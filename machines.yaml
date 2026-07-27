@@ -1,0 +1,76 @@
+# machines.yaml — HPC 머신 정의 (단일 소스)
+# hpc_runner 툴이 이 파일을 읽어 스케줄러/인증/경로 차이를 흡수한다.
+# <...> 로 표시된 값은 실제 환경에 맞게 채워야 함.
+
+perlmutter:
+  center: nersc
+  host: perlmutter-p1.nersc.gov
+  user: <nersc_username>
+  auth:
+    method: sshproxy            # 하루 1회 sshproxy로 24h 유효 key 발급
+    key_path: ~/.ssh/nersc      # sshproxy가 생성하는 key
+    key_ttl_hours: 24
+    ssh_config_host: perlmutter # ~/.ssh/config 에 ControlMaster 설정된 alias 권장
+  scheduler:
+    type: slurm
+    submit: sbatch
+    status: squeue
+    cancel: scancel
+    submit_tpl: templates/perlmutter.sbatch.j2
+  paths:
+    scratch: $PSCRATCH
+    run_root: $PSCRATCH/xgc-runs
+  xgc:
+    exe: <path/to/xgc-es>       # 이미 빌드된 실행파일 경로
+    modules:                    # 실행 전 module load
+      - PrgEnv-gnu
+      - cray-hdf5-parallel
+      - cudatoolkit
+      - adios2
+  defaults:
+    account: <nersc_project>    # -A / --account
+    qos: regular
+    constraint: gpu
+    nodes: 4
+    walltime: "01:00:00"
+
+polaris:
+  center: alcf
+  host: polaris.alcf.anl.gov
+  user: <alcf_username>
+  auth:
+    method: ssh_tunnel          # 로컬 포트포워딩 + MFA
+    local_port: 2222
+    ssh_config_host: polaris    # ~/.ssh/config alias 권장
+  scheduler:
+    type: pbs
+    submit: qsub
+    status: qstat
+    cancel: qdel
+    submit_tpl: templates/polaris.pbs.j2
+  paths:
+    scratch: /eagle/<project>
+    run_root: /eagle/<project>/xgc-runs
+  xgc:
+    exe: <path/to/xgc-es>
+    modules:
+      - PrgEnv-nvhpc
+      - cray-hdf5-parallel
+      - adios2
+  defaults:
+    account: <alcf_project>     # -A
+    queue: prod
+    nodes: 4
+    walltime: "01:00:00"
+
+# 공통 설정
+common:
+  local:
+    os_priority: [macos, linux]
+    ssh_multiplexing:
+      control_master: auto
+      control_persist: "8h"
+      control_path: "~/.ssh/cm-%r@%h:%p"
+  data:
+    pull_only_summaries: true   # 전량 다운로드 금지, 요약만 pull
+    output_format: adios2       # .bp

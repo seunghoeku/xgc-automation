@@ -1,0 +1,20 @@
+# secrets / local env
+.env
+.env.local
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.uv/
+
+# XGC 출력 (대용량, 로컬에 두지 않음)
+runs/**/*.bp
+runs/**/*.bp.dir/
+*.bp
+*.bp.dir/
+
+# OS
+.DS_Store

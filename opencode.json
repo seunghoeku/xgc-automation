@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "provider": {
+    "ohmic": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "PPPL ohmic",
+      "options": {
+        "baseURL": "https://ohmic.pppl.gov/v1",
+        "apiKey": "{env:OHMIC_API_KEY}"
+      },
+      "models": {
+        "opus": { "name": "Claude Opus (via ohmic)" },
+        "gpt": { "name": "ChatGPT (via ohmic)" }
+      }
+    }
+  },
+  "model": "ohmic/opus",
+  "mcp": {
+    "xgc-tools": {
+      "type": "local",
+      "command": ["uv", "run", "python", "-m", "tools.server"],
+      "enabled": false
+    }
+  },
+  "permission": {
+    "bash": "ask",
+    "edit": "ask"
+  }
+}
