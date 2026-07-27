@@ -63,7 +63,7 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
 
 def _ohmic_reachable(timeout: float = 4.0) -> dict[str, Any]:
     """로컬에서 ohmic API 엔드포인트 도달성만 확인 (인증/추론 호출 안 함)."""
-    base = "https://ohmic.pppl.gov/v1"
+    base = os.environ.get("OHMIC_BASE_URL", "https://api.ohmic.pppl.gov/v1")
     key_present = bool(os.environ.get("OHMIC_API_KEY"))
     try:
         req = urllib.request.Request(base, method="HEAD")
