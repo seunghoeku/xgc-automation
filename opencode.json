@@ -20,7 +20,7 @@
     "xgc-tools": {
       "type": "local",
       "command": ["uv", "run", "python", "-m", "tools.server"],
-      "enabled": false
+      "enabled": true
     }
   },
   "permission": {
