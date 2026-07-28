@@ -2,7 +2,7 @@
 #
 # This is the first known-good XGC input in this project: it passes
 # `xgc --dryrun` cleanly (no removed, no deprecated, no warnings) against
-# XGC-Devel master @ 256c3098.
+# XGC-Devel fix_comments @ 39c5c89f.
 #
 # Values here are recorded from the actual input file, not inferred.
 
@@ -17,7 +17,7 @@ backup_dir: /home/seungku/tmp/test_ecbc.bak.20260728   # pre-migration original
 
 validated:
   date: 2026-07-28
-  xgc_commit: 256c3098
+  xgc_commit: 39c5c89f
   input_md5: 91f972f2947148acc0248c9c6ee7688a
   dryrun: ACCEPTED           # 0 removed, 0 deprecated, 0 warnings
   n_ranks: 64

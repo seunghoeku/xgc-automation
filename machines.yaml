@@ -89,7 +89,7 @@ stellar:
     env_script: /projects/XGC/STELLAR/Software/bin/set_up_xgc.stellar
     modules: []                  # env_script performs all module loads
     verified:
-      commit: 256c3098           # XGC-Devel master, build verified 2026-07-28
+      commit: 39c5c89f           # XGC-Devel fix_comments, build verified 2026-07-28
       runtime_tested: false      # execution not yet verified
   defaults:
     account: pppl
