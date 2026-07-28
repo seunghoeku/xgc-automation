@@ -1,10 +1,26 @@
 # xgc-automation
 
-XGC(gyrokinetic code, xgc.pppl.gov) 시뮬레이션·분석 자동화 워크플로우.
-**로컬 두뇌 + 원격 손발**: 로컬(macOS/Linux)에서 LLM(ohmic.pppl.gov)을 돌리고,
-Perlmutter/Polaris는 SSH로 잡을 제출·모니터·분석한다.
+Automation workflow for XGC (gyrokinetic code, xgc.pppl.gov) simulations and
+analysis.
+**Local brain + remote hands**: the LLM (ohmic.pppl.gov) runs locally
+(macOS/Linux), while jobs are submitted, monitored, and analyzed on
+Perlmutter/Polaris over SSH.
 
-> 상세 설계·규칙은 `AGENTS.md` 참조. opencode는 시작 시 이 파일을 자동 로드한다.
+> See `AGENTS.md` for the detailed design and rules. opencode loads that file
+> automatically at startup.
 
-## 디렉토리 구조
+## Directory layout
 
+| Path | Purpose |
+|---|---|
+| `tools/` | MCP tool layer (`preflight`, `hpc_runner`, ...) |
+| `machines.yaml` | HPC machine definitions (single source of truth) |
+| `templates/` | Jinja2 templates for job scripts and XGC input |
+| `docs/` | Setup and per-machine build notes |
+| `kb/` | Knowledge base for physics_advisor |
+| `runs/` | Run records and pulled summary products |
+
+## Docs
+
+- `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines
+- `docs/build-stellar.md` — building XGC on stellar (note: `-O2` crashes the compiler)

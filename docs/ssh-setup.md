@@ -1,13 +1,14 @@
-# SSH 멀티플렉싱 설정 (MFA 머신 대응)
+# SSH multiplexing setup (for MFA-protected machines)
 
-XGC 자동화 툴은 **인증을 대신 수행하지 않는다** (AGENTS.md 절대규칙 3).
-MFA가 걸린 머신에서 매 명령마다 재인증하지 않으려면, 사람이 한 번 인증해
-열어둔 SSH 세션을 ControlMaster 소켓으로 재사용해야 한다.
+The XGC automation tools **never authenticate on your behalf** (AGENTS.md,
+absolute rule 3). To avoid re-authenticating on every command against an
+MFA-protected machine, a human opens one session and the tools reuse it through a
+ControlMaster socket.
 
-## 1. `~/.ssh/config` 에 추가
+## 1. Add to `~/.ssh/config`
 
 ```sshconfig
-# --- 공통 멀티플렉싱 ---
+# --- shared multiplexing ---
 Host stellar flux perlmutter polaris
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
@@ -24,49 +25,50 @@ Host flux
     User <pppl_username>
 ```
 
-`ControlPath` 디렉터리는 미리 존재해야 한다:
+The `ControlPath` directory must already exist:
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 ```
 
-주의: macOS에서 `ControlPath` 가 너무 길면 유닉스 소켓 경로 길이 제한
-(약 104자)에 걸린다. 위처럼 `~/.ssh/` 바로 아래에 두면 안전하다.
+Note: on macOS an overly long `ControlPath` hits the unix socket path length
+limit (~104 characters). Keeping it directly under `~/.ssh/` as shown is safe.
 
-## 2. 사람이 세션을 연다 (MFA는 여기서 1회)
+## 2. Open the session yourself (MFA happens once, here)
 
 ```bash
-ssh stellar        # Duo/비밀번호 인증 → 접속되면 그대로 두거나 exit 해도 master 는 8h 유지
+ssh stellar        # Duo/password prompt. The master persists 8h even after you exit.
 ```
 
-백그라운드 마스터만 띄우려면:
+To start only a background master:
 
 ```bash
 ssh -MNf stellar
 ```
 
-## 3. 상태 확인
+## 3. Check the state
 
 ```bash
-ssh -O check stellar     # "Master running (pid=NNNN)" 이면 정상
+ssh -O check stellar     # "Master running (pid=NNNN)" means healthy
 ```
 
-`preflight` 툴이 이 명령을 그대로 사용한다. 결과 해석:
+The `preflight` tool runs exactly this command. How to read its output:
 
-| `control_master` 값 | 의미 | 조치 |
+| `control_master` value | Meaning | Action |
 |---|---|---|
-| `alive: true` | 소켓 살아있음, 재인증 불필요 | 없음 |
-| `multiplexing_configured: false` | `~/.ssh/config` 에 ControlMaster 설정 없음 | 위 1단계 수행 |
-| `alive: false` (설정은 있음) | 마스터가 없거나 만료됨 | 위 2단계 수행 |
+| `alive: true` | Socket is live, no re-auth needed | none |
+| `multiplexing_configured: false` | No ControlMaster entry in `~/.ssh/config` | do step 1 |
+| `alive: false` (but configured) | Master is absent or expired | do step 2 |
 
-## 4. 세션 종료
+## 4. Close the session
 
 ```bash
 ssh -O exit stellar
 ```
 
-## 네트워크 전제
+## Network prerequisites
 
-- `flux.pppl.gov` 는 내부망(172.16.99.x) — PPPL VPN 또는 온사이트 필요.
-- `stellar.princeton.edu` 는 외부에서 도달 가능.
-- `perlmutter` / `polaris` 는 현재 접근 불가 상태 (2026-07 기준).
+- `flux.pppl.gov` is on the internal network (172.16.99.x) — requires PPPL VPN or
+  on-site access.
+- `stellar.princeton.edu` is reachable externally.
+- `perlmutter` and `polaris` are currently inaccessible (as of 2026-07).

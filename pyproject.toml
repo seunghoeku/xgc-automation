@@ -1,7 +1,7 @@
 [project]
 name = "xgc-automation"
 version = "0.1.0"
-description = "XGC 시뮬레이션 자동화 — 로컬 LLM 두뇌 + 원격 HPC 손발. opencode MCP 툴 계층."
+description = "XGC simulation automation — local LLM brain + remote HPC hands. opencode MCP tool layer."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

@@ -10,7 +10,7 @@ venv/
 *.egg-info/
 .uv/
 
-# XGC 출력 (대용량, 로컬에 두지 않음)
+# XGC output (large; never kept locally)
 runs/**/*.bp
 runs/**/*.bp.dir/
 *.bp

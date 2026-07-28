@@ -1,14 +1,14 @@
-"""XGC 자동화 MCP 서버.
+"""MCP server for XGC automation.
 
-opencode `opencode.json` 의 mcp.xgc-tools 가 이 모듈을 실행한다:
+opencode runs this module via mcp.xgc-tools in `opencode.json`:
     uv run python -m tools.server
 
-현재 구현된 툴:
-  - list_machines : machines.yaml 에 정의된 머신 목록
-  - preflight     : 접속·인증·설정 상태 점검 (AGENTS.md 로드맵 1번)
+Tools implemented so far:
+  - list_machines : machines defined in machines.yaml
+  - preflight     : check connectivity/auth/config state (roadmap item 1 in AGENTS.md)
 
-나머지 툴(physics_advisor/input_builder/validator/hpc_runner/
-data_analyzer/provenance)은 로드맵에 따라 이후 추가한다.
+The remaining tools (physics_advisor / input_builder / validator / hpc_runner /
+data_analyzer / provenance) will be added following the roadmap.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ mcp = FastMCP("xgc-tools")
 
 @mcp.tool()
 def list_machines() -> dict[str, Any]:
-    """machines.yaml 에 정의된 HPC 머신 목록과 요약 정보를 반환한다."""
+    """Return the list of HPC machines defined in machines.yaml with a summary."""
     out: dict[str, Any] = {}
     for name in m.machine_names():
         cfg = m.get_machine(name)
@@ -43,7 +43,7 @@ def list_machines() -> dict[str, Any]:
 
 
 def _check_placeholders(cfg: dict[str, Any], prefix: str = "") -> list[str]:
-    """<...> 로 남아있는 미채움 값들의 경로 목록을 재귀 수집."""
+    """Recursively collect paths of values still left as `<...>` placeholders."""
     unfilled: list[str] = []
     for key, value in cfg.items():
         path = f"{prefix}.{key}" if prefix else key
@@ -63,11 +63,12 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
 
 
 def _control_socket_alive(ssh_host: str, timeout: float = 5.0) -> dict[str, Any]:
-    """ssh ControlMaster 소켓이 살아있는지 확인 (`ssh -O check`).
+    """Check whether the ssh ControlMaster socket is alive (`ssh -O check`).
 
-    MFA 머신에서는 이것이 핵심 지표다. 소켓이 살아있으면 재인증 없이 명령을
-    보낼 수 있고, 죽어있으면 사용자가 직접 인증해 세션을 다시 열어야 한다.
-    인증을 대신 수행하지 않는다 (AGENTS.md 절대규칙 3).
+    This is the key indicator for MFA-protected machines. If the socket is alive,
+    commands can be sent without re-authenticating; if not, the user must open a
+    session themselves. We never authenticate on their behalf (AGENTS.md,
+    absolute rule 3).
     """
     try:
         proc = subprocess.run(
@@ -77,49 +78,49 @@ def _control_socket_alive(ssh_host: str, timeout: float = 5.0) -> dict[str, Any]
             timeout=timeout,
         )
     except FileNotFoundError:
-        return {"alive": False, "detail": "ssh 실행파일을 찾을 수 없음"}
+        return {"alive": False, "detail": "ssh executable not found"}
     except subprocess.TimeoutExpired:
-        return {"alive": False, "detail": "ssh -O check 타임아웃"}
+        return {"alive": False, "detail": "ssh -O check timed out"}
 
-    # 살아있으면 "Master running (pid=...)" 를 stderr 로 출력하고 rc=0
+    # When alive, ssh prints "Master running (pid=...)" to stderr and returns 0
     msg = (proc.stderr or proc.stdout or "").strip()
     alive = proc.returncode == 0
-    # ControlPath 자체가 설정 안 된 경우와 master 가 죽은 경우를 구분한다
+    # Distinguish "no ControlPath configured at all" from "master is dead"
     configured = "no controlpath" not in msg.lower()
     return {
         "alive": alive,
         "multiplexing_configured": configured,
-        "detail": msg or ("master 실행 중" if alive else "master 없음"),
+        "detail": msg or ("master running" if alive else "no master"),
     }
 
 
 def _ohmic_reachable(timeout: float = 4.0) -> dict[str, Any]:
-    """로컬에서 ohmic API 엔드포인트 도달성만 확인 (인증/추론 호출 안 함)."""
+    """Check reachability of the ohmic API endpoint only (no auth, no inference)."""
     base = os.environ.get("OHMIC_BASE_URL", "https://api.ohmic.pppl.gov/v1")
     key_present = bool(os.environ.get("OHMIC_API_KEY"))
     try:
         req = urllib.request.Request(base, method="HEAD")
         urllib.request.urlopen(req, timeout=timeout)
         reachable = True
-        detail = "HEAD 200/OK 계열"
+        detail = "HEAD returned 2xx"
     except urllib.error.HTTPError as exc:
-        # 4xx/5xx 라도 TCP+TLS 는 도달한 것
+        # Even a 4xx/5xx means TCP+TLS reached the endpoint
         reachable = True
-        detail = f"HTTP {exc.code} (도달됨)"
+        detail = f"HTTP {exc.code} (reached)"
     except (urllib.error.URLError, socket.timeout, OSError) as exc:
         reachable = False
-        detail = f"도달 실패: {exc}"
+        detail = f"unreachable: {exc}"
     return {"endpoint": base, "reachable": reachable, "api_key_present": key_present, "detail": detail}
 
 
 @mcp.tool()
 def preflight(machine: str | None = None) -> dict[str, Any]:
-    """접속·인증·설정 상태를 점검한다 (제출 전 사전 점검).
+    """Check connectivity, authentication, and configuration state before submitting.
 
     Args:
-        machine: 특정 머신만 점검. 생략 시 전체 머신 + ohmic 을 점검.
+        machine: check only this machine. If omitted, check all machines plus ohmic.
     Returns:
-        각 항목의 상태(ok/warn/fail)와 사람이 읽을 수 있는 진단.
+        Per-item status (ok/warn/fail) with human-readable diagnostics.
     """
     report: dict[str, Any] = {"ohmic": _ohmic_reachable()}
 
@@ -136,35 +137,39 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
         auth = cfg.get("auth", {})
         host = cfg.get("host")
 
-        # host 가 플레이스홀더가 아니면 SSH 포트(22) 도달성만 가볍게 확인
+        # If host is not a placeholder, do a light SSH port (22) reachability check
         ssh_ok = None
         if host and not m.is_placeholder(host):
             ssh_ok = _tcp_reachable(host, 22)
 
-        # MFA 머신: ControlMaster 소켓이 살아있어야 재인증 없이 명령 전송 가능
+        # MFA machines: a live ControlMaster socket is required to send commands
+        # without re-authenticating.
         control = None
         ssh_alias = auth.get("ssh_config_host")
         if ssh_alias and not m.is_placeholder(ssh_alias):
             control = _control_socket_alive(ssh_alias)
 
-        # 제출 가능 여부를 가르는 필수 항목만 blocker 로 분류
+        # Only fields that decide whether submission is possible count as blockers
         blockers = [f for f in unfilled if f.startswith("scheduler.")]
         actions: list[str] = []
         if ssh_ok is False:
-            actions.append(f"{host}:22 도달 불가 — VPN/온사이트 네트워크 확인 필요")
+            actions.append(f"{host}:22 unreachable — check VPN/on-site network")
         if control is not None and not control["alive"]:
             if not control.get("multiplexing_configured", True):
                 actions.append(
-                    f"~/.ssh/config 에 Host {ssh_alias} 의 ControlMaster 설정이 없음 — "
-                    f"docs/ssh-setup.md 참고해 추가 (MFA 재인증 회피의 전제조건)"
+                    f"no ControlMaster settings for Host {ssh_alias} in ~/.ssh/config — "
+                    f"add them per docs/ssh-setup.md (prerequisite for avoiding MFA re-auth)"
                 )
             else:
                 actions.append(
-                    f"ssh ControlMaster 미기동 — 사용자가 직접 `ssh {ssh_alias}` 로 "
-                    f"MFA 인증 후 세션을 열어두면 이후 재사용됨"
+                    f"ssh ControlMaster not running — run `ssh {ssh_alias}` yourself to "
+                    f"authenticate via MFA; the session is then reused"
                 )
         if blockers:
-            actions.append(f"스케줄러 설정 미확정: {', '.join(blockers)} — 확정 전 제출 금지")
+            actions.append(
+                f"scheduler settings unconfirmed: {', '.join(blockers)} — "
+                f"do not submit until resolved"
+            )
 
         if blockers or ssh_ok is False:
             status = "fail"
