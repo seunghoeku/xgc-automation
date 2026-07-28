@@ -5,10 +5,15 @@ opencode runs this module via mcp.xgc-tools in `opencode.json`:
 
 Tools implemented so far:
   - list_machines : machines defined in machines.yaml
-  - preflight     : check connectivity/auth/config state (roadmap item 1 in AGENTS.md)
+  - preflight     : check connectivity/auth/config state (roadmap item 1)
+  - plan_job      : render a job script and estimate cost, submitting nothing
+  - submit_job    : submit to the scheduler, gated on explicit confirmation
+  - job_status    : normalized job state across slurm/pbs
+  - cancel_job    : cancel a job, also gated on confirmation
+  - job_output    : bounded tail of a run's stdout/stderr
 
-The remaining tools (physics_advisor / input_builder / validator / hpc_runner /
-data_analyzer / provenance) will be added following the roadmap.
+The remaining tools (physics_advisor / input_builder / validator /
+data_analyzer) will be added following the roadmap.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from tools import hpc_runner as hr
 from tools import machines as m
 
 mcp = FastMCP("xgc-tools")
@@ -193,6 +199,99 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
 
     report["machines"] = machines_report
     return report
+
+
+@mcp.tool()
+def plan_job(
+    machine: str,
+    job_name: str | None = None,
+    nodes: int | None = None,
+    walltime: str | None = None,
+    ntasks_per_node: int | None = None,
+    account: str | None = None,
+    partition: str | None = None,
+    hello_world: bool = False,
+) -> dict[str, Any]:
+    """Render a job script and estimate its cost WITHOUT submitting anything.
+
+    Always call this before submit_job, and show the user the rendered script
+    plus the node-hour estimate (AGENTS.md, absolute rules 1 and 4).
+
+    Args:
+        machine: machine key from machines.yaml (see list_machines).
+        hello_world: run `srun hostname` instead of XGC, for round-trip testing.
+    Unspecified resources fall back to the machine's defaults.
+    """
+    plan = hr.prepare_submission(
+        machine,
+        job_name=job_name,
+        nodes=nodes,
+        walltime=walltime,
+        ntasks_per_node=ntasks_per_node,
+        account=account,
+        partition=partition,
+        hello_world=hello_world,
+    )
+    return plan.to_dict()
+
+
+@mcp.tool()
+def submit_job(
+    machine: str,
+    confirm: bool = False,
+    job_name: str | None = None,
+    nodes: int | None = None,
+    walltime: str | None = None,
+    ntasks_per_node: int | None = None,
+    account: str | None = None,
+    partition: str | None = None,
+    hello_world: bool = False,
+) -> dict[str, Any]:
+    """Submit a job to the scheduler. Requires explicit human confirmation.
+
+    With confirm=False (the default) this submits nothing and returns the plan.
+    Only set confirm=True after the user has seen the plan and approved it in
+    this conversation. Never set it on your own initiative.
+
+    On success, writes a provenance record to runs/<run_id>/.
+    """
+    return hr.submit(
+        machine,
+        confirm=confirm,
+        job_name=job_name,
+        nodes=nodes,
+        walltime=walltime,
+        ntasks_per_node=ntasks_per_node,
+        account=account,
+        partition=partition,
+        hello_world=hello_world,
+    )
+
+
+@mcp.tool()
+def job_status(machine: str, job_id: str) -> dict[str, Any]:
+    """Query a job's state, normalized to pending/running/completed/failed/cancelled.
+
+    For Slurm, finished jobs leave the queue, so this falls back to sacct to
+    recover the final state and exit code.
+    """
+    return hr.status(machine, job_id)
+
+
+@mcp.tool()
+def cancel_job(machine: str, job_id: str, confirm: bool = False) -> dict[str, Any]:
+    """Cancel a running or queued job. Requires explicit human confirmation."""
+    return hr.cancel(machine, job_id, confirm=confirm)
+
+
+@mcp.tool()
+def job_output(machine: str, run_id: str, max_bytes: int = 100_000) -> dict[str, Any]:
+    """Read the tail of a run's stdout/stderr from its remote run directory.
+
+    Reads a bounded tail instead of downloading files: XGC output can reach
+    terabytes and must be reduced remotely (AGENTS.md, data principles).
+    """
+    return hr.fetch_output(machine, run_id, max_bytes=max_bytes)
 
 
 def main() -> None:

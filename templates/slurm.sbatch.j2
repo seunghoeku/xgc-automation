@@ -27,6 +27,13 @@
 # provenance: {{ provenance_id | default('n/a') }}
 set -euo pipefail
 
+{% if env_script %}
+# Redirect stderr: the env script probes for compiler wrappers (mpicc etc.)
+# that exist only on login nodes. Compute nodes carry a runtime-only MPI
+# install, so `which` complains harmlessly. Silencing it keeps real errors
+# visible in slurm-*.err. Verified: xgc resolves all libraries on compute nodes.
+source {{ env_script }} 2>/dev/null
+{% endif %}
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}

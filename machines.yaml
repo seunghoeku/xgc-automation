@@ -83,7 +83,7 @@ stellar:
     run_root: /scratch/gpfs/seungku/xgc-runs
   xgc:
     # Build procedure and the -O2 compiler crash: docs/build-stellar.md
-    exe: /home/seungku/git/XGC-Devel/build_release/bin/xgc
+    exe: /home/seungku/git/XGC-Devel/build/bin/xgc
     src: /home/seungku/git/XGC-Devel
     build_type: Release          # RelWithDebInfo crashes icpx 2024.2 — do not use
     env_script: /projects/XGC/STELLAR/Software/bin/set_up_xgc.stellar
