@@ -76,11 +76,13 @@ Higher-level logic must remain unaware of the machine type.
 - Later, extend via a `hpc_runner.build(machine)` hook (CMake + per-machine modules).
 
 ## Current Phase / Next Steps (Roadmap)
-- [ ] 1. `preflight` tool — check connectivity and authentication state
-- [ ] 2. Finalize `machines.yaml` (fill in real hosts/paths/executables)
-- [ ] 3. `hpc_runner` MCP — submit/status/cancel/push/pull (slurm+pbs)
-- [ ] 4. Successful hello-world sbatch round trip (stellar first — Perlmutter/Polaris
-      are inaccessible)
+- [x] 1. `preflight` tool — check connectivity and authentication state
+- [x] 2. Finalize `machines.yaml` (stellar done; flux scheduler still unconfirmed,
+      Perlmutter/Polaris inaccessible)
+- [x] 3. `hpc_runner` MCP — submit/status/cancel/output (slurm+pbs).
+      push/pull exist in `tools/ssh.py` but are not yet exposed as MCP tools.
+- [x] 4. Successful hello-world sbatch round trip — stellar, jobs 2888408/2888413,
+      exit 0:0. PBS path is implemented but untested (no reachable PBS machine).
 - [ ] 5. `input_builder` + `validator`
 - [ ] 6. `physics_advisor` (KB + rules)
 - [ ] 7. `data_analyzer` (remote summary → local plot)
