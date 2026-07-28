@@ -63,6 +63,58 @@ polaris:
     nodes: 4
     walltime: "01:00:00"
 
+stellar:
+  center: princeton
+  host: stellar.princeton.edu
+  user: <princeton_netid>
+  auth:
+    method: ssh_controlmaster    # MFA(Duo) → 최초 1회 사람이 인증, 이후 소켓 재사용
+    ssh_config_host: stellar     # ~/.ssh/config alias (아래 common.ssh_multiplexing 참조)
+    mfa: true
+  scheduler:
+    type: slurm
+    submit: sbatch
+    status: squeue
+    cancel: scancel
+    submit_tpl: templates/slurm.sbatch.j2
+  paths:
+    scratch: /scratch/gpfs/<princeton_netid>
+    run_root: /scratch/gpfs/<princeton_netid>/xgc-runs
+  xgc:
+    exe: null                    # 아직 빌드 없음 → hello-world 왕복 검증만
+    modules: []
+  defaults:
+    account: <princeton_account>
+    partition: <partition>       # 확인 필요 (예: all / gpu)
+    nodes: 1
+    walltime: "00:10:00"
+
+flux:
+  center: pppl
+  host: flux.pppl.gov            # 내부망(172.16.99.52) — VPN/온사이트 필요
+  user: <pppl_username>
+  auth:
+    method: ssh_controlmaster
+    ssh_config_host: flux
+    mfa: true
+  scheduler:
+    type: <slurm|pbs>            # 확인 필요 — 채우기 전 제출 금지
+    submit: <sbatch|qsub>
+    status: <squeue|qstat>
+    cancel: <scancel|qdel>
+    submit_tpl: templates/slurm.sbatch.j2
+  paths:
+    scratch: <path/to/scratch>
+    run_root: <path/to/scratch>/xgc-runs
+  xgc:
+    exe: null
+    modules: []
+  defaults:
+    account: <pppl_account>
+    partition: <partition>
+    nodes: 1
+    walltime: "00:10:00"
+
 # 공통 설정
 common:
   local:

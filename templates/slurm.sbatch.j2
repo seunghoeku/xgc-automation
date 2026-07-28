@@ -1,0 +1,44 @@
+#!/bin/bash
+#SBATCH --job-name={{ job_name }}
+#SBATCH --output={{ run_dir }}/slurm-%j.out
+#SBATCH --error={{ run_dir }}/slurm-%j.err
+#SBATCH --nodes={{ nodes }}
+#SBATCH --time={{ walltime }}
+{% if account %}
+#SBATCH --account={{ account }}
+{% endif %}
+{% if partition %}
+#SBATCH --partition={{ partition }}
+{% endif %}
+{% if qos %}
+#SBATCH --qos={{ qos }}
+{% endif %}
+{% if constraint %}
+#SBATCH --constraint={{ constraint }}
+{% endif %}
+{% if ntasks_per_node %}
+#SBATCH --ntasks-per-node={{ ntasks_per_node }}
+{% endif %}
+{% if gpus_per_node %}
+#SBATCH --gpus-per-node={{ gpus_per_node }}
+{% endif %}
+
+# 생성: xgc-automation / {{ generated_at }}
+# provenance: {{ provenance_id | default('n/a') }}
+set -euo pipefail
+
+{% for mod in modules %}
+module load {{ mod }}
+{% endfor %}
+cd {{ run_dir }}
+
+echo "host=$(hostname) job=${SLURM_JOB_ID:-none} nodes={{ nodes }} start=$(date -Is)"
+
+{% if xgc_exe %}
+srun -n {{ total_ranks }} {{ xgc_exe }}
+{% else %}
+# XGC 실행파일 미지정 → hello-world 검증 모드
+srun -n {{ total_ranks }} hostname
+{% endif %}
+
+echo "end=$(date -Is) rc=$?"

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 import urllib.error
 import urllib.request
 from typing import Any
@@ -61,6 +62,37 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
+def _control_socket_alive(ssh_host: str, timeout: float = 5.0) -> dict[str, Any]:
+    """ssh ControlMaster 소켓이 살아있는지 확인 (`ssh -O check`).
+
+    MFA 머신에서는 이것이 핵심 지표다. 소켓이 살아있으면 재인증 없이 명령을
+    보낼 수 있고, 죽어있으면 사용자가 직접 인증해 세션을 다시 열어야 한다.
+    인증을 대신 수행하지 않는다 (AGENTS.md 절대규칙 3).
+    """
+    try:
+        proc = subprocess.run(
+            ["ssh", "-O", "check", ssh_host],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return {"alive": False, "detail": "ssh 실행파일을 찾을 수 없음"}
+    except subprocess.TimeoutExpired:
+        return {"alive": False, "detail": "ssh -O check 타임아웃"}
+
+    # 살아있으면 "Master running (pid=...)" 를 stderr 로 출력하고 rc=0
+    msg = (proc.stderr or proc.stdout or "").strip()
+    alive = proc.returncode == 0
+    # ControlPath 자체가 설정 안 된 경우와 master 가 죽은 경우를 구분한다
+    configured = "no controlpath" not in msg.lower()
+    return {
+        "alive": alive,
+        "multiplexing_configured": configured,
+        "detail": msg or ("master 실행 중" if alive else "master 없음"),
+    }
+
+
 def _ohmic_reachable(timeout: float = 4.0) -> dict[str, Any]:
     """로컬에서 ohmic API 엔드포인트 도달성만 확인 (인증/추론 호출 안 함)."""
     base = os.environ.get("OHMIC_BASE_URL", "https://api.ohmic.pppl.gov/v1")
@@ -101,15 +133,42 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
             continue
 
         unfilled = _check_placeholders(cfg)
+        auth = cfg.get("auth", {})
         host = cfg.get("host")
+
         # host 가 플레이스홀더가 아니면 SSH 포트(22) 도달성만 가볍게 확인
         ssh_ok = None
         if host and not m.is_placeholder(host):
             ssh_ok = _tcp_reachable(host, 22)
 
-        if unfilled:
-            status = "warn"
-        elif ssh_ok is False:
+        # MFA 머신: ControlMaster 소켓이 살아있어야 재인증 없이 명령 전송 가능
+        control = None
+        ssh_alias = auth.get("ssh_config_host")
+        if ssh_alias and not m.is_placeholder(ssh_alias):
+            control = _control_socket_alive(ssh_alias)
+
+        # 제출 가능 여부를 가르는 필수 항목만 blocker 로 분류
+        blockers = [f for f in unfilled if f.startswith("scheduler.")]
+        actions: list[str] = []
+        if ssh_ok is False:
+            actions.append(f"{host}:22 도달 불가 — VPN/온사이트 네트워크 확인 필요")
+        if control is not None and not control["alive"]:
+            if not control.get("multiplexing_configured", True):
+                actions.append(
+                    f"~/.ssh/config 에 Host {ssh_alias} 의 ControlMaster 설정이 없음 — "
+                    f"docs/ssh-setup.md 참고해 추가 (MFA 재인증 회피의 전제조건)"
+                )
+            else:
+                actions.append(
+                    f"ssh ControlMaster 미기동 — 사용자가 직접 `ssh {ssh_alias}` 로 "
+                    f"MFA 인증 후 세션을 열어두면 이후 재사용됨"
+                )
+        if blockers:
+            actions.append(f"스케줄러 설정 미확정: {', '.join(blockers)} — 확정 전 제출 금지")
+
+        if blockers or ssh_ok is False:
+            status = "fail"
+        elif unfilled or (control is not None and not control["alive"]):
             status = "warn"
         else:
             status = "ok"
@@ -118,9 +177,13 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
             "status": status,
             "host": host,
             "scheduler": cfg.get("scheduler", {}).get("type"),
-            "auth_method": cfg.get("auth", {}).get("method"),
+            "auth_method": auth.get("method"),
+            "mfa": bool(auth.get("mfa")),
             "ssh_port_22_reachable": ssh_ok,
+            "control_master": control,
             "unfilled_config_fields": unfilled,
+            "submit_blockers": blockers,
+            "next_actions": actions,
         }
 
     report["machines"] = machines_report
