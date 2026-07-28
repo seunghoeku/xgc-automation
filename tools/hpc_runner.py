@@ -1,15 +1,18 @@
 """Job submission, monitoring, and cancellation.
 
-Submission is deliberately two-phase (AGENTS.md, absolute rules 1 and 4):
+Submission is deliberately staged (AGENTS.md, absolute rules 1 and 4):
 
     plan = prepare_submission(...)   # renders the script, estimates cost
     # human reviews plan["script"] and plan["resources"]
-    submit(..., confirm=True)        # only now does anything reach the scheduler
+    submit(..., case_dir=..., confirm=True)
+        # 1. xgc --dryrun validates the input on the login node (seconds, free)
+        # 2. only if it passes does anything reach the scheduler
 
-`submit` without `confirm=True` returns the plan and submits nothing. The gate
-is here rather than in the MCP layer so that it holds no matter who calls.
+`submit` without `confirm=True` returns the plan and submits nothing. Both
+gates live here rather than in the MCP layer so they hold no matter who calls.
 
-Every submission writes a provenance record to runs/<run_id>/ (absolute rule 5).
+Every submission writes a provenance record to runs/<run_id>/, including the
+dryrun report, so a run's validation state is recoverable later (rule 5).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from tools import dryrun
 from tools import machines as m
 from tools import scheduler as sched
 from tools import ssh
@@ -224,12 +228,19 @@ def submit(
     *,
     confirm: bool = False,
     plan: SubmissionPlan | None = None,
+    case_dir: str | None = None,
+    skip_dryrun: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Submit a job, but only with explicit confirmation.
 
     Without confirm=True this returns the plan with submitted=False and touches
     nothing remote. That is the human-in-the-loop gate from absolute rule 1.
+
+    When case_dir is given, `xgc --dryrun` runs on the login node first and a
+    rejected input blocks submission. It costs seconds and no allocation, so it
+    is far cheaper than discovering a bad namelist after queueing. skip_dryrun
+    forces past it; a caller doing that should have a reason.
     """
     plan = plan or prepare_submission(machine, **kwargs)
 
@@ -239,6 +250,22 @@ def submit(
             "reason": "confirmation required; review the plan and resubmit with confirm=True",
             "plan": plan.to_dict(),
         }
+
+    dryrun_report: dict[str, Any] | None = None
+    if case_dir and not skip_dryrun:
+        report = dryrun.run_dryrun(
+            plan.machine,
+            case_dir,
+            n_ranks=plan.resources.get("total_ranks"),
+        )
+        dryrun_report = report.to_dict()
+        if report.blocking:
+            return {
+                "submitted": False,
+                "reason": f"input validation failed: {report.summary()}",
+                "dryrun": dryrun_report,
+                "plan": plan.to_dict(),
+            }
 
     cfg = m.get_machine(plan.machine)
     scheduler = sched.get_scheduler(cfg)
@@ -271,6 +298,8 @@ def submit(
             "commit": cfg.get("xgc", {}).get("verified", {}).get("commit"),
         },
         "scheduler_stdout": result.stdout.strip(),
+        "case_dir": case_dir,
+        "dryrun": dryrun_report,
     }
     meta_path = _write_provenance(plan, record)
 
@@ -282,6 +311,7 @@ def submit(
         "remote_run_dir": plan.remote_run_dir,
         "provenance": str(meta_path.relative_to(PROJECT_ROOT)),
         "resources": plan.resources,
+        "dryrun": dryrun_report,
     }
 
 

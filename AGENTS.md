@@ -83,7 +83,9 @@ Higher-level logic must remain unaware of the machine type.
       push/pull exist in `tools/ssh.py` but are not yet exposed as MCP tools.
 - [x] 4. Successful hello-world sbatch round trip — stellar, jobs 2888408/2888413,
       exit 0:0. PBS path is implemented but untested (no reachable PBS machine).
-- [ ] 5. `input_builder` + `validator`
+- [~] 5. `input_builder` + `validator` — `validator` done via `xgc --dryrun` on the
+      login node (`tools/dryrun.py`), wired in as a pre-submit gate. See
+      `docs/workflow.md`. `input_builder` (namelist templating) not started.
 - [ ] 6. `physics_advisor` (KB + rules)
 - [ ] 7. `data_analyzer` (remote summary → local plot)
 - [ ] 8. Polaris adapter (pbs/qsub)

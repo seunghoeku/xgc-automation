@@ -7,7 +7,8 @@ Tools implemented so far:
   - list_machines : machines defined in machines.yaml
   - preflight     : check connectivity/auth/config state (roadmap item 1)
   - plan_job      : render a job script and estimate cost, submitting nothing
-  - submit_job    : submit to the scheduler, gated on explicit confirmation
+  - validate_input: check an XGC input via `xgc --dryrun` on the login node
+  - submit_job    : submit to the scheduler, gated on confirmation + dryrun
   - job_status    : normalized job state across slurm/pbs
   - cancel_job    : cancel a job, also gated on confirmation
   - job_output    : bounded tail of a run's stdout/stderr
@@ -27,6 +28,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from tools import dryrun
 from tools import hpc_runner as hr
 from tools import machines as m
 
@@ -236,9 +238,33 @@ def plan_job(
 
 
 @mcp.tool()
+def validate_input(
+    machine: str,
+    case_dir: str,
+    n_ranks: int | None = None,
+) -> dict[str, Any]:
+    """Validate an XGC input file by running `xgc --dryrun` on the login node.
+
+    Runs the real XGC binary, so it catches exactly what a real run would
+    reject: removed/deprecated parameters, mesh problems, memory overruns, and
+    low particle resolution. Takes seconds, uses one rank, and consumes no
+    allocation.
+
+    Run this before submitting any XGC job. Report `removed` entries to the user
+    as blocking errors -- the job cannot run until they are fixed.
+
+    Args:
+        case_dir: remote directory containing `input` and `input_dir/`.
+        n_ranks: rank count the real job will use, so estimates match.
+    """
+    return dryrun.run_dryrun(machine, case_dir, n_ranks=n_ranks).to_dict()
+
+
+@mcp.tool()
 def submit_job(
     machine: str,
     confirm: bool = False,
+    case_dir: str | None = None,
     job_name: str | None = None,
     nodes: int | None = None,
     walltime: str | None = None,
@@ -246,6 +272,7 @@ def submit_job(
     account: str | None = None,
     partition: str | None = None,
     hello_world: bool = False,
+    skip_dryrun: bool = False,
 ) -> dict[str, Any]:
     """Submit a job to the scheduler. Requires explicit human confirmation.
 
@@ -253,11 +280,17 @@ def submit_job(
     Only set confirm=True after the user has seen the plan and approved it in
     this conversation. Never set it on your own initiative.
 
+    When case_dir is given, `xgc --dryrun` validates the input first and a
+    rejected input blocks submission. Always pass case_dir for real XGC runs.
+    Do not set skip_dryrun unless the user explicitly asks for it.
+
     On success, writes a provenance record to runs/<run_id>/.
     """
     return hr.submit(
         machine,
         confirm=confirm,
+        case_dir=case_dir,
+        skip_dryrun=skip_dryrun,
         job_name=job_name,
         nodes=nodes,
         walltime=walltime,
