@@ -90,7 +90,7 @@ stellar:
     modules: []                  # env_script performs all module loads
     verified:
       commit: 39c5c89f           # XGC-Devel fix_comments, build verified 2026-07-28
-      runtime_tested: false      # execution not yet verified
+      runtime_tested: true       # ecbc ran real physics on job 2888698 (2026-07-28)
   defaults:
     account: pppl
     partition: all               # all(491 nodes) / pppl(126) / gpu(7) / bigmem / serial

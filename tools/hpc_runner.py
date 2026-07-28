@@ -110,6 +110,7 @@ def prepare_submission(
     nodes: int | None = None,
     walltime: str | None = None,
     ntasks_per_node: int | None = None,
+    cpus_per_task: int | None = None,
     account: str | None = None,
     partition: str | None = None,
     qos: str | None = None,
@@ -117,6 +118,7 @@ def prepare_submission(
     xgc_exe: str | None = None,
     run_id: str | None = None,
     hello_world: bool = False,
+    run_dir: str | None = None,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -159,10 +161,16 @@ def prepare_submission(
         if m.is_placeholder(exe):
             raise SubmissionError(f"xgc.exe for {machine!r} is a placeholder: {exe}")
 
-    run_root = cfg.get("paths", {}).get("run_root")
-    if not run_root or m.is_placeholder(run_root):
-        raise SubmissionError(f"paths.run_root for {machine!r} is not configured")
-    remote_run_dir = f"{run_root}/{run_id}"
+    # XGC reads `input`, the mesh, and the profiles from its working directory,
+    # so a real run must execute in the prepared case directory rather than a
+    # fresh one. hello-world jobs read nothing and get their own directory.
+    if run_dir:
+        remote_run_dir = run_dir.rstrip("/")
+    else:
+        run_root = cfg.get("paths", {}).get("run_root")
+        if not run_root or m.is_placeholder(run_root):
+            raise SubmissionError(f"paths.run_root for {machine!r} is not configured")
+        remote_run_dir = f"{run_root}/{run_id}"
 
     ntasks_per_node = ntasks_per_node if ntasks_per_node is not None else 1
     total_ranks = nodes * ntasks_per_node
@@ -178,6 +186,7 @@ def prepare_submission(
         qos=qos,
         constraint=constraint,
         ntasks_per_node=ntasks_per_node,
+        cpus_per_task=cpus_per_task,
         gpus_per_node=None,
         total_ranks=total_ranks,
         modules=xgc_cfg.get("modules") or [],
@@ -191,6 +200,7 @@ def prepare_submission(
     resources = {
         "nodes": nodes,
         "ntasks_per_node": ntasks_per_node,
+        "cpus_per_task": cpus_per_task,
         "total_ranks": total_ranks,
         "walltime": walltime,
         "node_hours_max": round(nodes * hours, 2),
@@ -242,7 +252,10 @@ def submit(
     is far cheaper than discovering a bad namelist after queueing. skip_dryrun
     forces past it; a caller doing that should have a reason.
     """
-    plan = plan or prepare_submission(machine, **kwargs)
+    if plan is None:
+        # A real XGC run must execute in its case directory; default to it.
+        kwargs.setdefault("run_dir", case_dir)
+        plan = prepare_submission(machine, **kwargs)
 
     if not confirm:
         return {

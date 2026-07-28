@@ -21,6 +21,7 @@ validated:
   input_md5: 91f972f2947148acc0248c9c6ee7688a
   dryrun: ACCEPTED           # 0 removed, 0 deprecated, 0 warnings
   n_ranks: 64
+  runtime_tested: true       # job 2888698 reached the main loop and stepped
 
 physics:
   model: electrostatic       # sml_em_* present but field model is electrostatic
@@ -53,6 +54,26 @@ resource_estimate:
   particles: 11375616
   vertices_5d: 220231616
   particles_per_vertex: 0.0517   # on target for ReducedDeltaF (~0.05)
+
+# Measured from an actual run (job 2888698, 1 node / 8 ranks x 12 threads).
+runtime_measured:
+  date: 2026-07-28
+  ranks: 8
+  threads_per_rank: 12
+  nodes: 1
+  init_seconds: 166           # grid/field setup before the main loop
+  seconds_per_step: 208       # from the "Performance History" line
+  memory_per_rank_gb: 1.2     # steady state; the dryrun predicted 0.70
+  note: >
+    At this rank count a 50-step run needs ~3 h of stepping plus ~3 min of
+    init, so it cannot fit a 10-minute walltime. Scale ranks up or steps down.
+    The dryrun's memory estimate was ~40% low against the observed value.
+
+# Reference: XGC writes both unit conventions to units.txt.
+units_observed:
+  sml_dt_input_tau: 2.0e-4    # what the input file contains
+  sml_dt_seconds: 1.797e-8    # what XGC uses internally
+  sml_tran_seconds: 8.986e-5  # toroidal transit time; the conversion factor
 
 input_files:
   mesh:
@@ -98,3 +119,8 @@ notes:
   - "Collisions are off (col_mode=0)."
   - "sml_restart=.true., so a restart file is expected unless it is set false
      for a fresh run."
+  - "At runtime XGC warns: 'Using split weight scheme (required for
+     electrostatic simulation using ReducedDeltaF electrons). This operation
+     mode is not yet validated.' This comes from XGC itself, not from our
+     tooling. Worth confirming with the XGC team before trusting production
+     results from this configuration."

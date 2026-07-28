@@ -19,6 +19,9 @@
 {% if ntasks_per_node %}
 #SBATCH --ntasks-per-node={{ ntasks_per_node }}
 {% endif %}
+{% if cpus_per_task %}
+#SBATCH --cpus-per-task={{ cpus_per_task }}
+{% endif %}
 {% if gpus_per_node %}
 #SBATCH --gpus-per-node={{ gpus_per_node }}
 {% endif %}
@@ -39,7 +42,18 @@ module load {{ mod }}
 {% endfor %}
 cd {{ run_dir }}
 
+{% if cpus_per_task %}
+# Without this OpenMP defaults to the full core count per rank, oversubscribing
+# the node by the number of ranks on it.
+export OMP_NUM_THREADS={{ cpus_per_task }}
+export OMP_PROC_BIND=spread
+export OMP_PLACES=threads
+{% endif %}
+
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} nodes={{ nodes }} start=$(date -Is)"
+{% if cpus_per_task %}
+echo "ranks={{ total_ranks }} threads_per_rank=${OMP_NUM_THREADS}"
+{% endif %}
 
 {% if xgc_exe %}
 srun -n {{ total_ranks }} {{ xgc_exe }}
