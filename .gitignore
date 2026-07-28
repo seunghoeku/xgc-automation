@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# derived from the remote XGC source; regenerated on demand, keyed by commit
+.cache/
+
 # python
 __pycache__/
 *.py[cod]

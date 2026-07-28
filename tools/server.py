@@ -7,6 +7,11 @@ Tools implemented so far:
   - list_machines : machines defined in machines.yaml
   - preflight     : check connectivity/auth/config state (roadmap item 1)
   - plan_job      : render a job script and estimate cost, submitting nothing
+  - list_cases    : baseline XGC cases known to validate
+  - describe_parameter : an input parameter's type/default/options, from XGC source
+  - plan_input    : apply overrides to a baseline and return a diff
+  - stage_case    : copy a baseline's files to a new working directory
+  - write_input   : write a modified input, gated on confirmation
   - validate_input: check an XGC input via `xgc --dryrun` on the login node
   - submit_job    : submit to the scheduler, gated on confirmation + dryrun
   - job_status    : normalized job state across slurm/pbs
@@ -30,6 +35,7 @@ from mcp.server.fastmcp import FastMCP
 
 from tools import dryrun
 from tools import hpc_runner as hr
+from tools import input_builder as ib
 from tools import machines as m
 
 mcp = FastMCP("xgc-tools")
@@ -235,6 +241,91 @@ def plan_job(
         hello_world=hello_world,
     )
     return plan.to_dict()
+
+
+@mcp.tool()
+def list_cases() -> dict[str, Any]:
+    """List known baseline XGC cases from kb/cases/.
+
+    These are inputs verified to pass `xgc --dryrun`. Start from one of these
+    rather than writing a namelist from scratch.
+    """
+    return {"cases": ib.list_cases()}
+
+
+@mcp.tool()
+def describe_parameter(machine: str, name: str) -> dict[str, Any]:
+    """Look up an XGC input parameter's type, default, description, and options.
+
+    Answers come from metadata generated from the XGC C++ source on `machine`,
+    so they reflect the version actually installed there. Use this instead of
+    recalling parameter semantics from memory, and to check a name before
+    proposing a change. Unknown names come back with `did_you_mean`.
+
+    Watch the units: several inputs are given in normalized form and converted
+    internally, so the description is authoritative.
+    """
+    return ib.describe_parameter(machine, name)
+
+
+@mcp.tool()
+def plan_input(
+    case: str,
+    overrides: dict[str, Any],
+    target_path: str,
+    machine: str | None = None,
+) -> dict[str, Any]:
+    """Apply parameter overrides to a baseline case and return a diff. Writes nothing.
+
+    Every override is validated against XGC's metadata first: unknown names,
+    invalid enum values, and type mismatches are rejected here.
+
+    Show the user the returned `diff` and `changes` before calling write_input.
+
+    Args:
+        overrides: {parameter_name: value}. Booleans and strings are rendered
+            in Fortran form automatically.
+        target_path: where the new input will go. Must not be the baseline.
+    """
+    plan = ib.plan_input(case, overrides, target_path=target_path, machine=machine)
+    return plan.to_dict()
+
+
+@mcp.tool()
+def stage_case(
+    case: str,
+    target_dir: str,
+    confirm: bool = False,
+    machine: str | None = None,
+) -> dict[str, Any]:
+    """Copy a baseline case's files (mesh, equilibrium, profiles) to a new directory.
+
+    Do this before writing a modified input, since XGC needs those files
+    alongside it. The copy happens remotely; nothing transits this machine.
+    Requires explicit confirmation.
+    """
+    return ib.stage_case(case, target_dir, confirm=confirm, machine=machine)
+
+
+@mcp.tool()
+def write_input(
+    case: str,
+    overrides: dict[str, Any],
+    target_path: str,
+    confirm: bool = False,
+    machine: str | None = None,
+    n_ranks: int | None = None,
+) -> dict[str, Any]:
+    """Write a modified input file to the remote. Requires explicit confirmation.
+
+    With confirm=False this returns the plan and writes nothing. Only set
+    confirm=True after the user has seen the diff and approved it.
+
+    Refuses to overwrite a baseline case directory. After writing, validates
+    with `xgc --dryrun` and reports the result.
+    """
+    plan = ib.plan_input(case, overrides, target_path=target_path, machine=machine)
+    return ib.write_input(plan, confirm=confirm, n_ranks=n_ranks)
 
 
 @mcp.tool()

@@ -3,9 +3,17 @@
 The path from an input file to a running job, and the checks in between.
 
 ```
-  plan_job          render script, estimate node-hours       local, free
+  list_cases        pick a validated baseline                local, free
        |
-  validate_input    xgc --dryrun on the login node           ~3 s, free
+  stage_case        copy mesh/equilibrium/profiles remotely  seconds
+       |
+  plan_input        apply overrides, return a diff           local, free
+       |
+  [human approves]  review the diff
+       |
+  write_input       write + xgc --dryrun                     ~3 s, free
+       |
+  plan_job          render script, estimate node-hours       local, free
        |
   [human approves]  review script + cost + dryrun report
        |
@@ -15,6 +23,50 @@ The path from an input file to a running job, and the checks in between.
        |
   job_output        tail of stdout/stderr
 ```
+
+## Building an input
+
+Inputs are built by modifying a validated baseline, not written from scratch.
+XGC has 708 input parameters and most are coupled, so starting from a case
+known to pass the dryrun is both safer and easier to review.
+
+```python
+stage_case("ecbc", "/scratch/gpfs/<user>/xgc-runs/my-case", confirm=True)
+plan_input("ecbc", {"sml_mstep": 200, "sml_restart": False},
+           target_path=".../my-case/input")     # returns a diff
+write_input(..., confirm=True)                   # writes, then validates
+```
+
+Every override is checked against XGC's parameter metadata before anything is
+written. Unknown names (with `did_you_mean` suggestions), invalid enum values,
+and type mismatches are all rejected up front. Booleans and strings are
+rendered in Fortran form automatically, so `False` becomes `.false.` and a
+string is quoted.
+
+Overrides are applied by editing the file in place, so comments, ordering, and
+spacing survive. That keeps the diff small enough to actually review.
+
+`write_input` refuses to overwrite a baseline case directory. Baselines are
+references and need to stay reproducible.
+
+### Parameter metadata
+
+`describe_parameter` reports a parameter's type, default, description, and
+valid options, generated from the XGC C++ source on the target machine. It
+reflects the version actually installed there, so it is the right thing to
+consult instead of recalling semantics from memory.
+
+This is the same metadata the XGC input GUI uses -- both go through
+`utils/input_gui/`, so a file written by these tools opens cleanly in the GUI
+and vice versa.
+
+The metadata is cached under `.cache/`, keyed by the XGC commit, so it
+refreshes automatically when the source changes.
+
+**Units are a trap here.** Several inputs are given in normalized form and
+converted internally: `sml_dt` is in main-ion toroidal transit times (not
+seconds), and the `psi` inputs are in normalized poloidal flux. Read the
+description rather than assuming SI.
 
 ## Why validate before submitting
 
