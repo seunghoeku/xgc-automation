@@ -66,7 +66,7 @@ polaris:
 stellar:
   center: princeton
   host: stellar.princeton.edu
-  user: <princeton_netid>
+  user: seungku
   auth:
     method: ssh_controlmaster    # MFA(Duo) → 최초 1회 사람이 인증, 이후 소켓 재사용
     ssh_config_host: stellar     # ~/.ssh/config alias (아래 common.ssh_multiplexing 참조)
@@ -78,16 +78,23 @@ stellar:
     cancel: scancel
     submit_tpl: templates/slurm.sbatch.j2
   paths:
-    scratch: /scratch/gpfs/<princeton_netid>
-    run_root: /scratch/gpfs/<princeton_netid>/xgc-runs
+    scratch: /scratch/gpfs/seungku
+    run_root: /scratch/gpfs/seungku/xgc-runs
   xgc:
-    exe: null                    # 아직 빌드 없음 → hello-world 왕복 검증만
-    modules: []
+    # 빌드 절차와 -O2 컴파일러 크래시 이슈: docs/build-stellar.md
+    exe: /home/seungku/git/XGC-Devel/build_release/bin/xgc
+    src: /home/seungku/git/XGC-Devel
+    build_type: Release          # RelWithDebInfo 는 icpx 2024.2 크래시 → 사용 금지
+    env_script: /projects/XGC/STELLAR/Software/bin/set_up_xgc.stellar
+    modules: []                  # env_script 가 module load 를 모두 수행
+    verified:
+      commit: 256c3098           # XGC-Devel master, 2026-07-28 빌드 검증
+      runtime_tested: false      # 실행 검증은 아직 안 됨
   defaults:
-    account: <princeton_account>
-    partition: <partition>       # 확인 필요 (예: all / gpu)
+    account: pppl
+    partition: all               # all(491노드) / pppl(126) / gpu(7) / bigmem / serial
     nodes: 1
-    walltime: "00:10:00"
+    walltime: "00:10:00"         # 파티션 상한 15-00:01:00
 
 flux:
   center: pppl

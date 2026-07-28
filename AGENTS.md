@@ -46,14 +46,19 @@
 - ssh 멀티플렉싱: `ControlMaster auto` / `ControlPersist 8h` / `ControlPath ~/.ssh/cm-%r@%h:%p`.
 
 ## 빌드 자동화
-- 현재 범위 밖. XGC 실행파일은 이미 존재 → `machines.yaml`의 `xgc_exe`에 경로 명시.
+- 자동화는 아직 범위 밖. 다만 실행파일이 항상 준비돼 있지는 않아, 머신별 빌드
+  절차와 알려진 함정을 `docs/build-<machine>.md`에 기록한다.
+- 빌드된 실행파일 경로는 `machines.yaml`의 `xgc.exe`에 명시.
+- **stellar**: `docs/build-stellar.md` 참조. 요점 두 가지 —
+  (1) `set_up_xgc.stellar`를 반드시 source, (2) `CMAKE_BUILD_TYPE=Release` 필수.
+  `RelWithDebInfo`(`-O2`)는 icpx 2024.2 벡터라이저가 SIGSEGV로 죽는다.
 - 나중에 `hpc_runner.build(machine)` 훅으로 확장(CMake + 머신별 module).
 
 ## 현재 단계 / 다음 할 일 (로드맵)
 - [ ] 1. `preflight` 툴 — 접속·인증 상태 체크
 - [ ] 2. `machines.yaml` 확정 (실제 host/경로/실행파일 채우기)
 - [ ] 3. `hpc_runner` MCP — submit/status/cancel/push/pull (slurm+pbs)
-- [ ] 4. Perlmutter hello-world sbatch 왕복 성공
+- [ ] 4. hello-world sbatch 왕복 성공 (stellar 우선 — Perlmutter/Polaris 접근 불가)
 - [ ] 5. `input_builder` + `validator`
 - [ ] 6. `physics_advisor` (KB+규칙)
 - [ ] 7. `data_analyzer` (원격 요약→로컬 플롯)
