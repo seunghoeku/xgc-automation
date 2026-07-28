@@ -1,0 +1,100 @@
+# ECBC — reference case for the physics_advisor knowledge base.
+#
+# This is the first known-good XGC input in this project: it passes
+# `xgc --dryrun` cleanly (no removed, no deprecated, no warnings) against
+# XGC-Devel master @ 256c3098.
+#
+# Values here are recorded from the actual input file, not inferred.
+
+name: ecbc
+description: >
+  ECBC electrostatic delta-f case. Core simulation (bounce=2), single toroidal
+  mode family n=6, kinetic electrons and ions with ReducedDeltaF markers.
+
+machine: stellar
+case_dir: /home/seungku/tmp/test_ecbc
+backup_dir: /home/seungku/tmp/test_ecbc.bak.20260728   # pre-migration original
+
+validated:
+  date: 2026-07-28
+  xgc_commit: 256c3098
+  input_md5: 91f972f2947148acc0248c9c6ee7688a
+  dryrun: ACCEPTED           # 0 removed, 0 deprecated, 0 warnings
+  n_ranks: 64
+
+physics:
+  model: electrostatic       # sml_em_* present but field model is electrostatic
+  flavor: XGC1
+  delta_f: true              # ptl_marker_type='ReducedDeltaF' for both species
+  boundary: core             # sml_bounce=2, excludes open field lines
+  species:
+    - {name: electron, mass_au: 5.4545e-4, charge_eu: -1.0, marker: ReducedDeltaF}
+    - {name: ion, mass_au: 1.0, charge_eu: 1.0, marker: ReducedDeltaF}
+  toroidal_mode:
+    n: 6                     # sml_mode_select_n{min,max}_real
+    wedge_n: 6
+    nphi_total: 8
+  radial_domain:
+    inpsi: 0.0               # sml_inpsi, units of eq_x_psi
+    outpsi: 0.90
+
+numerics:
+  dt: 2.0e-4                 # sml_dt, toroidal transit times
+  mstep: 10000
+  num_per_vertex: [50, 50]
+  f0_grid: {nmu: 44, nvp: 22, smu_max: 4.0, vp_max: 4.0}
+  collisions: off            # col_mode=0
+
+# Measured by xgc --dryrun at 64 ranks. Scales with rank count.
+resource_estimate:
+  n_ranks: 64
+  memory_per_rank_gb: 0.146
+  available_per_rank_gb: 375.9
+  particles: 11375616
+  vertices_5d: 220231616
+  particles_per_vertex: 0.0517   # on target for ReducedDeltaF (~0.05)
+
+input_files:
+  mesh:
+    - ECBC_0.50_rhoi_mesh.eqd.node
+    - ECBC_0.50_rhoi_mesh.eqd.ele
+    - ECBC_0.50_rhoi_mesh.eqd.flx.aif
+  equilibrium: ECBC_151x151.eqd
+  geqdsk: geqdsk_ECBC_ITG_for_ECP_beta_0p25_FLOW
+  profiles:
+    density: ECBC_den_bet00p500.dat
+    temp_electron: ECBC_te.dat
+    temp_ion: ECBC_ti.dat
+  other: [adios2cfg.xml, petsc.rc]
+
+# Migration applied 2026-07-28 to make the case run on current XGC.
+# The original is preserved in backup_dir.
+migration:
+  removed_parameters:        # blocking; XGC refused to start
+    - {from: ptb_3db_on, to: sml_3db_on, note: "also moved to &sml_param"}
+    - {from: sml_poisson_solver_type, to: null,
+       note: "dropped; sml_iter_solver* already configures the solver"}
+    - {from: sml_f0_grid_alpha, to: null, note: "dropped; was 0.0"}
+    - {from: sml_f0_grid_alpha_start, to: null, note: "dropped; no longer used"}
+    - {from: f0_update_analytic_alpha, to: f0_update_alpha, note: "renamed"}
+  deprecated_parameters:     # accepted but obsolete; migrated for clarity
+    - {from: [sml_deltaf, sml_deltaf_elec], to: ptl_marker_type,
+       note: "replaced by ptl_marker_type='ReducedDeltaF' for both species"}
+    - {from: sml_f0_grid, to: ptl_dynamic_f0,
+       note: "dropped; ReducedDeltaF defaults dynamic_f0=false, matching full-f off"}
+    - {from: sml_special, to: null, note: "dropped; was 0 (normal simulation)"}
+    - {from: sml_em_pullback_mode, to: sml_em_pullback_method,
+       note: "mode 4 maps to 'IdealMHD' (verified in sml.cpp:190)"}
+    - {from: smooth_rad_efield, to: null, note: "dropped; smooth_r no longer exists"}
+
+# Marker type was previously implicit. sml_deltaf/sml_deltaf_elec are inert in
+# current XGC -- they appear only in the deprecation table and nothing reads
+# them -- so the case was silently defaulting to TotalF. Declaring
+# ReducedDeltaF restores the intended delta-f behavior and also brings
+# weight_evo_eq=PDE and dynamic_f0=false by default.
+notes:
+  - "The dryrun's low-resolution warning disappeared after this change: 0.0517
+     ptl/vertex is on target for ReducedDeltaF but ~100x short for TotalF."
+  - "Collisions are off (col_mode=0)."
+  - "sml_restart=.true., so a restart file is expected unless it is set false
+     for a fresh run."
