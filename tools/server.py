@@ -6,6 +6,11 @@ opencode runs this module via mcp.xgc-tools in `opencode.json`:
 Tools implemented so far:
   - list_machines : machines defined in machines.yaml
   - preflight     : check connectivity/auth/config state (roadmap item 1)
+  - plan_simulation_id : preview the next global simulation ID and directory
+  - reserve_simulation_id : reserve that ID after human confirmation
+  - stage_simulation_case : stage a baseline under the canonical directory
+  - inspect_input_archive : rank recent read-only input backups for migration
+  - physics_advisor : match natural-language physics to validated cases/rules
   - plan_job      : render a job script and estimate cost, submitting nothing
   - list_cases    : baseline XGC cases known to validate
   - describe_parameter : an input parameter's type/default/options, from XGC source
@@ -17,9 +22,10 @@ Tools implemented so far:
   - job_status    : normalized job state across slurm/pbs
   - cancel_job    : cancel a job, also gated on confirmation
   - job_output    : bounded tail of a run's stdout/stderr
+  - analyze_run   : remotely reduce a run to a bounded local summary
 
-The remaining tools (physics_advisor / input_builder / validator /
-data_analyzer) will be added following the roadmap.
+Scientific data products and provenance hardening will be added following the
+roadmap.
 """
 
 from __future__ import annotations
@@ -33,10 +39,14 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from tools import data_analyzer as da
 from tools import dryrun
 from tools import hpc_runner as hr
 from tools import input_builder as ib
+from tools import input_archive
 from tools import machines as m
+from tools import physics_advisor as pa
+from tools import simulation_registry as sr
 
 mcp = FastMCP("xgc-tools")
 
@@ -212,6 +222,7 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
 @mcp.tool()
 def plan_job(
     machine: str,
+    simulation_id: str | None = None,
     job_name: str | None = None,
     nodes: int | None = None,
     walltime: str | None = None,
@@ -233,6 +244,7 @@ def plan_job(
     """
     plan = hr.prepare_submission(
         machine,
+        simulation_id=simulation_id,
         job_name=job_name,
         nodes=nodes,
         walltime=walltime,
@@ -253,6 +265,101 @@ def list_cases() -> dict[str, Any]:
     rather than writing a namelist from scratch.
     """
     return {"cases": ib.list_cases()}
+
+
+@mcp.tool()
+def plan_simulation_id(
+    machines: list[str],
+    short_name: str = "",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Preview the next global simulation ID and canonical directory name.
+
+    Numbers are sequential across all machines and never reused. Machine names
+    are recorded as metadata but removed from the directory suffix because the
+    machine codes are already present in the ID. This writes nothing.
+    """
+    return sr.plan_simulation_id(machines, short_name, tags=tags)
+
+
+@mcp.tool()
+def reserve_simulation_id(
+    machines: list[str],
+    short_name: str = "",
+    tags: list[str] | None = None,
+    expected_number: int | None = None,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Reserve the next simulation number. Requires explicit confirmation.
+
+    First call plan_simulation_id and show its ID/directory to the human. After
+    approval, pass that exact number as expected_number with confirm=True. A
+    stale number is rejected rather than silently allocating a different ID.
+    """
+    return sr.reserve_simulation_id(
+        machines,
+        short_name,
+        tags=tags,
+        expected_number=expected_number,
+        confirm=confirm,
+    )
+
+
+@mcp.tool()
+def stage_simulation_case(
+    case: str,
+    simulation_id: str,
+    machine: str | None = None,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Copy a baseline into the reserved simulation's canonical directory.
+
+    The path is derived from machines.yaml and the registry, not supplied by
+    the model. Requires explicit confirmation before creating/copying files.
+    """
+    return sr.stage_simulation_case(
+        case,
+        simulation_id,
+        machine=machine,
+        confirm=confirm,
+    )
+
+
+@mcp.tool()
+def inspect_input_archive(
+    min_number: int = 600,
+    max_files: int = 100,
+) -> dict[str, Any]:
+    """Inspect recent input backups without modifying or validating them.
+
+    Compares parameter names with the newest local XGC metadata cache when
+    available. High alignment means only that the schema looks current enough
+    to prioritize; it does not make an input a validated baseline.
+    """
+    return input_archive.inspect_archive(
+        min_number=min_number,
+        max_files=max_files,
+    )
+
+
+@mcp.tool()
+def physics_advisor(
+    problem_description: str,
+    machine: str | None = None,
+) -> dict[str, Any]:
+    """Propose a validated XGC baseline from a natural-language physics problem.
+
+    The result is evidence-based: it matches facts and exclusions recorded in
+    kb/cases/, never invents numerical values, and carries through only
+    explicitly stated values covered by deterministic rules. Unsupported
+    physics is reported as unsupported rather than forced onto the closest
+    case.
+
+    This tool writes nothing. If it returns ``recommended``, pass its case and
+    overrides to plan_input, show the resulting diff to the human, and require
+    approval before write_input.
+    """
+    return pa.advise(problem_description, machine=machine)
 
 
 @mcp.tool()
@@ -358,6 +465,7 @@ def submit_job(
     machine: str,
     confirm: bool = False,
     case_dir: str | None = None,
+    simulation_id: str | None = None,
     job_name: str | None = None,
     nodes: int | None = None,
     walltime: str | None = None,
@@ -384,6 +492,7 @@ def submit_job(
         machine,
         confirm=confirm,
         case_dir=case_dir,
+        simulation_id=simulation_id,
         skip_dryrun=skip_dryrun,
         job_name=job_name,
         nodes=nodes,
@@ -420,6 +529,34 @@ def job_output(machine: str, run_id: str, max_bytes: int = 100_000) -> dict[str,
     terabytes and must be reduced remotely (AGENTS.md, data principles).
     """
     return hr.fetch_output(machine, run_id, max_bytes=max_bytes)
+
+
+@mcp.tool()
+def analyze_run(
+    machine: str,
+    run_id: str,
+    product: str = "inventory",
+    max_entries: int = 1_000,
+    save: bool = True,
+    confirm_overwrite: bool = False,
+) -> dict[str, Any]:
+    """Generate a bounded run summary remotely; never transfer raw .bp output.
+
+    The first product, ``inventory``, scans only the top-level run directory
+    and records ADIOS2 product names plus small file metadata. It does not
+    descend into or read any ``.bp`` product. The resulting JSON may be saved
+    under ``runs/<run_id>/summaries/`` for provenance.
+
+    Replacing an existing summary requires ``confirm_overwrite=True``.
+    """
+    return da.analyze_run(
+        machine,
+        run_id,
+        product=product,
+        max_entries=max_entries,
+        save=save,
+        confirm_overwrite=confirm_overwrite,
+    )
 
 
 def main() -> None:

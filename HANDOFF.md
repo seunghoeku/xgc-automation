@@ -1,5 +1,47 @@
 # HANDOFF
 
+## 2026-07-29 update
+
+Roadmap item 6, `physics_advisor`, now has a conservative MVP in
+`tools/physics_advisor.py` and is exposed by `tools/server.py`. It matches a
+natural-language request against evidence and exclusions stored in
+`kb/cases/*.yaml`, proposes only explicitly stated values covered by
+deterministic rules, and never invents numerical values. Because ECBC remains
+the only validated case, electromagnetic, edge-SOL, ELM, and collisional
+requests return `unsupported`. English and Korean matching are covered by
+tests in `tests/test_physics_advisor.py`.
+
+Global simulation IDs are implemented in `tools/simulation_registry.py`,
+backed by `kb/simulation_registry.yaml`. Historical numbering is recorded
+through 644, so the next reservation is 645. IDs are global rather than
+per-machine; historical duplicates are treated as mistakes. The reservation
+gate requires confirmation plus the exact planned number, and
+`stage_simulation_case` derives the remote directory from the reserved ID.
+`simulation_id` is permanent while timestamp `run_id` remains one submission
+attempt. See `docs/simulation-ids.md`.
+
+The user copied 427 historical input files into `input_backup/`. Treat this
+directory as read-only. `tools/input_archive.py` and the MCP
+`inspect_input_archive` prioritize `n600+` files, hash them, extract a bounded
+parameter summary, and compare parameter names with the newest local metadata
+cache. The initial recent set contains 17 files across 15 numbers. The ST40
+family n618/n620/n621/n624/n625 is the best first migration target; no archived
+input is a KB baseline until its companion files are found and current XGC
+dryrun succeeds. See `docs/input-archive.md`.
+
+The next roadmap implementation item is `data_analyzer`. Before designing it,
+inspect the current XGC GUI Monitor implementation and use a completed run (or
+a deliberately small captured fixture) to define the first remote summary
+product. Never pull raw `.bp` output wholesale.
+
+`data_analyzer` now has its first bounded product in
+`tools/data_analyzer.py`: a remote top-level run inventory saved locally as
+JSON. It records `.bp` product names but never enters or transfers them.
+`docs/data-analysis.md` records how this complements the XGC GUI Monitor and
+why future scientific reducers should reuse `xgc_analysis`. Stellar's
+ControlMaster had expired during implementation, so the reducer is covered by
+fixtures but has not yet been exercised against the real ECBC run directory.
+
 Session date: 2026-07-28. Written for the next coding agent picking this up.
 
 Read `AGENTS.md` first — it holds the project rules, and they are not optional.

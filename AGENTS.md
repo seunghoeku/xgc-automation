@@ -57,6 +57,10 @@ Higher-level logic must remain unaware of the machine type.
 - XGC output is ADIOS2 (`.bp`) and can reach several TB. **Never download it all.**
 - Reduce remotely (summary products), then pull only small amounts locally. For the
   prototype, start with post-hoc summaries.
+- Every new scientific simulation receives one globally sequential
+  `simulation_id` from `kb/simulation_registry.yaml`. The number is never
+  reused across machines. Scheduler submission attempts retain separate
+  timestamp-based `run_id` values.
 
 ## Portability (macOS first, Linux compatible)
 - Implement real SSH work in Python (paramiko/asyncssh) rather than parsing CLI
@@ -87,8 +91,14 @@ Higher-level logic must remain unaware of the machine type.
       login node (`tools/dryrun.py`), wired in as a pre-submit gate.
       `input_builder` builds from validated baselines in `kb/cases/`, reusing
       XGC's own `utils/input_gui/` parser and metadata. See `docs/workflow.md`.
-- [ ] 6. `physics_advisor` (KB + rules)
-- [ ] 7. `data_analyzer` (remote summary → local plot)
+- [x] 6. `physics_advisor` (KB + deterministic rules). Conservative MVP:
+      selects only validated KB cases, carries through explicitly stated
+      step/restart values, and rejects unsupported physics rather than
+      inventing parameters. ECBC is currently the only baseline.
+- [ ] 7. `data_analyzer` — foundation implemented: bounded remote run
+      inventory → local JSON. It never descends into or transfers `.bp`
+      products. A scientific xgc_analysis-backed profile/spectrum/heat reducer
+      and local plot are still required to complete this roadmap item.
 - [ ] 8. Polaris adapter (pbs/qsub)
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
 

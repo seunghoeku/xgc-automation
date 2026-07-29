@@ -3,9 +3,17 @@
 The path from an input file to a running job, and the checks in between.
 
 ```
-  list_cases        pick a validated baseline                local, free
+  plan_simulation_id preview global ID and directory         local, free
        |
-  stage_case        copy mesh/equilibrium/profiles remotely  seconds
+  [human approves]   approve the exact sequential number
+       |
+  reserve_simulation_id record ID; advance sequence          local, free
+       |
+  physics_advisor   natural language -> evidenced baseline   local, free
+       |
+  list_cases        inspect validated baselines              local, free
+       |
+  stage_simulation_case copy baseline to canonical directory seconds
        |
   plan_input        apply overrides, return a diff           local, free
        |
@@ -24,6 +32,19 @@ The path from an input file to a running job, and the checks in between.
   job_output        tail of stdout/stderr
 ```
 
+`simulation_id` identifies the scientific simulation and appears at the start
+of its directory name. The timestamp `run_id` remains separate because one
+simulation may have multiple submit/restart attempts. See
+`docs/simulation-ids.md`.
+
+`physics_advisor` is deliberately conservative. It selects only from validated
+cases in `kb/cases/`, applies explicit deterministic rules, and returns
+unsupported when the knowledge base does not cover the requested physics. A
+numerical override is never inferred from model intuition; only a value
+explicitly stated by the user and covered by a rule can be proposed. The
+proposal still goes through `plan_input`, which validates it against the XGC
+source metadata and produces the diff required for human review.
+
 ## Building an input
 
 Inputs are built by modifying a validated baseline, not written from scratch.
@@ -31,9 +52,12 @@ XGC has 708 input parameters and most are coupled, so starting from a case
 known to pass the dryrun is both safer and easier to review.
 
 ```python
-stage_case("ecbc", "/scratch/gpfs/<user>/xgc-runs/my-case", confirm=True)
+plan_simulation_id(["stellar"], "ecbc short")
+reserve_simulation_id(["stellar"], "ecbc short",
+                      expected_number=645, confirm=True)
+stage_simulation_case("ecbc", "n645st", confirm=True)
 plan_input("ecbc", {"sml_mstep": 200, "sml_restart": False},
-           target_path=".../my-case/input")     # returns a diff
+           target_path=".../n645st_ecbc_short/input")  # returns a diff
 write_input(..., confirm=True)                   # writes, then validates
 ```
 

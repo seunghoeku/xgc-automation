@@ -29,6 +29,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from tools import dryrun
 from tools import machines as m
 from tools import scheduler as sched
+from tools import simulation_registry as sim_registry
 from tools import ssh
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -71,6 +72,7 @@ class SubmissionPlan:
     script: str
     remote_run_dir: str
     remote_script_path: str
+    simulation: dict[str, Any] | None
     resources: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
 
@@ -81,6 +83,7 @@ class SubmissionPlan:
             "job_name": self.job_name,
             "remote_run_dir": self.remote_run_dir,
             "remote_script_path": self.remote_script_path,
+            "simulation": self.simulation,
             "resources": self.resources,
             "warnings": self.warnings,
             "script": self.script,
@@ -117,6 +120,7 @@ def prepare_submission(
     constraint: str | None = None,
     xgc_exe: str | None = None,
     run_id: str | None = None,
+    simulation_id: str | None = None,
     hello_world: bool = False,
     run_dir: str | None = None,
 ) -> SubmissionPlan:
@@ -135,8 +139,11 @@ def prepare_submission(
     xgc_cfg = cfg.get("xgc", {})
 
     run_id = run_id or new_run_id()
-    job_name = job_name or f"xgc-{run_id}"
+    if simulation_id and hello_world:
+        raise SubmissionError("simulation_id cannot be used for a hello-world job")
+    job_name = job_name or f"xgc-{simulation_id or run_id}"
     warnings: list[str] = []
+    simulation: dict[str, Any] | None = None
 
     nodes = nodes if nodes is not None else defaults.get("nodes", 1)
     walltime = walltime or defaults.get("walltime", "00:10:00")
@@ -161,10 +168,24 @@ def prepare_submission(
         if m.is_placeholder(exe):
             raise SubmissionError(f"xgc.exe for {machine!r} is a placeholder: {exe}")
 
-    # XGC reads `input`, the mesh, and the profiles from its working directory,
-    # so a real run must execute in the prepared case directory rather than a
-    # fresh one. hello-world jobs read nothing and get their own directory.
-    if run_dir:
+    # A reserved simulation has one canonical directory shared across its
+    # submission attempts/restarts. The timestamp run_id remains separate and
+    # identifies this particular scheduler submission in provenance.
+    if simulation_id:
+        try:
+            directory = sim_registry.simulation_directory(simulation_id, machine)
+            simulation = sim_registry.get_simulation(simulation_id)
+        except sim_registry.SimulationRegistryError as exc:
+            raise SubmissionError(str(exc)) from exc
+        expected_dir = directory["remote_directory"].rstrip("/")
+        if run_dir and run_dir.rstrip("/") != expected_dir:
+            raise SubmissionError(
+                f"case_dir/run_dir for {simulation_id} must be its canonical "
+                f"directory {expected_dir!r}; got {run_dir.rstrip('/')!r}"
+            )
+        remote_run_dir = expected_dir
+    elif run_dir:
+        # Legacy/unregistered case: preserve the explicit path.
         remote_run_dir = run_dir.rstrip("/")
     else:
         run_root = cfg.get("paths", {}).get("run_root")
@@ -218,6 +239,7 @@ def prepare_submission(
         script=script,
         remote_run_dir=remote_run_dir,
         remote_script_path=f"{remote_run_dir}/submit.sh",
+        simulation=simulation,
         resources=resources,
         warnings=warnings,
     )
@@ -305,6 +327,10 @@ def submit(
         "submitted_from": socket.gethostname(),
         "remote_run_dir": plan.remote_run_dir,
         "remote_script_path": plan.remote_script_path,
+        "simulation_id": (
+            plan.simulation.get("simulation_id") if plan.simulation else None
+        ),
+        "simulation": plan.simulation,
         "resources": plan.resources,
         "xgc": {
             "exe": cfg.get("xgc", {}).get("exe"),
@@ -386,6 +412,41 @@ def cancel(machine: str, job_id: str, *, confirm: bool = False) -> dict[str, Any
     }
 
 
+def _output_run_dir(machine: str, run_id: str, cfg: dict[str, Any]) -> str:
+    """Resolve a run's remote directory, preferring its provenance record.
+
+    Real XGC jobs normally execute in a prepared case directory rather than
+    ``paths.run_root/run_id``. Submission records that exact directory in
+    provenance.json, so output lookup must follow the record instead of
+    reconstructing a path that may never have existed.
+    """
+    if not run_id or Path(run_id).name != run_id or run_id in {".", ".."}:
+        raise SubmissionError(f"invalid run_id {run_id!r}")
+
+    provenance_path = RUNS_DIR / run_id / "provenance.json"
+    if provenance_path.exists():
+        try:
+            record = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SubmissionError(
+                f"cannot read provenance for {run_id!r}: {exc}"
+            ) from exc
+
+        recorded_machine = record.get("machine")
+        if recorded_machine and recorded_machine != machine:
+            raise SubmissionError(
+                f"run {run_id!r} belongs to {recorded_machine!r}, not {machine!r}"
+            )
+        recorded_dir = record.get("remote_run_dir")
+        if isinstance(recorded_dir, str) and recorded_dir.strip():
+            return recorded_dir.rstrip("/")
+
+    run_root = cfg.get("paths", {}).get("run_root")
+    if not run_root or m.is_placeholder(run_root):
+        raise SubmissionError(f"paths.run_root for {machine!r} is not configured")
+    return f"{run_root.rstrip('/')}/{run_id}"
+
+
 def fetch_output(machine: str, run_id: str, *, max_bytes: int = 100_000) -> dict[str, Any]:
     """Read the job's stdout/stderr from the remote run directory.
 
@@ -394,8 +455,10 @@ def fetch_output(machine: str, run_id: str, *, max_bytes: int = 100_000) -> dict
     """
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
-    run_root = cfg.get("paths", {}).get("run_root")
-    remote_run_dir = f"{run_root}/{run_id}"
+    try:
+        remote_run_dir = _output_run_dir(machine, run_id, cfg)
+    except SubmissionError as exc:
+        return {"error": str(exc)}
 
     listing = ssh.run(host, ["ls", "-1", remote_run_dir])
     if not listing.ok:

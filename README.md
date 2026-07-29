@@ -18,9 +18,30 @@ Perlmutter/Polaris over SSH.
 | `templates/` | Jinja2 templates for job scripts and XGC input |
 | `docs/` | Setup and per-machine build notes |
 | `kb/` | Knowledge base for physics_advisor |
+| `input_backup/` | Read-only historical input archive; never treated as validated |
 | `runs/` | Run records and pulled summary products |
+
+## Implemented workflow
+
+`physics_advisor` matches a natural-language physics request to facts and
+exclusions recorded in `kb/cases/`. It never invents numerical values. With
+the current single-case knowledge base, it recommends ECBC only for a
+compatible electrostatic core request and reports electromagnetic, edge-SOL,
+ELM, or collisional requests as unsupported.
+
+The returned case and explicit overrides flow through `plan_input` for XGC
+metadata validation and a human-readable diff before anything can be written.
+
+New simulations receive a global sequential `simulation_id` such as `n645au`
+or `n647pe_po`. The ID prefixes the remote directory, while full machine names
+remain metadata rather than being repeated in the directory suffix. ID
+reservation and remote case staging both require explicit human confirmation.
 
 ## Docs
 
 - `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines
 - `docs/build-stellar.md` — building XGC on stellar (note: `-O2` crashes the compiler)
+- `docs/build-polaris.md` — verified Polaris environment and CMake configure
+- `docs/data-analysis.md` — remote reduction boundary and summary products
+- `docs/simulation-ids.md` — sequential IDs, machine codes, and directories
+- `docs/input-archive.md` — recent-first archive inspection and migration policy
