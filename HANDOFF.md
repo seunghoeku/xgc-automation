@@ -16,6 +16,13 @@ on `x3005c0s7b0n0`. Live `qdel` and XGC compute-node runtime remain unverified.
 The Polaris ControlMaster was alive during compilation and testing. Do not
 submit further jobs without the normal human approval gate.
 
+A first compute-node dryrun attempt (job 7302090) exposed a template bug:
+`MPICH_GPU_SUPPORT_ENABLED=1` was forced even though the executable is not
+linked with Cray GTL. It failed before XGC input validation with exit 255.
+The template now enables GPU-aware MPI only when `xgc.gpu_aware_mpi` is true;
+Polaris is explicitly false, matching XGC's own environment script. A retry
+still requires the normal reviewed resource plan and approval.
+
 `data_analyzer` now includes the first scientific product, `oned_profiles`.
 It targets XGC-Analysis `codex/catalog-fast-open` (`252c3ea`) and the combined
 reader direction validated by XGC_reader `XGC_analysis` (`43b4122`). The

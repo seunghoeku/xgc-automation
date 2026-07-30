@@ -94,6 +94,13 @@ The module list also displays `gcc-native/14.2`, but the Cray compiler wrappers
 actually resolve to GNU 13.3.1. This is the compiler identity relevant to the
 XGC objects and matches the GNU 13 family used for the shared Kokkos build.
 
+This executable is not linked with the Cray GPU Transport Layer (GTL).
+Accordingly, `machines.yaml` sets `xgc.gpu_aware_mpi: false`, matching the
+commented-out `MPICH_GPU_SUPPORT_ENABLED` line in XGC's Polaris environment
+script. Forcing that variable to `1` makes Cray MPICH abort during
+initialization. GPU rank affinity remains enabled independently through
+`CUDA_VISIBLE_DEVICES`.
+
 CMake enabled the OpenMP, Serial, and CUDA Kokkos backends and generated Ninja
 build files successfully. No `/eagle/TokamakITER` references remain in the
 `CMake` sources, Polaris environment script, `CMakeCache.txt`, or

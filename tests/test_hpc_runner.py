@@ -172,6 +172,7 @@ class PolarisPlanTests(unittest.TestCase):
             "paths": {"run_root": "/grand/TokamakProfile/shku/xgc-runs"},
             "xgc": {
                 "exe": "/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc",
+                "gpu_aware_mpi": False,
                 "env_script": (
                     "/grand/TokamakProfile/shku/XGC-Devel/"
                     "quickstart/modules_and_env/polaris.sh"
@@ -206,13 +207,23 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertIn("#PBS -A TokamakProfile", directives)
         self.assertIn("mpiexec --np 16 -ppn 4", plan.script)
         self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
-        self.assertIn("MPICH_GPU_SUPPORT_ENABLED=1", plan.script)
+        self.assertNotIn("MPICH_GPU_SUPPORT_ENABLED", plan.script)
         self.assertIn("pbs-${PBS_JOBID}.out", plan.script)
         self.assertEqual(plan.resources["total_ranks"], 16)
         self.assertEqual(plan.resources["cpus_per_task"], 16)
         self.assertEqual(plan.resources["gpus_per_node"], 4)
         self.assertEqual(plan.resources["filesystems"], "home:grand")
         self.assertEqual(plan.resources["node_hours_max"], 4.0)
+
+    def test_polaris_enables_gpu_aware_mpi_only_when_configured(self) -> None:
+        self.cfg["xgc"]["gpu_aware_mpi"] = True
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "polaris",
+                run_id="run-polaris-gpu-aware-mpi",
+            )
+
+        self.assertIn("export MPICH_GPU_SUPPORT_ENABLED=1", plan.script)
 
     def test_polaris_hello_world_uses_mpiexec_without_gpu_wrapper(self) -> None:
         with patch.object(hr.m, "get_machine", return_value=self.cfg):

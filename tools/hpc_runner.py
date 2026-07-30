@@ -246,6 +246,7 @@ def prepare_submission(
         ntasks_per_node=ntasks_per_node,
         cpus_per_task=cpus_per_task,
         gpus_per_node=gpus_per_node,
+        gpu_aware_mpi=bool(xgc_cfg.get("gpu_aware_mpi", False)),
         total_ranks=total_ranks,
         modules=xgc_cfg.get("modules") or [],
         env_script=xgc_cfg.get("env_script"),

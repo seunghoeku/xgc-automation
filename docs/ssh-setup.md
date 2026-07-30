@@ -9,7 +9,7 @@ ControlMaster socket.
 
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar flux perlmutter polaris
+Host stellar flux perlmutter polaris polaris1
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
@@ -25,6 +25,10 @@ Host flux
     User <pppl_username>
 
 Host polaris
+    HostName polaris.alcf.anl.gov
+    User shku
+
+Host polaris1
     HostName polaris.alcf.anl.gov
     User shku
 ```
