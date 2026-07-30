@@ -1,8 +1,7 @@
 # Building XGC on Polaris
 
-Status: CMake configure verified on 2026-07-29. A read-only remote check found
-only CMake compiler-probe binaries in `build`; the XGC executable has not been
-compiled or validated.
+Status: configure and the `xgc` target compiled successfully on 2026-07-30.
+Runtime execution on a compute node has not yet been tested.
 
 ## Paths
 
@@ -10,6 +9,7 @@ compiled or validated.
 |---|---|
 | Source | `/grand/TokamakProfile/shku/XGC-Devel` |
 | Build | `/grand/TokamakProfile/shku/XGC-Devel/build` |
+| Executable | `/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc` |
 | Shared Kokkos modules | `/grand/TokamakProfile/Software/polaris/modulefiles` |
 | PETSc and ADIOS2 | `/grand/TokamakProfile/jdominsk/libraries/install` |
 | CUDA toolkit | `/soft/compilers/cudatoolkit/cuda-12.6.3` |
@@ -66,6 +66,34 @@ PETSC_DIR=/grand/TokamakProfile/jdominsk/libraries/install/petsc-3.24.1
 USE_CABANA=OFF
 ```
 
+## Verified compilation
+
+The `xgc` target was built on the login node with bounded parallelism:
+
+```bash
+ninja -C /grand/TokamakProfile/shku/XGC-Devel/build -j 8 xgc
+```
+
+Ninja reported a 678-edge build and successfully linked `build/bin/xgc`.
+Verification:
+
+| Check | Result |
+|---|---|
+| Source commit | `60bef3bcef9fdab9709cab43d52a28dd89d8cb6f` |
+| Executable size | 669,944,456 bytes |
+| Executable permission | `-rwxr-xr-x` |
+| PrgEnv | `PrgEnv-gnu/8.6.0` |
+| `cc`, `CC`, `ftn` backend | GNU 13.3.1 |
+| Dynamic dependencies | All resolved; no `not found` entries |
+| PETSc | `/grand/TokamakProfile/jdominsk/libraries/install/petsc-3.24.1` |
+| ADIOS2 | `/grand/TokamakProfile/jdominsk/libraries/install/ADIOS2-2.10.2` |
+| Kokkos | `/grand/TokamakProfile/Software/polaris/kokkos/.../gnu/13.2/...` |
+| CUDA runtime | `/soft/compilers/cudatoolkit/cuda-12.6.3` |
+
+The module list also displays `gcc-native/14.2`, but the Cray compiler wrappers
+actually resolve to GNU 13.3.1. This is the compiler identity relevant to the
+XGC objects and matches the GNU 13 family used for the shared Kokkos build.
+
 CMake enabled the OpenMP, Serial, and CUDA Kokkos backends and generated Ninja
 build files successfully. No `/eagle/TokamakITER` references remain in the
 `CMake` sources, Polaris environment script, `CMakeCache.txt`, or
@@ -107,11 +135,9 @@ Official references:
 
 ## Remaining verification
 
-Before an XGC submission can be planned without an executable override:
+Before the first XGC allocation:
 
-1. Compile successfully in `/grand/TokamakProfile/shku/XGC-Devel/build`.
-2. Record the resulting executable in `machines.yaml` under `polaris.xgc.exe`.
-3. Open the Polaris MFA/SSH session manually if its ControlMaster has expired.
-4. Preview a small hello-world plan and obtain human approval before `qsub`.
-5. Verify the `qstat` and output paths, then run an XGC dryrun before any
+1. Open the Polaris MFA/SSH session manually if its ControlMaster has expired.
+2. Preview a small hello-world plan and obtain human approval before `qsub`.
+3. Verify the `qstat` and output paths, then run an XGC dryrun before any
    allocation-consuming scientific job.

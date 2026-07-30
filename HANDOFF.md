@@ -8,10 +8,11 @@ The four-node prototype profile uses `debug-scaling`, four MPI ranks and four
 GPUs per node, 16 OpenMP threads per rank, and `filesystems=home:grand`.
 Planning rejects missing PBS account/queue/filesystem/system resources, and
 terminal `qstat` output uses `Exit_status` to distinguish success from failure.
-Compilation, the executable path, and a live `qsub/qstat/qdel` round trip are
-still unverified; a read-only check found only CMake probe binaries in the
-build tree. The Polaris ControlMaster was alive during that check. Do not
-submit without the normal human approval gate.
+The Polaris `xgc` target compiled successfully on 2026-07-30 from commit
+`60bef3bc`; `build/bin/xgc` is executable and all dynamic libraries resolve.
+`machines.yaml` now records that path. A live `qsub/qstat/qdel` round trip and
+compute-node runtime remain unverified. The Polaris ControlMaster was alive
+during compilation. Do not submit without the normal human approval gate.
 
 `data_analyzer` now includes the first scientific product, `oned_profiles`.
 It targets XGC-Analysis `codex/catalog-fast-open` (`252c3ea`) and the combined

@@ -82,7 +82,7 @@ Higher-level logic must remain unaware of the machine type.
 ## Current Phase / Next Steps (Roadmap)
 - [x] 1. `preflight` tool — check connectivity and authentication state
 - [x] 2. Finalize `machines.yaml` (stellar done; Polaris paths and PBS
-      resources recorded but its executable remains blocked until compilation;
+      resources plus its compiled executable are recorded;
       flux scheduler still unconfirmed, Perlmutter inaccessible)
 - [x] 3. `hpc_runner` MCP — submit/status/cancel/output (slurm+pbs).
       push/pull exist in `tools/ssh.py` but are not yet exposed as MCP tools.
@@ -103,8 +103,7 @@ Higher-level logic must remain unaware of the machine type.
       needs to verify the remote analysis environment before this item closes.
 - [ ] 8. Polaris adapter (pbs/qsub) — PBS template and local parser/rendering
       tests are implemented. Live qsub/qstat/qdel verification still requires
-      explicit approval; XGC execution remains blocked until the executable is
-      compiled.
+      explicit approval; the executable is compiled but not runtime-tested.
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
 
 ## Open Questions to Resolve First
