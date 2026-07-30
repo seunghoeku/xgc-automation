@@ -2,6 +2,17 @@
 
 ## 2026-07-29 update
 
+`data_analyzer` now includes the first scientific product, `oned_profiles`.
+It targets XGC-Analysis `codex/catalog-fast-open` (`252c3ea`) and the combined
+reader direction validated by XGC_reader `XGC_analysis` (`43b4122`). The
+remote reducer restricts catalog metadata to `xgc.oneddiag.bp`, disables state
+tracking, reads the first/latest logical steps of selected density,
+perpendicular-temperature, and parallel-flow channels, and downsamples the
+radial grid. Only bounded JSON returns; an SVG is rendered locally. Configure
+`analysis.pythonpath` in `machines.yaml` when XGC-Analysis is not installed in
+the machine's default XGC environment. Fixture tests cover the boundary, but
+stellar's expired ControlMaster prevented a real-run check.
+
 Roadmap item 6, `physics_advisor`, now has a conservative MVP in
 `tools/physics_advisor.py` and is exposed by `tools/server.py`. It matches a
 natural-language request against evidence and exclusions stored in

@@ -537,6 +537,7 @@ def analyze_run(
     run_id: str,
     product: str = "inventory",
     max_entries: int = 1_000,
+    max_profile_points: int = 512,
     save: bool = True,
     confirm_overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -547,6 +548,11 @@ def analyze_run(
     descend into or read any ``.bp`` product. The resulting JSON may be saved
     under ``runs/<run_id>/summaries/`` for provenance.
 
+    ``oned_profiles`` uses the XGC-Analysis fast catalog remotely to read only
+    the first/latest logical steps of selected ``xgc.oneddiag.bp`` profile
+    variables. It returns bounded JSON and renders a local SVG; raw BP data
+    remains on the HPC machine. ``max_profile_points`` limits radial samples.
+
     Replacing an existing summary requires ``confirm_overwrite=True``.
     """
     return da.analyze_run(
@@ -554,6 +560,7 @@ def analyze_run(
         run_id,
         product=product,
         max_entries=max_entries,
+        max_profile_points=max_profile_points,
         save=save,
         confirm_overwrite=confirm_overwrite,
     )

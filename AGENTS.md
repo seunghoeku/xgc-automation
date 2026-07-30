@@ -95,10 +95,11 @@ Higher-level logic must remain unaware of the machine type.
       selects only validated KB cases, carries through explicitly stated
       step/restart values, and rejects unsupported physics rather than
       inventing parameters. ECBC is currently the only baseline.
-- [ ] 7. `data_analyzer` — foundation implemented: bounded remote run
-      inventory → local JSON. It never descends into or transfers `.bp`
-      products. A scientific xgc_analysis-backed profile/spectrum/heat reducer
-      and local plot are still required to complete this roadmap item.
+- [ ] 7. `data_analyzer` — bounded inventory plus an XGC-Analysis-backed
+      `oned_profiles` reducer are implemented. The latter selects only the
+      first/latest logical steps remotely and saves bounded JSON plus a local
+      SVG without transferring `.bp`. Fixture tests pass; a real HPC run still
+      needs to verify the remote analysis environment before this item closes.
 - [ ] 8. Polaris adapter (pbs/qsub)
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
 

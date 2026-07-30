@@ -37,6 +37,11 @@ or `n647pe_po`. The ID prefixes the remote directory, while full machine names
 remain metadata rather than being repeated in the directory suffix. ID
 reservation and remote case staging both require explicit human confirmation.
 
+`data_analyzer` keeps raw ADIOS2 output on the HPC machine. Its inventory
+product scans only top-level names, while `oned_profiles` uses XGC-Analysis
+logical-step selection remotely and saves bounded JSON plus a local SVG for
+the first/latest 1-D profiles.
+
 ## Docs
 
 - `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines

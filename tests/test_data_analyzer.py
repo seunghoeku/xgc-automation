@@ -50,6 +50,64 @@ def _inventory(remote: str = "/scratch/run-1") -> dict:
     }
 
 
+def _oned_profiles(remote: str = "/scratch/run-1") -> dict:
+    return {
+        "schema": "xgc-oned-profiles/v1",
+        "generated_at": "2026-07-29T00:00:00+00:00",
+        "remote_run_dir": remote,
+        "source_product": "xgc.oneddiag.bp",
+        "reader": {
+            "package": "xgc-analysis",
+            "version": "0.1-dev",
+            "module_path": "/opt/xgc-analysis/xgc_analysis/__init__.py",
+            "git_commit": "252c3ea",
+            "catalog_mode": "selected-product-metadata",
+            "track_state": False,
+        },
+        "selection": {
+            "policy": "first-and-latest-logical-step",
+            "available_step_count": 11,
+            "selected_logical_steps": [0, 10],
+            "max_profile_points": 512,
+            "source_radial_point_count": 4,
+            "returned_radial_point_count": 4,
+            "estimated_values_upper_bound": 64,
+        },
+        "coordinate": {
+            "variable": "psi",
+            "logical_step": 0,
+            "values": [0.0, 0.3, 0.7, 1.0],
+        },
+        "step_metadata": {
+            "0": {"logical_step": 0, "time": 0.0, "gstep": 0},
+            "10": {"logical_step": 10, "time": 0.1, "gstep": 10},
+        },
+        "profiles": [
+            {
+                "variable": "e_gc_density_df_1d",
+                "species": "e",
+                "quantity": "gc_density_df_1d",
+                "unit": "m^-3",
+                "values_by_logical_step": {
+                    "0": [1.0, 2.0, 3.0, 4.0],
+                    "10": [1.5, 2.5, 3.5, 4.5],
+                },
+            },
+            {
+                "variable": "e_perp_temperature_df_1d",
+                "species": "e",
+                "quantity": "perp_temperature_df_1d",
+                "unit": "eV",
+                "values_by_logical_step": {
+                    "0": [100.0, 90.0, 70.0, 20.0],
+                    "10": [102.0, 91.0, 71.0, 22.0],
+                },
+            },
+        ],
+        "warnings": [],
+    }
+
+
 class DataAnalyzerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -173,6 +231,105 @@ class DataAnalyzerTests(unittest.TestCase):
         self.assertEqual(payload["scan"]["scope"], "top-level-only")
         self.assertEqual(payload["counts"]["adios2_products"], 1)
         self.assertNotIn("large-hidden-array", proc.stdout)
+
+    def test_oned_profiles_runs_xgc_analysis_reducer_remotely(self) -> None:
+        with (
+            patch.object(da, "RUNS_DIR", self.runs_dir),
+            patch.object(
+                da.m,
+                "get_machine",
+                return_value={
+                    "auth": {},
+                    "analysis": {
+                        "python": "/opt/analysis/bin/python",
+                        "pythonpath": "/opt/XGC-Analysis",
+                        "env_script": "/opt/xgc-env.sh",
+                    },
+                },
+            ),
+            patch.object(da.ssh, "host_for", return_value="stellar"),
+            patch.object(
+                da.ssh,
+                "run",
+                return_value=self._remote_result(_oned_profiles()),
+            ) as run,
+        ):
+            result = da.inspect_oned_profiles("stellar", "run-1", max_points=128)
+
+        self.assertEqual(result["schema"], "xgc-oned-profiles/v1")
+        self.assertEqual(result["machine"], "stellar")
+        self.assertEqual(result["profiles"][0]["species"], "e")
+        remote_argv = run.call_args.args[1]
+        self.assertEqual(remote_argv[0:2], ["env", "PYTHONPATH=/opt/XGC-Analysis"])
+        self.assertEqual(remote_argv[2:4], ["/opt/analysis/bin/python", "-c"])
+        self.assertEqual(remote_argv[-2:], ["/scratch/run-1", "128"])
+        self.assertEqual(run.call_args.kwargs["env_script"], "/opt/xgc-env.sh")
+
+    def test_oned_profiles_saves_json_and_local_svg(self) -> None:
+        with (
+            patch.object(da, "RUNS_DIR", self.runs_dir),
+            patch.object(da.m, "get_machine", return_value={"auth": {}}),
+            patch.object(da.ssh, "host_for", return_value="stellar"),
+            patch.object(
+                da.ssh,
+                "run",
+                return_value=self._remote_result(_oned_profiles()),
+            ),
+        ):
+            result = da.analyze_run("stellar", "run-1", product="oned_profiles")
+
+        summary_path = Path(result["output_path"])
+        plot_path = Path(result["plot_path"])
+        self.assertTrue(summary_path.is_file())
+        self.assertTrue(plot_path.is_file())
+        self.assertEqual(
+            json.loads(summary_path.read_text(encoding="utf-8"))["data"]["schema"],
+            "xgc-oned-profiles/v1",
+        )
+        svg = plot_path.read_text(encoding="utf-8")
+        self.assertIn("<svg", svg)
+        self.assertIn("Guiding-center density", svg)
+        self.assertNotIn(".bp", plot_path.name)
+
+    def test_existing_oned_plot_requires_overwrite_confirmation(self) -> None:
+        summary_dir = self.run_dir / "summaries"
+        summary_dir.mkdir()
+        plot_path = summary_dir / "oned_profiles.svg"
+        plot_path.write_text("<svg>old</svg>\n", encoding="utf-8")
+
+        with (
+            patch.object(da, "RUNS_DIR", self.runs_dir),
+            patch.object(da.m, "get_machine", return_value={"auth": {}}),
+            patch.object(da.ssh, "host_for", return_value="stellar"),
+            patch.object(
+                da.ssh,
+                "run",
+                return_value=self._remote_result(_oned_profiles()),
+            ),
+        ):
+            result = da.analyze_run("stellar", "run-1", product="oned_profiles")
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["saved"])
+        self.assertEqual(plot_path.read_text(encoding="utf-8"), "<svg>old</svg>\n")
+        self.assertFalse((summary_dir / "oned_profiles.json").exists())
+
+    def test_oned_profiles_rejects_unbounded_point_request_before_ssh(self) -> None:
+        with (
+            patch.object(da, "RUNS_DIR", self.runs_dir),
+            patch.object(da.ssh, "run") as run,
+        ):
+            with self.assertRaisesRegex(da.DataAnalysisError, "between 16 and 2048"):
+                da.inspect_oned_profiles("stellar", "run-1", max_points=10_000)
+        run.assert_not_called()
+
+    def test_oned_reducer_uses_fast_catalog_and_selected_steps(self) -> None:
+        script = da._REMOTE_ONED_PROFILES
+        self.assertIn("metadata_product_keys={PRODUCT}", script)
+        self.assertIn("track_state=False", script)
+        self.assertIn("selected_steps", script)
+        self.assertIn("catalog.read_arrays", script)
+        self.assertNotIn("ssh.pull", script)
 
 
 if __name__ == "__main__":
