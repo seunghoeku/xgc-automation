@@ -51,6 +51,12 @@ polaris:
     submit_tpl: templates/polaris.pbs.j2
     system: polaris
     filesystems: home:grand
+    verified:
+      submit: true
+      status: true
+      output: true
+      cancel: false
+      job_id: 7301673.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov
   paths:
     scratch: /grand/TokamakProfile/shku
     run_root: /grand/TokamakProfile/shku/xgc-runs

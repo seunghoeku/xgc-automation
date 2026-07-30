@@ -10,9 +10,11 @@ Planning rejects missing PBS account/queue/filesystem/system resources, and
 terminal `qstat` output uses `Exit_status` to distinguish success from failure.
 The Polaris `xgc` target compiled successfully on 2026-07-30 from commit
 `60bef3bc`; `build/bin/xgc` is executable and all dynamic libraries resolve.
-`machines.yaml` now records that path. A live `qsub/qstat/qdel` round trip and
-compute-node runtime remain unverified. The Polaris ControlMaster was alive
-during compilation. Do not submit without the normal human approval gate.
+`machines.yaml` now records that path. PBS job 7301673 then completed a live
+1-node `qsub`/`qstat`/output round trip with `Exit_status=0` and four MPI ranks
+on `x3005c0s7b0n0`. Live `qdel` and XGC compute-node runtime remain unverified.
+The Polaris ControlMaster was alive during compilation and testing. Do not
+submit further jobs without the normal human approval gate.
 
 `data_analyzer` now includes the first scientific product, `oned_profiles`.
 It targets XGC-Analysis `codex/catalog-fast-open` (`252c3ea`) and the combined

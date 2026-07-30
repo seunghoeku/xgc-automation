@@ -101,9 +101,10 @@ Higher-level logic must remain unaware of the machine type.
       first/latest logical steps remotely and saves bounded JSON plus a local
       SVG without transferring `.bp`. Fixture tests pass; a real HPC run still
       needs to verify the remote analysis environment before this item closes.
-- [ ] 8. Polaris adapter (pbs/qsub) — PBS template and local parser/rendering
-      tests are implemented. Live qsub/qstat/qdel verification still requires
-      explicit approval; the executable is compiled but not runtime-tested.
+- [x] 8. Polaris adapter (pbs/qsub) — PBS template, local tests, and a live
+      1-node qsub/qstat/output round trip passed with exit 0 (job 7301673).
+      Live qdel was not exercised; the XGC executable is compiled but not
+      runtime-tested.
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
 
 ## Open Questions to Resolve First

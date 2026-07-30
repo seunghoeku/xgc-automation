@@ -105,8 +105,22 @@ with `USE_CABANA=OFF`, XGC probes for Cabana without requiring it.
 
 ## PBS execution profile
 
-`machines.yaml` and `templates/polaris.pbs.j2` now record the local submission
-profile, but no live `qsub` has been run through the automation yet.
+`machines.yaml` and `templates/polaris.pbs.j2` record the submission profile.
+A live hello-world round trip passed on 2026-07-30:
+
+| Check | Result |
+|---|---|
+| Job ID | `7301673.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov` |
+| Queue/resources | `debug-scaling`, 1 node, 4 ranks, 10-minute limit |
+| Compute host | `x3005c0s7b0n0` |
+| Launcher | `mpiexec --np 4 -ppn 4 hostname` |
+| Scheduler result | `completed`, `Exit_status=0` |
+| Output | Four hostname lines and `rc=0` |
+
+The run is recorded locally under `runs/pbs-smoke-20260730/`. Live
+`qsub`, extended `qstat`, terminal exit-code parsing, and bounded output reads
+are therefore verified. The cancellation command remains unit-tested but has
+not been exercised against a live queued job.
 
 | Resource | Prototype default | Reason |
 |---|---:|---|
@@ -138,6 +152,5 @@ Official references:
 Before the first XGC allocation:
 
 1. Open the Polaris MFA/SSH session manually if its ControlMaster has expired.
-2. Preview a small hello-world plan and obtain human approval before `qsub`.
-3. Verify the `qstat` and output paths, then run an XGC dryrun before any
-   allocation-consuming scientific job.
+2. Stage a validated XGC case and run the login-node dryrun.
+3. Preview the XGC job plan and obtain human approval before `qsub`.
