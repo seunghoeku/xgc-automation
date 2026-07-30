@@ -38,7 +38,7 @@ perlmutter:
 polaris:
   center: alcf
   host: polaris.alcf.anl.gov
-  user: <alcf_username>
+  user: shku
   auth:
     method: ssh_tunnel          # local port forwarding + MFA
     local_port: 2222
@@ -49,19 +49,31 @@ polaris:
     status: qstat
     cancel: qdel
     submit_tpl: templates/polaris.pbs.j2
+    system: polaris
+    filesystems: home:grand
   paths:
-    scratch: /eagle/<project>
-    run_root: /eagle/<project>/xgc-runs
+    scratch: /grand/TokamakProfile/shku
+    run_root: /grand/TokamakProfile/shku/xgc-runs
   xgc:
-    exe: <path/to/xgc-es>
-    modules:
-      - PrgEnv-nvhpc
-      - cray-hdf5-parallel
-      - adios2
+    # Configure succeeded, but compilation/runtime have not been verified.
+    exe: <unverified_polaris_xgc_executable>
+    src: /grand/TokamakProfile/shku/XGC-Devel
+    build: /grand/TokamakProfile/shku/XGC-Devel/build
+    build_type: RelWithDebInfo
+    env_script: /grand/TokamakProfile/shku/XGC-Devel/quickstart/modules_and_env/polaris.sh
+    modules: []
+    verified:
+      configure: true
+      compiled: false
+      runtime_tested: false
   defaults:
-    account: <alcf_project>     # -A
-    queue: prod
+    account: TokamakProfile
+    # Four-node prototype jobs fit debug-scaling; prod requires at least 10.
+    queue: debug-scaling
     nodes: 4
+    ntasks_per_node: 4
+    cpus_per_task: 16
+    gpus_per_node: 4
     walltime: "01:00:00"
 
 stellar:

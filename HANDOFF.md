@@ -2,6 +2,17 @@
 
 ## 2026-07-29 update
 
+The Polaris adapter now has a real PBS template and local tests. Its configured
+paths use `/grand/TokamakProfile`, not the retired `/eagle/TokamakITER` tree.
+The four-node prototype profile uses `debug-scaling`, four MPI ranks and four
+GPUs per node, 16 OpenMP threads per rank, and `filesystems=home:grand`.
+Planning rejects missing PBS account/queue/filesystem/system resources, and
+terminal `qstat` output uses `Exit_status` to distinguish success from failure.
+Compilation, the executable path, and a live `qsub/qstat/qdel` round trip are
+still unverified; a read-only check found only CMake probe binaries in the
+build tree. The Polaris ControlMaster was alive during that check. Do not
+submit without the normal human approval gate.
+
 `data_analyzer` now includes the first scientific product, `oned_profiles`.
 It targets XGC-Analysis `codex/catalog-fast-open` (`252c3ea`) and the combined
 reader direction validated by XGC_reader `XGC_analysis` (`43b4122`). The
@@ -141,11 +152,13 @@ Beyond the tooling:
 cancelled near its walltime. The toolchain is proven end to end, but no
 scientific result has been produced.
 
-**Roadmap 6–9 not started**: `physics_advisor`, `data_analyzer`, Polaris
-adapter, provenance hardening.
+**Roadmap 6 and the foundations of 7–8 are implemented.** Scientific analysis
+still needs a live HPC verification, the Polaris adapter still needs its first
+approved PBS round trip, and provenance hardening remains.
 
-**PBS support is written but untested.** `tools/scheduler.py` has a full PBS
-adapter. No PBS machine was reachable, so none of it has ever executed.
+**PBS support is locally tested, not live-tested.** Script rendering and
+qstat parsing have fixtures, but no scheduler command has been issued through
+the automation.
 
 **`push`/`pull` exist in `tools/ssh.py` but are not exposed as MCP tools.**
 Deliberate: the data principles in `AGENTS.md` forbid bulk downloads, and no

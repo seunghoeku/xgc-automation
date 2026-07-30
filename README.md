@@ -47,6 +47,7 @@ the first/latest 1-D profiles.
 - `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines
 - `docs/build-stellar.md` — building XGC on stellar (note: `-O2` crashes the compiler)
 - `docs/build-polaris.md` — verified Polaris environment and CMake configure
+  plus the locally tested PBS resource profile
 - `docs/data-analysis.md` — remote reduction boundary and summary products
 - `docs/simulation-ids.md` — sequential IDs, machine codes, and directories
 - `docs/input-archive.md` — recent-first archive inspection and migration policy

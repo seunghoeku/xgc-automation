@@ -39,7 +39,7 @@ _SLURM_STATES = {
 # qstat state codes -> normalized.
 _PBS_STATES = {
     "Q": PENDING, "H": PENDING, "W": PENDING, "T": PENDING,
-    "R": RUNNING, "E": RUNNING,
+    "R": RUNNING, "E": RUNNING, "B": RUNNING, "S": RUNNING,
     "F": COMPLETED, "C": COMPLETED,
     "X": COMPLETED,
 }
@@ -68,6 +68,13 @@ class Scheduler:
 
     def cancel_argv(self, job_id: str) -> list[str]:
         raise NotImplementedError
+
+    def parse_exit_code(self, stdout: str) -> str | None:
+        """Return a scheduler exit code embedded in status output, if any."""
+        return None
+
+    def validate_resources(self, resources: dict[str, Any]) -> None:
+        """Reject scheduler-specific omissions before a script is rendered."""
 
 
 class SlurmScheduler(Scheduler):
@@ -129,7 +136,15 @@ class PBSScheduler(Scheduler):
         text = stdout.strip()
         if not text:
             raise SchedulerError("qsub produced no output")
-        return text.splitlines()[-1].strip()
+        job_id = text.splitlines()[-1].strip()
+        if not re.fullmatch(
+            r"\d+(?:\[\])?(?:[.][A-Za-z0-9_.-]+)?",
+            job_id,
+        ):
+            raise SchedulerError(
+                f"could not parse job id from qsub output: {stdout!r}"
+            )
+        return job_id
 
     def status_argv(self, job_id: str) -> list[str]:
         return ["qstat", "-x", "-f", job_id]
@@ -138,10 +153,47 @@ class PBSScheduler(Scheduler):
         match = re.search(r"job_state\s*=\s*(\w)", stdout)
         if not match:
             return UNKNOWN
-        return _PBS_STATES.get(match.group(1).upper(), UNKNOWN)
+        state = _PBS_STATES.get(match.group(1).upper(), UNKNOWN)
+        if state not in TERMINAL_STATES:
+            return state
+
+        comment = re.search(r"^\s*comment\s*=\s*(.+)$", stdout, re.MULTILINE)
+        if comment and re.search(r"\b(delet|cancel)", comment.group(1), re.IGNORECASE):
+            return CANCELLED
+
+        exit_code = self.parse_exit_code(stdout)
+        if exit_code is None:
+            # A terminal letter alone does not prove success. PBS extended
+            # status normally carries Exit_status; stay conservative if it is
+            # absent instead of silently classifying a failed job as complete.
+            return UNKNOWN
+        try:
+            return COMPLETED if int(exit_code) == 0 else FAILED
+        except ValueError:
+            return UNKNOWN
+
+    def parse_exit_code(self, stdout: str) -> str | None:
+        """Extract PBS ``Exit_status`` from extended qstat output."""
+        match = re.search(r"^\s*Exit_status\s*=\s*(\S+)", stdout, re.MULTILINE)
+        return match.group(1) if match else None
 
     def cancel_argv(self, job_id: str) -> list[str]:
         return ["qdel", job_id]
+
+    def validate_resources(self, resources: dict[str, Any]) -> None:
+        """Require the site resources used by the Polaris PBS template."""
+        missing = [
+            label
+            for label in ("account", "queue", "filesystems", "system")
+            if not resources.get(label)
+            or str(resources[label]).startswith("<")
+        ]
+        if missing:
+            raise SchedulerError(
+                "PBS submission configuration is incomplete; set "
+                + ", ".join(missing)
+                + " in machines.yaml or the submission request"
+            )
 
 
 _ADAPTERS: dict[str, type[Scheduler]] = {

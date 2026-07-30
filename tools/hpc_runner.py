@@ -114,6 +114,7 @@ def prepare_submission(
     walltime: str | None = None,
     ntasks_per_node: int | None = None,
     cpus_per_task: int | None = None,
+    gpus_per_node: int | None = None,
     account: str | None = None,
     partition: str | None = None,
     qos: str | None = None,
@@ -128,7 +129,8 @@ def prepare_submission(
 
     Args:
         machine: key in machines.yaml.
-        hello_world: ignore the XGC executable and run `srun hostname` instead.
+        partition: Slurm partition or PBS queue.
+        hello_world: ignore XGC and run hostname through the site launcher.
         xgc_exe: override the executable from machines.yaml.
 
     Unspecified resource arguments fall back to the machine's `defaults`.
@@ -148,13 +150,20 @@ def prepare_submission(
     nodes = nodes if nodes is not None else defaults.get("nodes", 1)
     walltime = walltime or defaults.get("walltime", "00:10:00")
     account = account or defaults.get("account")
-    partition = partition or defaults.get("partition")
+    partition = partition or defaults.get("partition") or defaults.get("queue")
     qos = qos or defaults.get("qos")
     constraint = constraint or defaults.get("constraint")
+    filesystems = (
+        defaults.get("filesystems")
+        or cfg.get("scheduler", {}).get("filesystems")
+    )
+    pbs_system = cfg.get("scheduler", {}).get("system")
 
     for label, value in (("account", account), ("partition", partition)):
         if m.is_placeholder(value):
             warnings.append(f"{label} is still a placeholder ({value})")
+    if m.is_placeholder(filesystems):
+        warnings.append(f"filesystems is still a placeholder ({filesystems})")
 
     if hello_world:
         exe = None
@@ -193,7 +202,32 @@ def prepare_submission(
             raise SubmissionError(f"paths.run_root for {machine!r} is not configured")
         remote_run_dir = f"{run_root}/{run_id}"
 
-    ntasks_per_node = ntasks_per_node if ntasks_per_node is not None else 1
+    ntasks_per_node = (
+        ntasks_per_node
+        if ntasks_per_node is not None
+        else defaults.get("ntasks_per_node", 1)
+    )
+    cpus_per_task = (
+        cpus_per_task
+        if cpus_per_task is not None
+        else defaults.get("cpus_per_task")
+    )
+    gpus_per_node = (
+        gpus_per_node
+        if gpus_per_node is not None
+        else defaults.get("gpus_per_node")
+    )
+    try:
+        scheduler.validate_resources(
+            {
+                "account": account,
+                "queue": partition,
+                "filesystems": filesystems,
+                "system": pbs_system,
+            }
+        )
+    except sched.SchedulerError as exc:
+        raise SubmissionError(str(exc)) from exc
     total_ranks = nodes * ntasks_per_node
 
     template_name = Path(cfg["scheduler"]["submit_tpl"]).name
@@ -204,11 +238,14 @@ def prepare_submission(
         walltime=walltime,
         account=account,
         partition=partition,
+        queue=partition,
         qos=qos,
         constraint=constraint,
+        filesystems=filesystems,
+        pbs_system=pbs_system,
         ntasks_per_node=ntasks_per_node,
         cpus_per_task=cpus_per_task,
-        gpus_per_node=None,
+        gpus_per_node=gpus_per_node,
         total_ranks=total_ranks,
         modules=xgc_cfg.get("modules") or [],
         env_script=xgc_cfg.get("env_script"),
@@ -222,14 +259,16 @@ def prepare_submission(
         "nodes": nodes,
         "ntasks_per_node": ntasks_per_node,
         "cpus_per_task": cpus_per_task,
+        "gpus_per_node": gpus_per_node,
         "total_ranks": total_ranks,
         "walltime": walltime,
         "node_hours_max": round(nodes * hours, 2),
         "account": account,
         "partition": partition,
+        "filesystems": filesystems,
         "qos": qos,
         "scheduler": scheduler.type_name,
-        "executable": exe or "(hello-world: srun hostname)",
+        "executable": exe or "(hello-world: hostname)",
     }
 
     return SubmissionPlan(
@@ -373,6 +412,9 @@ def status(machine: str, job_id: str) -> dict[str, Any]:
         "state": state,
         "source": scheduler.type_name,
     }
+    exit_code = scheduler.parse_exit_code(result.stdout)
+    if exit_code is not None:
+        out["exit_code"] = exit_code
 
     if state == sched.UNKNOWN and isinstance(scheduler, sched.SlurmScheduler):
         acct = ssh.run(host, scheduler.accounting_argv(job_id))

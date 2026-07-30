@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools import hpc_runner as hr
+from tools.ssh import CommandResult
 
 
 class OutputRunDirTests(unittest.TestCase):
@@ -157,6 +158,106 @@ class SimulationPlanTests(unittest.TestCase):
                     simulation_id="n645st",
                     hello_world=True,
                 )
+
+
+class PolarisPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = {
+            "scheduler": {
+                "type": "pbs",
+                "submit_tpl": "templates/polaris.pbs.j2",
+                "system": "polaris",
+                "filesystems": "home:grand",
+            },
+            "paths": {"run_root": "/grand/TokamakProfile/shku/xgc-runs"},
+            "xgc": {
+                "exe": "/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc",
+                "env_script": (
+                    "/grand/TokamakProfile/shku/XGC-Devel/"
+                    "quickstart/modules_and_env/polaris.sh"
+                ),
+                "modules": [],
+            },
+            "defaults": {
+                "account": "TokamakProfile",
+                "queue": "debug-scaling",
+                "nodes": 4,
+                "ntasks_per_node": 4,
+                "cpus_per_task": 16,
+                "gpus_per_node": 4,
+                "walltime": "01:00:00",
+            },
+        }
+
+    def test_polaris_template_renders_required_resources_and_affinity(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "polaris",
+                run_id="run-polaris-test",
+            )
+
+        directives = {
+            line for line in plan.script.splitlines() if line.startswith("#PBS")
+        }
+        self.assertIn("#PBS -l select=4:system=polaris", directives)
+        self.assertIn("#PBS -l place=scatter", directives)
+        self.assertIn("#PBS -l filesystems=home:grand", directives)
+        self.assertIn("#PBS -q debug-scaling", directives)
+        self.assertIn("#PBS -A TokamakProfile", directives)
+        self.assertIn("mpiexec --np 16 -ppn 4", plan.script)
+        self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
+        self.assertIn("MPICH_GPU_SUPPORT_ENABLED=1", plan.script)
+        self.assertIn("pbs-${PBS_JOBID}.out", plan.script)
+        self.assertEqual(plan.resources["total_ranks"], 16)
+        self.assertEqual(plan.resources["cpus_per_task"], 16)
+        self.assertEqual(plan.resources["gpus_per_node"], 4)
+        self.assertEqual(plan.resources["filesystems"], "home:grand")
+        self.assertEqual(plan.resources["node_hours_max"], 4.0)
+
+    def test_polaris_hello_world_uses_mpiexec_without_gpu_wrapper(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "polaris",
+                run_id="run-polaris-hello",
+                hello_world=True,
+            )
+
+        self.assertIn("mpiexec --np 16 -ppn 4 hostname", plan.script)
+        self.assertNotIn("xgc-rank", plan.script)
+
+    def test_polaris_plan_rejects_missing_filesystem_resource(self) -> None:
+        self.cfg["scheduler"]["filesystems"] = None
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            with self.assertRaisesRegex(hr.SubmissionError, "filesystems"):
+                hr.prepare_submission(
+                    "polaris",
+                    run_id="run-polaris-missing-filesystem",
+                    hello_world=True,
+                )
+
+    def test_pbs_status_reports_exit_code_and_failure(self) -> None:
+        output = (
+            "Job Id: 12345.polaris-pbs-01\n"
+            "    job_state = F\n"
+            "    Exit_status = 9\n"
+        )
+        remote_result = CommandResult(
+            returncode=0,
+            stdout=output,
+            stderr="",
+            command="qstat -x -f 12345.polaris-pbs-01",
+        )
+        with (
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="polaris"),
+            patch.object(hr.ssh, "run", return_value=remote_result),
+        ):
+            result = hr.status("polaris", "12345.polaris-pbs-01")
+
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["exit_code"], "9")
+        self.assertTrue(result["terminal"])
+        self.assertEqual(result["source"], "pbs")
 
 
 if __name__ == "__main__":

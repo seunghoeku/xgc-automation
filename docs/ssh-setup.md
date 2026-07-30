@@ -23,6 +23,10 @@ Host stellar
 Host flux
     HostName flux.pppl.gov
     User <pppl_username>
+
+Host polaris
+    HostName polaris.alcf.anl.gov
+    User shku
 ```
 
 The `ControlPath` directory must already exist:
@@ -71,4 +75,6 @@ ssh -O exit stellar
 - `flux.pppl.gov` is on the internal network (172.16.99.x) — requires PPPL VPN or
   on-site access.
 - `stellar.princeton.edu` is reachable externally.
-- `perlmutter` and `polaris` are currently inaccessible (as of 2026-07).
+- `polaris` was reached manually in 2026-07; the automation still requires
+  the user-created MFA session and reuses its ControlMaster.
+- Perlmutter connectivity has not yet been verified in this project.

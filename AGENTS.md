@@ -34,7 +34,7 @@ locally.
 | Machine | Center | Scheduler | Auth | Scratch |
 |---|---|---|---|---|
 | Perlmutter | NERSC | Slurm (`sbatch/squeue/scancel`) | sshproxy → 24h SSH key | `$PSCRATCH` |
-| Polaris | ALCF | PBS (`qsub/qstat/qdel`) | ssh tunnel/port forwarding + MFA | `/eagle/<proj>` |
+| Polaris | ALCF | PBS (`qsub/qstat/qdel`) | ssh tunnel/port forwarding + MFA | `/grand/TokamakProfile` |
 
 `machines.yaml` plus the `hpc_runner` tool absorb the differences between machines.
 Higher-level logic must remain unaware of the machine type.
@@ -81,8 +81,9 @@ Higher-level logic must remain unaware of the machine type.
 
 ## Current Phase / Next Steps (Roadmap)
 - [x] 1. `preflight` tool — check connectivity and authentication state
-- [x] 2. Finalize `machines.yaml` (stellar done; flux scheduler still unconfirmed,
-      Perlmutter/Polaris inaccessible)
+- [x] 2. Finalize `machines.yaml` (stellar done; Polaris paths and PBS
+      resources recorded but its executable remains blocked until compilation;
+      flux scheduler still unconfirmed, Perlmutter inaccessible)
 - [x] 3. `hpc_runner` MCP — submit/status/cancel/output (slurm+pbs).
       push/pull exist in `tools/ssh.py` but are not yet exposed as MCP tools.
 - [x] 4. Successful hello-world sbatch round trip — stellar, jobs 2888408/2888413,
@@ -100,7 +101,10 @@ Higher-level logic must remain unaware of the machine type.
       first/latest logical steps remotely and saves bounded JSON plus a local
       SVG without transferring `.bp`. Fixture tests pass; a real HPC run still
       needs to verify the remote analysis environment before this item closes.
-- [ ] 8. Polaris adapter (pbs/qsub)
+- [ ] 8. Polaris adapter (pbs/qsub) — PBS template and local parser/rendering
+      tests are implemented. Live qsub/qstat/qdel verification still requires
+      explicit approval; XGC execution remains blocked until the executable is
+      compiled.
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
 
 ## Open Questions to Resolve First

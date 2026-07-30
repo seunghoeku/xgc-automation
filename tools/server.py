@@ -228,6 +228,7 @@ def plan_job(
     walltime: str | None = None,
     ntasks_per_node: int | None = None,
     cpus_per_task: int | None = None,
+    gpus_per_node: int | None = None,
     account: str | None = None,
     partition: str | None = None,
     hello_world: bool = False,
@@ -239,7 +240,8 @@ def plan_job(
 
     Args:
         machine: machine key from machines.yaml (see list_machines).
-        hello_world: run `srun hostname` instead of XGC, for round-trip testing.
+        partition: Slurm partition or PBS queue.
+        hello_world: run hostname through the machine launcher instead of XGC.
     Unspecified resources fall back to the machine's defaults.
     """
     plan = hr.prepare_submission(
@@ -250,6 +252,7 @@ def plan_job(
         walltime=walltime,
         ntasks_per_node=ntasks_per_node,
         cpus_per_task=cpus_per_task,
+        gpus_per_node=gpus_per_node,
         account=account,
         partition=partition,
         hello_world=hello_world,
@@ -471,6 +474,7 @@ def submit_job(
     walltime: str | None = None,
     ntasks_per_node: int | None = None,
     cpus_per_task: int | None = None,
+    gpus_per_node: int | None = None,
     account: str | None = None,
     partition: str | None = None,
     hello_world: bool = False,
@@ -499,6 +503,7 @@ def submit_job(
         walltime=walltime,
         ntasks_per_node=ntasks_per_node,
         cpus_per_task=cpus_per_task,
+        gpus_per_node=gpus_per_node,
         account=account,
         partition=partition,
         hello_world=hello_world,

@@ -25,7 +25,7 @@ The path from an input file to a running job, and the checks in between.
        |
   [human approves]  review script + cost + dryrun report
        |
-  submit_job        re-runs the dryrun, then sbatch          consumes allocation
+  submit_job        re-runs dryrun, then sbatch/qsub         consumes allocation
        |
   job_status        pending -> running -> completed
        |
@@ -117,6 +117,11 @@ caller:
 
 Always pass `case_dir` for real XGC runs. It is unnecessary for `hello_world`
 jobs, which do not read an input file.
+
+For PBS machines, the `partition` argument is interpreted as the PBS queue.
+Polaris defaults to `debug-scaling`; its PBS script also requires the
+configured account, system, and filesystem list. Missing required PBS
+resources are rejected during `plan_job`, before any remote write or `qsub`.
 
 ## Reading the dryrun report
 
