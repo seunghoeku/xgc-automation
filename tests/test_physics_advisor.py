@@ -32,11 +32,16 @@ class PhysicsAdvisorTests(unittest.TestCase):
             "Electromagnetic edge-SOL turbulence with collisions enabled."
         )
 
+        # Electromagnetic disqualifies every case in the KB (ecbc is a core
+        # electrostatic case; st40-heatload is electrostatic too).
         self.assertEqual(result["status"], "unsupported")
         self.assertNotIn("selected_case", result)
-        excluded = result["candidates"][0]["excluded"]
-        self.assertTrue(any("electrostatic" in reason for reason in excluded))
-        self.assertTrue(any("core case" in reason for reason in excluded))
+        self.assertTrue(result["candidates"])
+        for candidate in result["candidates"]:
+            self.assertTrue(candidate["excluded"])
+        ecbc = next(c for c in result["candidates"] if c["case"] == "ecbc")
+        self.assertTrue(any("electrostatic" in r for r in ecbc["excluded"]))
+        self.assertTrue(any("core case" in r for r in ecbc["excluded"]))
 
     def test_asks_for_detail_when_no_signal_matches(self) -> None:
         result = pa.advise("I want to study a plasma problem.")
@@ -48,6 +53,20 @@ class PhysicsAdvisorTests(unittest.TestCase):
         result = pa.advise(
             "Electrostatic core delta-f turbulence.",
             machine="polaris",
+        )
+
+        # ecbc (stellar) is filtered out by the machine constraint. The only
+        # polaris case, st40-heatload, is disqualified by delta-f/core.
+        self.assertEqual(result["status"], "unsupported")
+        names = {c["case"] for c in result["candidates"]}
+        self.assertNotIn("ecbc", names)
+        for candidate in result["candidates"]:
+            self.assertTrue(candidate["excluded"])
+
+    def test_filters_by_machine_with_no_cases_at_all(self) -> None:
+        result = pa.advise(
+            "Electrostatic core delta-f turbulence.",
+            machine="no-such-machine",
         )
 
         self.assertEqual(result["status"], "unsupported")

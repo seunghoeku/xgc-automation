@@ -1,0 +1,183 @@
+# ST40 heat-load — second validated baseline for the physics_advisor KB.
+#
+# Promoted from the input archive via tools/case_promotion.py: the researcher's
+# simulation notebook records run n620fr as "OK" (2025-10-27, frontier), and
+# the migrated input passes `xgc --dryrun` on polaris against XGC f805e6223.
+#
+# Values here are recorded from the actual input file, not inferred.
+
+name: st40-heatload
+description: >
+  ST40 electrostatic edge/SOL heat-load case (shot 11013565). Total-f, kinetic
+  electrons and ions, collisions on (col_mode=4), sheath model, neutrals and
+  heat sources active. No initial flow in this variant (eq_flow_shape=0).
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/n620fr_dryrun
+# The big mesh/equilibrium/profile files stay in the shared input directory
+# and are referenced in place via sml_input_file_dir; nothing was copied.
+input_file_dir: /grand/TokamakProfile/shku/XGC_inputs
+
+provenance:
+  archive_file: input_backup/n620fr_ST40_1101365_wo_flow
+  archive_sha256: 633d536f3bb7d57cba1bee7d4874f671901c9800c20d74ddfdf1f2499c8b5d1f
+  simulation_number: 620
+  original_machine: frontier
+  notebook:
+    sheet: y2025
+    shot: n620fr
+    description: "ST40, w/o flow, correct sign"
+    note: "OK"
+    date: 2025-10-27
+    data_location: kronos
+
+validated:
+  date: 2026-07-31
+  machine: polaris
+  xgc_commit: f805e6223
+  input_md5: 62a586dd7db4c8ac50d83d57586f788b
+  dryrun: ACCEPTED            # via debug-queue job 7307649 (login nodes cannot
+  n_ranks: 1                  # run the CUDA build); 12 s wall, exit 0
+  runtime_tested: false       # no stepping run on polaris yet
+
+physics:
+  model: electrostatic        # dryrun: "Field model: electrostatic"
+  flavor: XGC1
+  delta_f: false              # no ptl_marker_type declared -> TotalF default
+  boundary: edge              # sml_bounce=0, sml_outpsi=1.15 includes SOL
+  device: ST40 (Tokamak Energy spherical tokamak), shot 11013565
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF}
+  toroidal:
+    nphi_total: 16
+    wedge_n: 2
+  radial_domain:
+    inpsi: 0.0
+    outpsi: 1.15              # beyond separatrix; SOL included
+  extras:
+    collisions: col_mode=4
+    sheath: sml_sheath_mode=1, adjust on
+    neutrals: sml_neutral=.true. (recycling; old neu_* grid params removed)
+    sources: sml_source=.true., ~0.7 MW each species (src_param)
+
+numerics:
+  dt: 1.0e-3                  # sml_dt, toroidal transit times
+  mstep: 100
+  num_per_vertex: [7000, 7000]
+  f0_grid: {nmu: 32, nvp: 17, smu_max: 4.0, vp_max: 4.0}
+
+# Measured by xgc --dryrun at 1 rank; divide by the real rank count.
+resource_estimate:
+  n_ranks: 1
+  host_memory_per_rank_gb: 208.3
+  device_memory_per_rank_gb: 208.1   # A100 has 39.5 GB -> needs >= ~8 ranks/GPU-count planning
+  particles: 465274112
+  vertices_5d: 1037499392
+  particles_per_vertex: 0.448        # dryrun warns: typical TotalF wants ~5
+
+input_files:                  # all present in input_file_dir, referenced in place
+  mesh:
+    - st40_11013565_flip.node
+    - st40_11013565_flip.ele
+    - st40_11013565_flip.flx.aif
+  equilibrium: st_11013565_flip.eqd
+  profiles:
+    density: ne_st11013565.prf
+    temp_electron: te_st11013565.prf
+    temp_ion: ti_st11013565.prf
+    flow: omg_st11013565_mach_0p5.prf   # loaded but eq_flow_shape=0 -> no flow
+
+# Migration applied 2026-07-31 to make the archived input run on current XGC.
+# Every change follows the dryrun's own suggestion text.
+migration:
+  removed_parameters:         # blocking; XGC refused to start
+    - {from: neu_col_mode, to: null, note: "dropped per dryrun suggestion"}
+    - {from: neu_cx_period, to: null, note: "dropped per dryrun suggestion"}
+    - {from: neu_grid_mode, to: null, note: "dropped per dryrun suggestion"}
+    - {from: neu_grid_max_psi, to: null, note: "dropped per dryrun suggestion"}
+    - {from: neu_full_grid, to: null, note: "dropped per dryrun suggestion"}
+    - {from: sml_f0_grid_alpha, to: null, note: "dropped; was 0.0"}
+    - {from: sml_f0_grid_alpha_start, to: null, note: "dropped; no longer used"}
+    - {from: f0_update_analytic_alpha, to: f0_update_alpha, note: "renamed"}
+  deprecated_parameters:      # accepted but obsolete; migrated for clarity
+    - {from: sml_special, to: null, note: "dropped; was 0 (normal simulation)"}
+    - {from: smooth_rad_efield, to: null, note: "dropped; smooth_r no longer exists"}
+  path_changes:
+    - {parameter: sml_input_file_dir,
+       from: '../XGC_inputs/',
+       to: '/grand/TokamakProfile/shku/XGC_inputs/'}
+
+notes:
+  - "Sibling variants in the archive share this setup and differ only in flow
+     and field direction: n621fr (b-parallel flow), n624fr (flipped BT),
+     n625fr (flipped BT, minus flow), n615/616fr (recorded as failed: wrong
+     field sign). Represent them as overrides on this baseline, not new cases."
+  - "sml_restart=.true. in the baseline; a fresh run must set it false."
+  - "Original production ran on frontier; polaris resource planning is open.
+     n_ranks must be divisible by sml_nphi_total=16 (dryrun warning)."
+  - "1-rank dryrun flags 0.448 ptl/vertex (TotalF typical ~5). The frontier
+     production run used many ranks; re-check resolution at production scale."
+
+# Deterministic matching evidence for tools/physics_advisor.py. Regex patterns
+# are facts about the request language, not a source of new physics values.
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: ST40 device
+      patterns: ['\bST[\s-]?40\b', '\b11013565\b']
+    - label: edge or SOL domain
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', 'divertor',
+                 '엣지', '가장자리', '스크레이프']
+    - label: heat load / heat flux width
+      patterns: ['\bheat[\s-]*(?:load|flux)\b', '\blambda[_\s-]*q\b',
+                 '\bEich\b', '열\s*부하', '열\s*유속']
+    - label: electrostatic
+      patterns: ['\belectrostatic\b', '정전기']
+    - label: total-f markers
+      patterns: ['\btotal[\s-]*f\b', '\bfull[\s-]*f\b', '토탈[\s-]*f']
+    - label: collisional with neutrals
+      patterns: ['\bcollision(?:s|al)?\b', '\bneutrals?\b', '충돌', '중성']
+    - label: spherical tokamak
+      patterns: ['\bspherical\s+tokamak\b', '구형\s*토카막']
+  exclusions:
+    - label: electromagnetic
+      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      reason: this baseline is electrostatic (an EM ST40 variant, n502su, exists
+        only as an unvalidated archive entry)
+    - label: core-only turbulence
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b', '코어\s*난류']
+      reason: this is an edge/SOL heat-load case (sml_bounce=0, outpsi=1.15)
+    - label: delta-f
+      patterns: ['\bdelta[\s-]*f\b', '델타[\s-]*f']
+      reason: this baseline uses TotalF markers
+    - label: ELM
+      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      reason: not an ELM baseline
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b',
+                 '\bASDEX\b', '\bTCV\b', '\bNSTX\b', '\bJET\b', '\bC[\s-]?Mod\b']
+      reason: this baseline is ST40 geometry; other devices need their own case
+  baseline_parameters:
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.15
+    sml_dt: 1.0e-3
+    sml_mstep: 100
+    sml_nphi_total: 16
+    sml_wedge_n: 2
+    col_mode: 4
+    sml_sheath_mode: 1
+    sml_neutral: true
+    sml_source: true
+    sml_restart: true
+  warnings:
+    - >
+      runtime_tested is false on polaris: the dryrun passed but no stepping
+      run has been done there. The "OK" outcome is from the original frontier
+      run (notebook n620fr).
+    - >
+      Resource planning is open: a 1-rank dryrun estimates 208 GB/rank, so a
+      real polaris job needs enough ranks (divisible by sml_nphi_total=16)
+      and the particle count may need raising toward TotalF-typical
+      resolution.
