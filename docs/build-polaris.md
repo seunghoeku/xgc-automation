@@ -1,49 +1,95 @@
 # Building XGC on Polaris
 
-Status: configure and the `xgc` target compiled successfully on 2026-07-30.
-Runtime execution on a compute node has not yet been tested.
+Status: the GCC 13 `xgc` target compiled successfully on 2026-07-30, but its
+compute-node runtime remains unverified. XGC-Devel upstream `master` at
+`f805e622` now contains a new GCC 14/CUDA 12.8.1 setup. That target setup is
+documented below but has not yet been built or runtime-tested in the `shku`
+checkout.
 
 ## Paths
 
 | Item | Path |
 |---|---|
 | Source | `/grand/TokamakProfile/shku/XGC-Devel` |
-| Build | `/grand/TokamakProfile/shku/XGC-Devel/build` |
-| Executable | `/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc` |
-| Shared Kokkos modules | `/grand/TokamakProfile/Software/polaris/modulefiles` |
-| PETSc and ADIOS2 | `/grand/TokamakProfile/jdominsk/libraries/install` |
-| CUDA toolkit | `/soft/compilers/cudatoolkit/cuda-12.6.3` |
+| Verified GCC 13 build | `/grand/TokamakProfile/shku/XGC-Devel/build` |
+| Verified GCC 13 executable | `/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc` |
+| GCC 14 target source/worktree | `/grand/TokamakProfile/shku/XGC-Devel-gcc14` |
+| GCC 14 target build | `/grand/TokamakProfile/shku/XGC-Devel-gcc14/build` |
+| GCC 14 dependency root | `/grand/TokamakProfile/hager/Software/install` |
+| GCC 14 CUDA toolkit | `cudatoolkit-standalone/12.8.1` |
 
 The filesystem name is `/grand`, not `/grad`.
 
-## Environment
+## GCC 14 master environment
 
-`quickstart/modules_and_env/polaris.sh` must use the migrated module tree:
+Commit `7c3d278f` replaces the previous project Kokkos/Cabana modules with a
+self-contained GCC 14 dependency installation. The master environment does:
 
 ```bash
-module use /grand/TokamakProfile/Software/polaris/modulefiles
-module load kokkos/4.6.02_shared_PEgnu8.6.0_cv13.2_ct12.6.3
+module reset
+module use /soft/modulefiles
+module swap PrgEnv-nvidia PrgEnv-gnu
+module load cray-fftw cray-libsci
+module load cudatoolkit-standalone/12.8.1
+module load spack-pe-base cmake
+module load cray-python/3.11.7
+module load googletest/1.14.0
+
+export CUDA_ROOT=${CUDA_HOME}
+export CRAYPE_LINK_TYPE=dynamic
+export NVCC_WRAPPER_DEFAULT_COMPILER=CC
+source /grand/TokamakProfile/hager/Software/install/cray-python-venv-3.11.7/bin/activate
 ```
 
-Cabana is not installed in the migrated tree. Do not load its old module;
-configure XGC with `USE_CABANA=OFF`.
+The corresponding dependency roots in `CMake/find_dependencies_polaris.cmake`
+are:
 
-The `xgc_cmake` interactive-shell alias expands to:
+| Package | GCC 14 master path |
+|---|---|
+| ADIOS2 | `/grand/TokamakProfile/hager/Software/install/adios/v2.12.2-gcc14` |
+| Kokkos | `/grand/TokamakProfile/hager/Software/install/kokkos/v4.7.04-gcc14-cuda12.8.1` |
+| Ginkgo | `/grand/TokamakProfile/hager/Software/install/ginkgo/ginkgo-1.11.0-gcc14-cuda12.8.1` |
+| PETSc | `/grand/TokamakProfile/hager/Software/install/petsc/3.24.4-gcc14` |
+
+Cabana remains disabled. Do not carry the previous jdominsk GCC 13 dependency
+paths into this build.
+
+## GCC 14 target configure
+
+Preserve the verified GCC 13 checkout because `machines.yaml` sources its
+runtime environment script. Create a separate master worktree at
+`/grand/TokamakProfile/shku/XGC-Devel-gcc14`, then configure its empty `build`
+directory after sourcing that worktree's environment script:
 
 ```bash
-cmake -G Ninja \
+cmake \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_CXX_COMPILER=CC \
+  -DCMAKE_CXX_COMPILER=/grand/TokamakProfile/hager/Software/install/kokkos/v4.7.04-gcc14-cuda12.8.1/bin/nvcc_wrapper \
   -DCMAKE_C_COMPILER=cc \
   -DCMAKE_Fortran_COMPILER=ftn \
   -DCMAKE_CXX_STANDARD=17 \
-  -DCMAKE_Fortran_FLAGS="-Wno-argument-mismatch"
+  -DCMAKE_Fortran_FLAGS="-Wno-argument-mismatch" \
+  -DUSE_CABANA=OFF \
+  ..
 ```
 
-## Verified configure
+Build using the generator-independent interface:
 
-After sourcing `quickstart/modules_and_env/polaris.sh`, configure in the empty
-build directory with the alias options plus:
+```bash
+cmake --build /grand/TokamakProfile/shku/XGC-Devel-gcc14/build \
+  --target xgc --parallel 8
+```
+
+Before changing `machines.yaml`, verify the compiler identity, dynamic
+libraries, absence of retired `/eagle` paths, login-node dryrun, and a short
+compute-node run. Then move `xgc.src`, `xgc.build`, `xgc.exe`, and
+`xgc.env_script` together to the GCC 14 worktree and record its commit. Updating
+only the source checkout would mix the old executable with the new environment.
+
+## Previous verified GCC 13 configure
+
+The 2026-07-30 build used the previous environment and remains available as a
+rollback reference:
 
 ```bash
 xgc_cmake \
@@ -52,9 +98,8 @@ xgc_cmake \
   ..
 ```
 
-The explicit CUDA root is important. An earlier configure selected the system
-CUDA 12.9.1 even though the migrated Kokkos installation was built against
-CUDA 12.6.3.
+The explicit CUDA root was required for that older Kokkos installation. It is
+not the configuration used by GCC 14 master.
 
 The verified cache contains:
 
@@ -66,7 +111,7 @@ PETSC_DIR=/grand/TokamakProfile/jdominsk/libraries/install/petsc-3.24.1
 USE_CABANA=OFF
 ```
 
-## Verified compilation
+## Previous verified GCC 13 compilation
 
 The `xgc` target was built on the login node with bounded parallelism:
 
@@ -90,9 +135,8 @@ Verification:
 | Kokkos | `/grand/TokamakProfile/Software/polaris/kokkos/.../gnu/13.2/...` |
 | CUDA runtime | `/soft/compilers/cudatoolkit/cuda-12.6.3` |
 
-The module list also displays `gcc-native/14.2`, but the Cray compiler wrappers
-actually resolve to GNU 13.3.1. This is the compiler identity relevant to the
-XGC objects and matches the GNU 13 family used for the shared Kokkos build.
+These compiler and library identities describe only the rollback GCC 13
+binary, not the new master target.
 
 This executable is not linked with the Cray GPU Transport Layer (GTL).
 Accordingly, `machines.yaml` sets `xgc.gpu_aware_mpi: false`, matching the
@@ -102,9 +146,8 @@ initialization. GPU rank affinity remains enabled independently through
 `CUDA_VISIBLE_DEVICES`.
 
 CMake enabled the OpenMP, Serial, and CUDA Kokkos backends and generated Ninja
-build files successfully. No `/eagle/TokamakITER` references remain in the
-`CMake` sources, Polaris environment script, `CMakeCache.txt`, or
-`build.ninja`. The common typo `/grad/TokamakProfile` is also absent.
+build files successfully. No `/eagle/TokamakITER` references remain in that
+legacy build cache. The common typo `/grad/TokamakProfile` is also absent.
 
 Warnings about Cabana, Ginkgo, Omega_h, Xgc_Mesh_Reader, HDF5, and FusionIO
 were non-blocking for this configuration. The Cabana warning is expected:

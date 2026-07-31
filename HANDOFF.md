@@ -1,5 +1,177 @@
 # HANDOFF
 
+## Current handoff snapshot — 2026-07-31
+
+Read `AGENTS.md` before doing anything. The immediate objective is to finish
+the bounded `data_analyzer` integration against XGC-Analysis PR #51 and then
+validate the new GCC 14 Polaris build without disturbing the known GCC 13
+fallback. No scheduler submission or destructive/overwriting remote action is
+authorized by this handoff; show the resource plan and obtain explicit human
+approval before `qsub`.
+
+### Repository state
+
+| Repository | Branch / revision | State |
+|---|---|---|
+| `xgc-automation` | `main`, HEAD `7234691`, five commits ahead of `origin/main` | Five tracked files are modified and not committed: `HANDOFF.md`, `docs/build-polaris.md`, `machines.yaml`, `templates/polaris.pbs.j2`, and `tests/test_hpc_runner.py`. Preserve the two untracked `runs/polaris-compute-dryrun-*` directories. |
+| `XGC_reader` | `XGC_analysis`, commit `65e31ae` (`Align analysis catalogs with PR 51`) | Branch matches `origin/XGC_analysis`. Only unrelated user-owned files are untracked; do not add or remove them. |
+| `XGC-Devel` | local branch `dadt_prediction`; `upstream/master` is `f805e622` | The checkout contains unrelated untracked files and build trees. Do not switch or clean it. Use a separate Polaris worktree for GCC 14. |
+
+The current `xgc-automation` tracked modifications implement the recorded GCC
+14 target and the corrected Polaris rank/GPU mapping. They have not yet been
+committed. Review their diff before committing; do not include the untracked
+run directories.
+
+### XGC-Analysis PR #51 benchmark and conclusion
+
+PR #51 was tested independently from upstream master, explicitly excluding
+the older `codex/catalog-fast-open` branch:
+
+- upstream base: `258a8669b3dace4e0c30e65dd3bb70dde676ee60`
+- PR head: `d422276725951396bd05738386ce574ee217fc8d`
+- commits: `dfc77b1` (fast directory catalog options) and `d422276`
+  (bounded manifest input scans)
+- test directory:
+  `/grand/TokamakProfile/shku/n645pe_TCV_NT_PT_totalf_ES/NT`
+- directory size: 15,984 files, 456 top-level BP entries, 23 logical products
+
+Measured timings on Polaris:
+
+| Operation | Result |
+|---|---:|
+| master manifest construction | 23.0668 s |
+| PR #51 manifest construction | 0.3836 s (about 60x faster) |
+| master `open_catalog(collect_metadata=False)` conservative lower bound | 62.8544 s |
+| PR #51 default `open_catalog(collect_metadata=False)` | 8.2167 s |
+| PR #51 fast `oned`-only open, first / five-run median | 0.4502 s / 0.2098 s |
+| metadata-free product-name discovery | 0.018 s first run |
+| XGC_reader-equivalent discovery / required-product open | 0.0634 s / 1.0902 s |
+| actual two-step `e_gc_density_1d` read, first / median | 0.2382 s / 0.1782 s |
+
+The former delay was overwhelmingly catalog construction, not reading the
+requested arrays. PR #51 solves it when callers use `exclude_products` and
+`build_manifest=False`; merely updating the package while retaining the
+default open path still leaves significant metadata/state work. The one-off
+state-scan timings were cache/order sensitive and should not be used as a
+standalone performance claim. Sixteen PR catalog/manifest tests passed.
+
+Temporary benchmark material remains at `/tmp/sku-xgc-pr51-019fab9d` on
+Polaris and in local worktrees `/private/tmp/xgc-analysis-pr51-base` and
+`/private/tmp/xgc-analysis-pr51-head`. Do not delete the remote directory
+without approval.
+
+### XGC_reader status
+
+Commit `65e31ae` aligns XGC_reader with PR #51. It performs metadata-free
+product discovery, excludes everything outside the Simulation static/required
+products and selected diagnostics, and opens with
+`open_catalog(exclude_products=..., build_manifest=False)`. It does not depend
+on the old `metadata_product_keys` or `track_state` arguments. Thirty tracked
+tests pass. A local integration test opened the expected `mesh`, `oned`, and
+`volumes` products in 0.317 s; the Polaris-equivalent required-product open
+took 1.0902 s.
+
+### Remaining incompatibility in xgc-automation
+
+`tools/data_analyzer.py` still calls the old `codex/catalog-fast-open` API with
+`metadata_product_keys` and `track_state`. Those arguments are incompatible
+with PR #51. The next code change should:
+
+1. adopt PR #51's metadata-free discovery and
+   `exclude_products`/`build_manifest=False` pattern;
+2. update its fixture/unit tests;
+3. replace stale `codex/catalog-fast-open` references in
+   `docs/data-analysis.md` and this handoff's older historical notes;
+4. run the full local suite, then verify `oned_profiles` against the real
+   Polaris NT directory without transferring raw `.bp` data.
+
+### Polaris GCC 14 transition
+
+Current XGC-Devel upstream master is `f805e622`; the GCC 14 setup was added in
+`7c3d278f`. The target environment is:
+
+- `PrgEnv-gnu`, GCC 14, `cudatoolkit-standalone/12.8.1`
+- ADIOS2 `/grand/TokamakProfile/hager/Software/install/adios/v2.12.2-gcc14`
+- Kokkos `/grand/TokamakProfile/hager/Software/install/kokkos/v4.7.04-gcc14-cuda12.8.1`
+- Ginkgo `/grand/TokamakProfile/hager/Software/install/ginkgo/ginkgo-1.11.0-gcc14-cuda12.8.1`
+- PETSc `/grand/TokamakProfile/hager/Software/install/petsc/3.24.4-gcc14`
+- Python environment
+  `/grand/TokamakProfile/hager/Software/install/cray-python-venv-3.11.7`
+- CMake uses Kokkos `nvcc_wrapper`; `USE_CABANA=Off`
+
+The modified PBS template follows upstream's Polaris NUMA mapping: local ranks
+0, 1, 2, 3 bind to GPUs 3, 2, 1, 0. A matching unit test was added. The full
+local xgc-automation suite passes (55 tests), and `git diff --check` passes.
+
+The configured executable in `machines.yaml` deliberately remains the known
+GCC 13 build at commit `60bef3bc`:
+
+- source: `/grand/TokamakProfile/shku/XGC-Devel`
+- build: `/grand/TokamakProfile/shku/XGC-Devel/build`
+- executable: `/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc`
+- compiled/configured: true; compute runtime verified: false
+- GPU-aware MPI: false, because this binary is not linked with Cray GTL
+
+The unverified GCC 14 target is recorded separately as:
+
+- source: `/grand/TokamakProfile/shku/XGC-Devel-gcc14`
+- build: `/grand/TokamakProfile/shku/XGC-Devel-gcc14/build`
+- revision: `f805e622`
+
+The `polaris1` ControlMaster was reported alive, but new command channels timed
+out at both 20 and 90 seconds. Consequently, the new `hager` dependency paths,
+remote checkout, configure, and build have not been verified, and no remote
+files were changed in this phase. The human may need to reconnect/restart the
+Polaris authenticated session.
+
+### Recommended continuation order
+
+1. Review and commit the five current tracked `xgc-automation` changes only.
+2. Convert `tools/data_analyzer.py`, its tests, and analysis documentation to
+   the PR #51 API; run the 55-test suite plus new tests.
+3. Re-establish `polaris1`, then read-only verify all GCC 14 dependency paths.
+4. Create the separate `XGC-Devel-gcc14` worktree at `f805e622`; configure and
+   build following `docs/build-polaris.md`. Do not replace the GCC 13 tree.
+5. Check CMake cache/compiler versions, dynamic linkage, absence of `/eagle`
+   and `/grad` paths, and run a login-node dryrun.
+6. Prepare a minimal compute-node smoke-test plan with node count and walltime;
+   obtain explicit approval before `qsub`.
+7. Only after a successful smoke test, update `xgc.src`, `xgc.build`,
+   `xgc.exe`, and `xgc.env_script` together and mark the target verified.
+8. Run the real bounded `oned_profiles` reducer on the NT directory and save
+   only bounded JSON/SVG locally.
+
+Run the local suite with:
+
+```sh
+env UV_CACHE_DIR=/private/tmp/uv-cache-xgc-auto \
+  MPLCONFIGDIR=/private/tmp/mpl-xgc-auto \
+  PYTHONPYCACHEPREFIX=/private/tmp/pycache-xgc-auto \
+  uv run python -m unittest discover -s tests -p 'test_*.py'
+```
+
+Do not reintroduce `/eagle/TokamakITER` or the typo `/grad/TokamakProfile`;
+Polaris paths belong under `/grand/TokamakProfile`. Do not enable
+`MPICH_GPU_SUPPORT_ENABLED` until the selected executable is demonstrably GTL
+linked. Do not clean or commit unrelated user-owned untracked files.
+
+## 2026-07-31 update
+
+XGC-Devel upstream `master` at `f805e622` now contains the GCC 14 Polaris
+setup introduced by `7c3d278f`. It replaces the former GCC 13/CUDA 12.6.3
+dependency stack with CUDA 12.8.1 and libraries under
+`/grand/TokamakProfile/hager/Software/install`. The automation PBS template
+now also follows master's Polaris NUMA/GPU mapping: local ranks 0,1,2,3 bind
+to GPUs 3,2,1,0.
+
+The configured executable remains the previously compiled GCC 13 binary at
+commit `60bef3bc`. The GCC 14 target is recorded in `machines.yaml` but is
+deliberately marked unverified. Build it in the separate
+`/grand/TokamakProfile/shku/XGC-Devel-gcc14` worktree, run a compute-node smoke
+test, and only then move `xgc.src`, `xgc.build`, `xgc.exe`, and `xgc.env_script`
+together. Do not treat merely sourcing the new master setup as validation of
+the old executable.
+
 ## 2026-07-29 update
 
 The Polaris adapter now has a real PBS template and local tests. Its configured

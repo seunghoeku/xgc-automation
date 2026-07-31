@@ -61,6 +61,9 @@ polaris:
     scratch: /grand/TokamakProfile/shku
     run_root: /grand/TokamakProfile/shku/xgc-runs
   xgc:
+    # This remains the last verified GCC 13 build. Upstream master now targets
+    # the GCC 14/CUDA 12.8.1 toolchain recorded below; switch exe/build only
+    # after a clean build and compute-node smoke test succeed.
     exe: /grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc
     src: /grand/TokamakProfile/shku/XGC-Devel
     build: /grand/TokamakProfile/shku/XGC-Devel/build
@@ -75,6 +78,15 @@ polaris:
       compiled: true
       runtime_tested: false
       commit: 60bef3bcef9fdab9709cab43d52a28dd89d8cb6f
+    target_toolchain:
+      source_commit: f805e622307546a4cb29f7bd097bac70ae95eed0
+      setup_commit: 7c3d278f24ff461843f58641ebb8ca8e621fea6f
+      compiler: gcc14
+      cuda: 12.8.1
+      dependencies: /grand/TokamakProfile/hager/Software/install
+      source: /grand/TokamakProfile/shku/XGC-Devel-gcc14
+      build: /grand/TokamakProfile/shku/XGC-Devel-gcc14/build
+      verified: false
   defaults:
     account: TokamakProfile
     # Four-node prototype jobs fit debug-scaling; prod requires at least 10.

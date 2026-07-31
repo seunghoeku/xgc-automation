@@ -207,6 +207,10 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertIn("#PBS -A TokamakProfile", directives)
         self.assertIn("mpiexec --np 16 -ppn 4", plan.script)
         self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
+        self.assertIn(
+            "gpu=$((4 - 1 - local_rank % 4))",
+            plan.script,
+        )
         self.assertNotIn("MPICH_GPU_SUPPORT_ENABLED", plan.script)
         self.assertIn("pbs-${PBS_JOBID}.out", plan.script)
         self.assertEqual(plan.resources["total_ranks"], 16)

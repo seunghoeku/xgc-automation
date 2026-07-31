@@ -44,11 +44,11 @@ echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_r
 
 {% if xgc_exe %}
 {% if gpus_per_node %}
-# Bind each local MPI rank round-robin to one Polaris GPU without creating a
-# helper file in the simulation directory.
+# Match Polaris NUMA domains to GPUs: local ranks 0,1,2,3 use GPUs 3,2,1,0.
+# Keep the binding inline so the simulation directory needs no helper script.
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
   --cpu-bind depth -d {{ cpus_per_task or 1 }} -genvall \
-  /bin/bash -c 'gpu=$((${PMI_LOCAL_RANK:-0} % {{ gpus_per_node }})); export CUDA_VISIBLE_DEVICES=${gpu}; exec "$@"' \
+  /bin/bash -c 'local_rank=${PMI_LOCAL_RANK:-0}; gpu=$(({{ gpus_per_node }} - 1 - local_rank % {{ gpus_per_node }})); export CUDA_VISIBLE_DEVICES=${gpu}; exec "$@"' \
   xgc-rank "{{ xgc_exe }}"
 {% else %}
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
