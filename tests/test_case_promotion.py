@@ -41,6 +41,16 @@ def _write_notebook(path: Path) -> None:
         ["n696fr", "d3d PT no field flat", "ES",
          "d193793_torque_pt.node", "2025-06-01", "", ""]
     )
+    # EM run from the xgc-eem binary era (no field switch in the input).
+    modern.append(
+        ["n695pe", "ASDEX EM turbulence", "EM",
+         "au37980.node", "2025-05-01", "OK", ""]
+    )
+    # XGCa (neoclassical) run.
+    modern.append(
+        ["n694pe", "NT torque neoclassical", "XGCa",
+         "d193793_nt.node", "2025-04-01", "Used for Paper", ""]
+    )
 
     # Legacy sheet layout with different headers.
     legacy = workbook.create_sheet("yr2012")
@@ -237,6 +247,74 @@ class CasePromotionTests(unittest.TestCase):
             if c["archive_name"] == "n620fr_ST40_wo_flow"
         )
         self.assertIsNone(ok["name_note_mismatch"])
+
+    # -- binary era (xgc-eem / xgc-es / xgca) ----------------------------------
+
+    def test_classify_code_column(self) -> None:
+        self.assertEqual(
+            cp.classify_code_column("EM"),
+            {"flavor": "xgc1", "field_model": "em",
+             "binary_era": "xgc-eem", "code_text": "EM"},
+        )
+        self.assertEqual(cp.classify_code_column("ES/adiabatic")["binary_era"], "xgc-es")
+        self.assertEqual(cp.classify_code_column("EM - df")["field_model"], "em")
+        self.assertEqual(cp.classify_code_column("XGCa")["binary_era"], "xgca")
+        self.assertEqual(cp.classify_code_column("xgca")["flavor"], "xgca")
+        self.assertEqual(cp.classify_code_column("")["flavor"], "unknown")
+        # ES/ EM tokens inside other words must not match.
+        self.assertEqual(cp.classify_code_column("core_dev")["field_model"], "unknown")
+
+    def test_em_era_input_without_switch_warns_on_promotion(self) -> None:
+        (self.archive_dir / "n695pe_ASDEX_EM_turb").write_text(
+            _INPUT_OK, encoding="utf-8"
+        )
+        plan = cp.plan_case_promotion("n695pe_ASDEX_EM_turb")
+        field = plan["draft"]["physics_inferred"]["field_model"]
+
+        self.assertEqual(field["value"], "electromagnetic")
+        self.assertIn("xgc-eem", field["source"])
+        self.assertTrue(
+            any("sml_electromagnetic=.true." in w for w in plan["warnings"])
+        )
+
+    def test_em_input_with_explicit_switch_does_not_warn(self) -> None:
+        (self.archive_dir / "n695pe_ASDEX_EM_explicit").write_text(
+            _INPUT_OK.replace(
+                "sml_restart=.false.",
+                "sml_restart=.false.\nsml_electromagnetic=.true.",
+            ),
+            encoding="utf-8",
+        )
+        plan = cp.plan_case_promotion("n695pe_ASDEX_EM_explicit")
+        field = plan["draft"]["physics_inferred"]["field_model"]
+
+        self.assertEqual(field["value"], "electromagnetic")
+        self.assertIn("input parameter", field["source"])
+        self.assertFalse(
+            any("silently run the wrong physics" in w for w in plan["warnings"])
+        )
+
+    def test_xgca_run_is_flagged(self) -> None:
+        (self.archive_dir / "n694pe_NT_torque_xgca").write_text(
+            _INPUT_OK, encoding="utf-8"
+        )
+        plan = cp.plan_case_promotion("n694pe_NT_torque_xgca")
+
+        self.assertEqual(
+            plan["draft"]["physics_inferred"]["flavor"]["value"], "xgca"
+        )
+        self.assertTrue(any("xgca" in w for w in plan["warnings"]))
+
+    def test_ranking_exposes_binary_era(self) -> None:
+        (self.archive_dir / "n695pe_ASDEX_EM_turb").write_text(
+            _INPUT_OK, encoding="utf-8"
+        )
+        result = cp.rank_promotion_candidates(min_number=695, max_files=5)
+        record = next(
+            c for c in result["candidates"]
+            if c["archive_name"] == "n695pe_ASDEX_EM_turb"
+        )
+        self.assertEqual(record["binary_era"]["binary_era"], "xgc-eem")
 
     # -- planning ---------------------------------------------------------------
 

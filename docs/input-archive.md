@@ -87,6 +87,27 @@ On the real data this reproduces the manual analysis below: the ST40 family
 ranks first on `'OK'` notes, and every recent ITER input ranks last on
 `'failed'`/`'numerical instability'` notes despite high schema alignment.
 
+## Binary eras: xgc-eem / xgc-es / xgca
+
+Until recently the field model was selected by the *binary*, not the input:
+EM runs used `xgc-eem`, ES runs used `xgc-es`, and neoclassical runs used
+(and still use) `xgca`. The notebook's Code column records which one each run
+used. Current XGC unifies EM/ES into one binary switched by
+`sml_electromagnetic` (default `.false.` = electrostatic).
+
+This creates a silent trap for promotion: an EM-era input carries **no**
+field-model switch, passes `xgc --dryrun` cleanly, and then runs
+electrostatic — the wrong physics with no error. `classify_code_column`
+therefore derives the binary era from the notebook, `plan_case_promotion`
+warns that migration must add `sml_electromagnetic=.true.`, and the physics
+classification cites whether the field model came from the input itself or
+only from the notebook.
+
+In the n500+ range the notebook records 53 ES, 16 EM, and 34 XGCa primaries;
+all 16 EM inputs lack the switch and need this migration. XGCa runs are
+flagged separately: they use a different binary that this pipeline has not
+validated yet.
+
 ## Drafting a case from the archive
 
 ```python

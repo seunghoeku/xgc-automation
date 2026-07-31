@@ -44,6 +44,7 @@ KEY_PARAMETERS = (
     "sml_nphi_total",
     "sml_wedge_n",
     "sml_em",
+    "sml_electromagnetic",
     "col_mode",
     "ptl_marker_type",
     "sml_deltaf",

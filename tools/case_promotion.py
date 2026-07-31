@@ -304,7 +304,49 @@ def _outcome_for_notes(matched: list[SimulationNote]) -> dict[str, Any]:
     return classify_outcome(" ".join(note.combined_text() for note in matched))
 
 
-_FIELD_MODEL_NOTE_RE = re.compile(r"\b(EM|ES)\b", re.IGNORECASE)
+# The notebook's Code column records which binary era a run belongs to.
+# Until recently EM and ES were separate executables (xgc-eem / xgc-es) and
+# neoclassical runs used (and still use) xgca; the field model was chosen by
+# the binary, not the input. Current XGC unifies EM/ES into one binary with
+# the sml_electromagnetic switch (default .false. = electrostatic), so an
+# old EM input MUST gain sml_electromagnetic=.true. during migration or it
+# will silently run electrostatic.
+_CODE_XGCA_RE = re.compile(r"\bxgca\b", re.IGNORECASE)
+_CODE_EM_RE = re.compile(r"\bem\b", re.IGNORECASE)
+_CODE_ES_RE = re.compile(r"\bes\b", re.IGNORECASE)
+
+
+def classify_code_column(code_text: str) -> dict[str, Any]:
+    """Interpret the notebook Code column into binary era facts.
+
+    Returns flavor (xgc1/xgca/unknown) and field model (em/es/unknown),
+    quoting the original text. XGCa runs are neoclassical: the field model
+    distinction does not select their binary.
+    """
+    text = code_text.strip()
+    if _CODE_XGCA_RE.search(text):
+        flavor = "xgca"
+    elif text:
+        flavor = "xgc1"
+    else:
+        flavor = "unknown"
+
+    if _CODE_EM_RE.search(text):
+        field = "em"
+    elif _CODE_ES_RE.search(text):
+        field = "es"
+    else:
+        field = "unknown"
+
+    return {
+        "flavor": flavor,
+        "field_model": field,
+        "binary_era": (
+            "xgca" if flavor == "xgca"
+            else {"em": "xgc-eem", "es": "xgc-es"}.get(field, "unknown")
+        ),
+        "code_text": text,
+    }
 
 
 def _infer_physics(
@@ -318,29 +360,52 @@ def _infer_physics(
     """
     physics: dict[str, Any] = {}
 
-    # Field model: the input's own switches first, then the notebook Code column.
-    em_param = key_parameters.get("sml_em") or key_parameters.get("sml_3db_on")
+    # Field model. Historically the field model was chosen by the binary
+    # (xgc-eem vs xgc-es), not the input, so an explicit input switch is rare
+    # in archived files: sml_electromagnetic (current) or legacy sml_em.
+    # Otherwise the notebook Code column is the only record of which binary
+    # the run used.
+    em_param = key_parameters.get("sml_electromagnetic") or key_parameters.get("sml_em")
     if em_param is not None:
         is_em = em_param.strip().lower() in {".true.", ".t.", "t", "true"}
         physics["field_model"] = {
             "value": "electromagnetic" if is_em else "electrostatic",
-            "source": "input parameter",
+            "source": "input parameter (sml_electromagnetic/sml_em)",
         }
     else:
         for note in matched_notes:
-            match = _FIELD_MODEL_NOTE_RE.search(note.code)
-            if match:
+            code = classify_code_column(note.code)
+            if code["field_model"] != "unknown":
                 physics["field_model"] = {
                     "value": (
                         "electromagnetic"
-                        if match.group(1).upper() == "EM"
+                        if code["field_model"] == "em"
                         else "electrostatic"
                     ),
-                    "source": f"notebook Code column: {note.code!r}",
+                    "source": (
+                        f"notebook Code column: {note.code!r} "
+                        f"(binary era: {code['binary_era']}); "
+                        f"not declared in the input itself"
+                    ),
                 }
                 break
         else:
-            physics["field_model"] = {"value": "unknown", "source": None}
+            physics["field_model"] = {
+                "value": "unknown",
+                "source": None,
+            }
+
+    # Flavor: xgca (neoclassical) still has its own binary; xgc1 is implied
+    # otherwise. The Code column is the only record for archived runs.
+    flavor = "unknown"
+    flavor_source = None
+    for note in matched_notes:
+        code = classify_code_column(note.code)
+        if code["flavor"] != "unknown":
+            flavor = code["flavor"]
+            flavor_source = f"notebook Code column: {note.code!r}"
+            break
+    physics["flavor"] = {"value": flavor, "source": flavor_source}
 
     # Domain: outpsi > 1 includes the separatrix/SOL; bounce settings agree.
     outpsi = key_parameters.get("sml_outpsi")
@@ -418,12 +483,14 @@ def rank_promotion_candidates(
         matched = notes_for_number(record["simulation_number"], notes)
         outcome = _outcome_for_notes(matched)
         mismatch = name_note_mismatch(record["archive_name"], matched)
+        code = classify_code_column(matched[0].code) if matched else None
         candidates.append(
             {
                 "archive_name": record["archive_name"],
                 "simulation_number": record["simulation_number"],
                 "variant": record.get("variant"),
                 "name_note_mismatch": mismatch,
+                "binary_era": code,
                 "machines": record["machines"],
                 "schema_alignment": record["schema_comparison"]["alignment"],
                 "recognized_ratio": record["schema_comparison"]["recognized_ratio"],
@@ -491,6 +558,27 @@ def plan_case_promotion(archive_name: str) -> dict[str, Any]:
         )
     if mismatch:
         warnings.append("Name/notebook device mismatch: " + mismatch["detail"])
+
+    # Binary-era trap: EM inputs from the xgc-eem era carry no field-model
+    # switch, and the unified binary defaults to electrostatic. Without adding
+    # sml_electromagnetic=.true. such a case would dryrun cleanly and then
+    # silently simulate the wrong physics.
+    field = physics.get("field_model") or {}
+    if (
+        field.get("value") == "electromagnetic"
+        and "notebook" in (field.get("source") or "")
+    ):
+        warnings.append(
+            "The notebook records this as an EM run from the xgc-eem binary "
+            "era, but the input has no field-model switch. Migration MUST add "
+            "sml_electromagnetic=.true. -- the unified binary defaults to "
+            "electrostatic and would silently run the wrong physics."
+        )
+    if (physics.get("flavor") or {}).get("value") == "xgca":
+        warnings.append(
+            "This is an XGCa (neoclassical) run; it uses the separate xgca "
+            "binary, which this pipeline has not validated yet."
+        )
     if outcome["outcome"] == "failed":
         warnings.append(
             "The notebook records this run as FAILED: "
