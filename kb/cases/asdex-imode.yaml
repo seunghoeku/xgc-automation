@@ -1,0 +1,194 @@
+# ASDEX-U I-mode — third validated baseline for the physics_advisor KB.
+#
+# Promoted from the input archive via tools/case_promotion.py. The notebook
+# records run n566pe as "Used for CEDA meeting" (flip-B delta-f I-mode), and
+# the migrated input passes `xgc --dryrun` on polaris against XGC f805e6223.
+#
+# Values here are recorded from the actual input file, not inferred.
+
+name: asdex-imode
+description: >
+  ASDEX Upgrade I-mode edge turbulence case (shot au37980, flipped B).
+  Electrostatic XGC1, kinetic electrons and ions, edge domain including SOL
+  (outpsi=1.12), collisions off, toroidal rotation profile loaded.
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/n566pe_dryrun
+input_file_dir: /grand/TokamakProfile/shku/XGC_inputs
+
+provenance:
+  archive_file: input_backup/n566pe_ASDEX_I_mode_flip_df
+  simulation_number: 566
+  original_machine: perlmutter
+  notebook:
+    sheet: y2025
+    shot: n566pe
+    description: "ASDEX_I_mode_flip_df"
+    note: "Used for CEDA meeting"
+    code_column: "ES - df"      # xgc-es binary era
+  related_runs:
+    - {shot: n567pe, note: "rerun of n557pe with more particles, similar result"}
+    - {shot: n568pe, note: "rerun of n566 with large number, similar result"}
+    - {shot: n610pe/n612pe, note: "later total-f turbulence chain with f_init/heating"}
+    - {shot: n640pe, note: "EM variant (xgc-eem era); needs sml_electromagnetic=.true."}
+
+validated:
+  date: 2026-07-31
+  machine: polaris
+  xgc_commit: f805e6223
+  input_md5: 9e3b31ab478aed81d56f44a911a7e685
+  dryrun: ACCEPTED            # debug-queue job 7307755, 17 s wall, exit 0,
+  n_ranks: 1                  # 0 removed / 0 deprecated / resolution warnings
+  runtime_tested: false
+
+physics:
+  model: electrostatic        # dryrun: "Field model: electrostatic";
+                              # notebook Code column "ES - df" (xgc-es era)
+  flavor: XGC1
+  delta_f: intended           # see notes: notebook says delta-f, input does
+                              # not declare a marker type
+  boundary: edge              # sml_bounce=0, outpsi=1.12 includes SOL
+  device: ASDEX Upgrade, shot au37980 4.200s IDE, flipped B
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0}
+  toroidal:
+    nphi_total: 16
+    wedge_n: 2
+  radial_domain:
+    inpsi: 0.0
+    outpsi: 1.12
+  extras:
+    collisions: off (col_mode=0)
+    rotation: vtor profile loaded (flipped-B adjusted)
+    neutrals: sml_neutral on (old neu_* grid params removed in migration)
+
+numerics:
+  dt: 2.0e-3                  # sml_dt, toroidal transit times
+  mstep: 6000
+  num_per_vertex: [70, 70]
+  f0_grid: {nmu: 32, nvp: 17, smu_max: 4.0, vp_max: 4.0}
+
+# Measured by xgc --dryrun at 1 rank; divide by the real rank count.
+resource_estimate:
+  n_ranks: 1
+  host_memory_per_rank_gb: 67.9
+  device_memory_per_rank_gb: 67.5    # A100 39.5 GB -> needs multiple ranks
+  particles: 300674080
+  vertices_5d: 2319485760
+  particles_per_vertex: 0.130        # dryrun warns (typical 5 for total-f)
+
+input_files:                  # all present in input_file_dir, referenced in place
+  mesh:
+    - au37980_4.200_IDE.flip_xgc1_Jul24.node
+    - au37980_4.200_IDE.flip_xgc1_Jul24.ele
+    - au37980_4.200_IDE.flip_xgc1_Jul24.flx.aif
+  equilibrium: au37980_4.200_IDE.flip.eqd
+  profiles:
+    density: ne_au37980_I.prf
+    temp_electron: te_au37980_I.prf
+    temp_ion: ti_au37980_I.prf
+    flow: vtor_au37980_I_minus_adjust.prf
+
+# Migration applied 2026-07-31; original preserved in the archive.
+migration:
+  removed_parameters:
+    - {from: neu_col_mode, to: null, note: "dropped (known from n620fr dryrun)"}
+    - {from: neu_cx_period, to: null, note: "dropped"}
+    - {from: neu_grid_mode, to: null, note: "dropped"}
+    - {from: neu_grid_max_psi, to: null, note: "dropped"}
+    - {from: neu_full_grid, to: null, note: "dropped"}
+    - {from: sml_f0_grid_alpha, to: null, note: "dropped; was 0.0"}
+    - {from: sml_f0_grid_alpha_start, to: null, note: "dropped; no longer used"}
+    - {from: f0_update_analytic_alpha, to: f0_update_alpha, note: "renamed"}
+    - {from: sml_special, to: null, note: "dropped; was 0"}
+    - {from: smooth_rad_efield, to: null, note: "dropped; smooth_r gone"}
+    - {from: sml_f0_grid, to: null, note: "dropped; was .false. (ecbc table)"}
+    - {from: sml_poisson_solver_type, to: null,
+       note: "dropped; sml_iter_solver* configures the solver (ecbc table)"}
+  path_changes:
+    - {parameter: sml_input_file_dir,
+       from: '../XGC-1_inputs/',
+       to: '/grand/TokamakProfile/shku/XGC_inputs/'}
+  accepted_legacy:
+    - "src_*_e electron-source parameters and diag_tracer_* were flagged as
+       unknown by the stellar metadata cache but accepted by the polaris
+       dryrun; the caches track different XGC commits."
+
+notes:
+  - "Marker-type trap (same as ecbc): the notebook intent is delta-f
+     ('ES - df', filename _df) but the input declares no ptl_marker_type, so
+     current XGC defaults to TotalF. The 0.13 ptl/vertex resolution is ~40x
+     short for TotalF but near delta-f targets. Before production, decide:
+     declare ptl_marker_type='ReducedDeltaF' (restores the intent; note the
+     electrostatic split-weight validation warning recorded in ecbc) or stay
+     TotalF and raise particles."
+  - "sml_restart=.true. in the baseline; a fresh run must set it false."
+  - "1-rank dryrun: 67.9 GB host / 67.5 GB device per rank. n_ranks must be
+     divisible by sml_nphi_total=16."
+  - "Original ran on perlmutter (xgc-es era). Sibling n568pe reproduced the
+     result with more particles."
+
+# Deterministic matching evidence for tools/physics_advisor.py.
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: ASDEX Upgrade device
+      patterns: ['\bASDEX(?:[\s-]*U(?:pgrade)?)?\b', '\bAUG\b', '\bau37980\b',
+                 '아스덱스']
+    - label: I-mode
+      patterns: ['\bI[\s-]?mode\b', 'I[\s-]?모드']
+    - label: edge or SOL domain
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+    - label: electrostatic
+      patterns: ['\belectrostatic\b', '정전기']
+    - label: edge turbulence
+      patterns: ['\bedge\s+turbulence\b', '\bpedestal\b', '엣지\s*난류',
+                 '페데스탈']
+    - label: collisionless
+      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b', '무충돌']
+    - label: rotation or flipped field
+      patterns: ['\brotation\b', '\btoroidal\s+flow\b', '\bflip(?:ped)?\s+B\b',
+                 '회전', '역방향\s*자기장']
+  exclusions:
+    - label: electromagnetic
+      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      reason: this baseline is electrostatic; the EM variant (n640pe, xgc-eem
+        era) is only an unvalidated archive entry needing
+        sml_electromagnetic=.true.
+    - label: core-only turbulence
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b', '코어\s*난류']
+      reason: this is an edge case (sml_bounce=0, outpsi=1.12)
+    - label: enabled collisions
+      patterns: ['\bcollisional\b', '\bcollisions?\s+(?:on|enabled|required)\b',
+                 '충돌\s*(?:포함|활성|켜)']
+      reason: collisions are off (col_mode=0)
+    - label: ELM
+      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      reason: not an ELM baseline
+    - label: heat load
+      patterns: ['\bheat[\s-]*(?:load|flux)\b', '\blambda[_\s-]*q\b', '열\s*부하']
+      reason: use st40-heatload for divertor heat-load studies; this case has
+        no sheath heat-load diagnostics configured
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b',
+                 '\bST[\s-]?40\b', '\bTCV\b', '\bNSTX\b', '\bJET\b',
+                 '\bC[\s-]?Mod\b']
+      reason: this baseline is ASDEX-U geometry; other devices need their own case
+  baseline_parameters:
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.12
+    sml_dt: 2.0e-3
+    sml_mstep: 6000
+    sml_nphi_total: 16
+    sml_wedge_n: 2
+    col_mode: 0
+    sml_restart: true
+  warnings:
+    - >
+      Marker model is undeclared: the notebook intent was delta-f but current
+      XGC will run TotalF by default. Resolve before production (see notes).
+    - >
+      runtime_tested is false on polaris; the "Used for CEDA meeting" outcome
+      is from the original perlmutter run.

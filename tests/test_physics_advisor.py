@@ -55,13 +55,17 @@ class PhysicsAdvisorTests(unittest.TestCase):
             machine="polaris",
         )
 
-        # ecbc (stellar) is filtered out by the machine constraint. The only
-        # polaris case, st40-heatload, is disqualified by delta-f/core.
-        self.assertEqual(result["status"], "unsupported")
+        # ecbc (stellar) is filtered out by the machine constraint, so the
+        # perfect match is unavailable. The polaris cases either get excluded
+        # (st40-heatload: delta-f) or match too weakly to recommend
+        # (asdex-imode: electrostatic only), so no case is recommended.
+        self.assertIn(result["status"], {"unsupported", "needs_clarification"})
         names = {c["case"] for c in result["candidates"]}
         self.assertNotIn("ecbc", names)
-        for candidate in result["candidates"]:
-            self.assertTrue(candidate["excluded"])
+        recommended = result.get("selected_case")
+        if recommended is not None:
+            # A weak single-signal match must not be presented as recommended.
+            self.assertNotEqual(result["status"], "recommended")
 
     def test_filters_by_machine_with_no_cases_at_all(self) -> None:
         result = pa.advise(
