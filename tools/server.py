@@ -10,6 +10,9 @@ Tools implemented so far:
   - reserve_simulation_id : reserve that ID after human confirmation
   - stage_simulation_case : stage a baseline under the canonical directory
   - inspect_input_archive : rank recent read-only input backups for migration
+  - rank_promotion_candidates : join the archive with the simulation notebook
+  - plan_case_promotion : draft a kb case from an archived input, writing nothing
+  - write_draft_case : write that draft under kb/cases/drafts/, gated on confirm
   - physics_advisor : match natural-language physics to validated cases/rules
   - plan_job      : render a job script and estimate cost, submitting nothing
   - list_cases    : baseline XGC cases known to validate
@@ -39,6 +42,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from tools import case_promotion as cp
 from tools import data_analyzer as da
 from tools import dryrun
 from tools import hpc_runner as hr
@@ -342,6 +346,58 @@ def inspect_input_archive(
     return input_archive.inspect_archive(
         min_number=min_number,
         max_files=max_files,
+    )
+
+
+@mcp.tool()
+def rank_promotion_candidates(
+    min_number: int = 600,
+    max_files: int = 100,
+) -> dict[str, Any]:
+    """Rank archived inputs for promotion to kb/cases/ baselines.
+
+    Joins the read-only input archive with the researcher's simulation
+    notebook (Other_data/simulation_note_XGC1.xlsx), classifying each run's
+    recorded outcome from the notebook's own wording and quoting the evidence.
+    Recorded successes rank first, then schema alignment, then recency.
+
+    This validates nothing: promotion still requires staging referenced files
+    and passing `xgc --dryrun`.
+    """
+    return cp.rank_promotion_candidates(
+        min_number=min_number, max_files=max_files
+    )
+
+
+@mcp.tool()
+def plan_case_promotion(archive_name: str) -> dict[str, Any]:
+    """Draft a kb case for one archived input. Writes nothing.
+
+    Combines the parsed input, the notebook's intent/outcome for that
+    simulation number, and a deterministic physics classification (each field
+    cites its source). Lists the remaining steps before the draft can become a
+    validated baseline. Show the draft and warnings to the user before calling
+    write_draft_case.
+    """
+    return cp.plan_case_promotion(archive_name)
+
+
+@mcp.tool()
+def write_draft_case(
+    archive_name: str,
+    confirm: bool = False,
+    allow_failed: bool = False,
+) -> dict[str, Any]:
+    """Write a promotion draft under kb/cases/drafts/. Requires confirmation.
+
+    With confirm=False this returns the plan and writes nothing. Only set
+    confirm=True after the user has reviewed the draft. Drafts are invisible
+    to list_cases/physics_advisor until a human finalizes them into kb/cases/
+    after a passing dryrun. Runs the notebook records as failed are refused
+    unless allow_failed=True.
+    """
+    return cp.write_draft_case(
+        archive_name, confirm=confirm, allow_failed=allow_failed
     )
 
 

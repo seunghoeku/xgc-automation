@@ -26,6 +26,14 @@ _ASSIGNMENT_RE = re.compile(
     r"^\s*([A-Za-z][A-Za-z0-9_]*)(?:\s*\([^)]*\))?\s*=\s*(.*?)\s*$"
 )
 
+# Suffixes marking a file as a variant of a primary input rather than the
+# input itself: alternates (.turb/.neo), fragments (.inc), packaging (.tar),
+# and editor/date backups (.bak1, .Jul10, .1stday).
+_VARIANT_SUFFIX_RE = re.compile(
+    r"\.(?:tar|inc|neo|turb(?:\.[A-Za-z0-9_.]+)?|nocol|bak\d*|orig|old"
+    r"|[A-Z][a-z]{2}\d{1,2}|1stday)$"
+)
+
 KEY_PARAMETERS = (
     "sml_dt",
     "sml_mstep",
@@ -150,16 +158,33 @@ def _machine_names(codes: list[str]) -> list[str]:
     return [code_to_machine.get(code, f"unknown:{code}") for code in codes]
 
 
+def _variant_kind(name: str) -> str | None:
+    """The variant suffix if this is not a primary input, else None.
+
+    Variants are alternates (`input.neo`, `input.turb`), fragments (`.inc`),
+    packaging (`.tar`), or backups (`.bak1`, `.Jul10`). They document how a
+    primary input was used but should not be ranked as independent runs.
+    """
+    match = _VARIANT_SUFFIX_RE.search(name)
+    return match.group(0).lstrip(".") if match else None
+
+
 def _inspect_file(
     path: Path,
     match: re.Match[str],
     current_parameters: set[str],
 ) -> dict[str, Any]:
     raw = path.read_bytes()
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
+    is_tar = path.name.endswith(".tar")
+    if is_tar:
+        # tar payloads are binary; decoding them as text would yield garbage
+        # "parameters" and a meaningless schema comparison.
+        text = ""
+    else:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1")
     parsed = parse_input_text(text)
     parameters = parsed["parameters"]
     names = set(parameters)
@@ -181,9 +206,23 @@ def _inspect_file(
 
     codes_text = (match.group("codes") or "").lower()
     codes = codes_text.split("_") if codes_text else []
+    # For files inside a numbered directory, the directory carries the
+    # simulation identity: report `<dir>/<file>` and treat the plain `input`
+    # as the primary, everything else as a variant.
+    in_numbered_dir = (
+        path.parent != ARCHIVE_DIR
+        and _NUMBERED_NAME_RE.match(path.parent.name) is not None
+    )
+    if in_numbered_dir:
+        display_name = f"{path.parent.name}/{path.name}"
+        variant = None if path.name == "input" else _variant_kind(path.name)
+    else:
+        display_name = path.name
+        variant = _variant_kind(path.name)
     return {
         "simulation_number": int(match.group("number")),
-        "archive_name": path.name,
+        "archive_name": display_name,
+        "variant": variant,
         "relative_path": str(path.relative_to(ARCHIVE_DIR)),
         "machine_codes": codes,
         "machines": _machine_names(codes),
@@ -228,6 +267,14 @@ def inspect_archive(
         match = _NUMBERED_NAME_RE.match(path.name)
         if match:
             numbered.append((path, match))
+            continue
+        # Some runs are archived as a numbered *directory* holding `input`
+        # plus variants (e.g. n523po_CBC_totalf_lin2/input.neo). The directory
+        # name carries the simulation number in that layout.
+        if path.parent != ARCHIVE_DIR and path.name.startswith("input"):
+            parent_match = _NUMBERED_NAME_RE.match(path.parent.name)
+            if parent_match:
+                numbered.append((path, parent_match))
 
     selected = [
         (path, match)
