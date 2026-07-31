@@ -42,7 +42,7 @@ polaris:
   auth:
     method: ssh_tunnel          # local port forwarding + MFA
     local_port: 2222
-    ssh_config_host: polaris1   # Polaris login node 1 ControlMaster alias
+    ssh_config_host: polaris4   # Polaris login node 4 ControlMaster alias
   scheduler:
     type: pbs
     submit: qsub

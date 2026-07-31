@@ -106,6 +106,14 @@ Higher-level logic must remain unaware of the machine type.
       Live qdel was not exercised; the XGC executable is compiled but not
       runtime-tested.
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
+- [ ] 10. Case promotion pipeline (`tools/case_promotion.py`) — joins
+      `input_backup/` with the researcher's simulation notebook
+      (`Other_data/simulation_note_XGC1.xlsx`) to rank candidates by recorded
+      outcome, and drafts kb cases under `kb/cases/drafts/` (invisible to the
+      advisor). Fixture tests pass and the real-data ranking matches the
+      manual analysis in `docs/input-archive.md`. Still open: stage the ST40
+      family's referenced files, migrate parameters, pass `xgc --dryrun`, and
+      finalize the first promoted baseline into `kb/cases/`.
 
 ## Open Questions to Resolve First
 1. **ohmic.pppl.gov API spec** — OpenAI-compatible? Authentication (key/SSO/IP)?

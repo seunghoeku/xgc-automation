@@ -66,6 +66,44 @@ baselines: production notes report failures or instability for several of
 them. Runtime outcome is stronger evidence than filename recency or schema
 alignment.
 
+## Simulation notebook join
+
+`Other_data/simulation_note_XGC1.xlsx` is the researcher's own record of each
+numbered run's intent and outcome, one sheet per year back to 2008. Column
+headers drift across years, so `tools/case_promotion.py` maps them by name
+(`shot #`/`Shotname`, `note`/`general description`, ...).
+
+```python
+rank_promotion_candidates(min_number=600, max_files=100)
+```
+
+joins the archive inventory with the notebook and classifies each run's
+outcome (`success` / `failed` / `inconclusive` / `unknown`) from the
+researcher's own wording via keyword rules, quoting the matched phrases as
+evidence. Failure wording dominates success wording. Ranking is deterministic:
+recorded successes first, then schema alignment, then recency.
+
+On the real data this reproduces the manual analysis below: the ST40 family
+ranks first on `'OK'` notes, and every recent ITER input ranks last on
+`'failed'`/`'numerical instability'` notes despite high schema alignment.
+
+## Drafting a case from the archive
+
+```python
+plan_case_promotion("n620fr_ST40_1101365_wo_flow")   # writes nothing
+write_draft_case("n620fr...", confirm=True)          # kb/cases/drafts/
+```
+
+The plan combines the parsed input, the notebook entry, and a deterministic
+physics classification in which every field cites its source (a parameter
+value or the notebook's Code column); anything not derivable is `unknown`,
+never guessed. Drafting a run the notebook records as failed requires
+`allow_failed=True`.
+
+Drafts live under `kb/cases/drafts/` and are invisible to `list_cases` and
+the physics advisor. Finalizing one into `kb/cases/` is a human step that
+requires the checklist below.
+
 ## Promotion to a validated baseline
 
 Before adding any archive input to `kb/cases/`:
