@@ -65,6 +65,9 @@ polaris:
     # the GCC 14/CUDA 12.8.1 toolchain recorded below; switch exe/build only
     # after a clean build and compute-node smoke test succeed.
     exe: /grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc
+    # xgca (neoclassical) built 2026-07-31 with cmake -DXGCA=ON, same build
+    # dir/commit f805e6223. Compiled only -- no dryrun or runtime test yet.
+    xgca_exe: /grand/TokamakProfile/shku/XGC-Devel/build/bin/xgca
     src: /grand/TokamakProfile/shku/XGC-Devel
     build: /grand/TokamakProfile/shku/XGC-Devel/build
     build_type: RelWithDebInfo

@@ -106,14 +106,16 @@ Higher-level logic must remain unaware of the machine type.
       Live qdel was not exercised; the XGC executable is compiled but not
       runtime-tested.
 - [ ] 9. Strengthen provenance / (later) team-sharing UI
-- [ ] 10. Case promotion pipeline (`tools/case_promotion.py`) — joins
+- [x] 10. Case promotion pipeline (`tools/case_promotion.py`) — joins
       `input_backup/` with the researcher's simulation notebook
-      (`Other_data/simulation_note_XGC1.xlsx`) to rank candidates by recorded
-      outcome, and drafts kb cases under `kb/cases/drafts/` (invisible to the
-      advisor). Fixture tests pass and the real-data ranking matches the
-      manual analysis in `docs/input-archive.md`. Still open: stage the ST40
-      family's referenced files, migrate parameters, pass `xgc --dryrun`, and
-      finalize the first promoted baseline into `kb/cases/`.
+      (`Other_data/simulation_note_XGC1.xlsx`), classifies outcomes from the
+      notebook's own wording (negation-aware), detects binary eras
+      (xgc-eem/xgc-es/xgca) and name-note mismatches, and drafts kb cases
+      under `kb/cases/drafts/`. Three baselines were promoted and
+      dryrun-validated on polaris via debug-queue jobs: st40-heatload
+      (n620fr), asdex-imode (n566pe), kstar-rmp (n613fr). KB now has 4 cases.
+      Open: torque family needs the freshly built (untested) xgca binary;
+      kstar-rmp needs its missing RMP field file before a real run.
 
 ## Open Questions to Resolve First
 1. **ohmic.pppl.gov API spec** — OpenAI-compatible? Authentication (key/SSO/IP)?

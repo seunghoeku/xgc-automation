@@ -6,6 +6,32 @@ compute-node runtime remains unverified. XGC-Devel upstream `master` at
 documented below but has not yet been built or runtime-tested in the `shku`
 checkout.
 
+Update 2026-07-31: `xgc --dryrun` works on compute nodes (debug queue) and has
+validated three promoted cases (jobs 7307649, 7307755, 7307766). Login-node
+dryrun is NOT possible: the CUDA build requires a visible GPU and the login
+nodes' NVML is broken (`nvidia-smi` fails with "Failed to initialize NVML"
+even though an A100 and /dev/nvidia0 are present). Kokkos aborts with
+`cudaErrorNoDevice` before XGC reads the input. Use a 1-node/10-min debug-queue
+job instead; the dryrun itself takes ~10-20 s.
+
+## xgca (neoclassical) target
+
+Built 2026-07-31 in the same GCC 13 build directory (commit `f805e6223`):
+
+```bash
+cd /grand/TokamakProfile/shku/XGC-Devel/build
+source ../quickstart/modules_and_env/polaris.sh
+cmake -DXGCA=ON .          # cache previously had XGCA:BOOL=OFF
+ninja -j 8 xgca            # 677 edges, ~25 min on the login node
+```
+
+Result: `build/bin/xgca` (671 MB), recorded as `xgc.xgca_exe` in
+`machines.yaml`. Status: compiled only. No dryrun or compute-node smoke test
+has been run. It is needed to validate the NT/PT torque draft family
+(kb/cases/drafts/, notebook outcome "Used for Paper"). hager also has xgca
+binaries under `/grand/TokamakProfile/hager/XGC-Devel/_build3/bin/` but with
+unrecorded commit/environment; prefer the shku build for provenance.
+
 ## Paths
 
 | Item | Path |

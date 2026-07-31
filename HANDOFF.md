@@ -1,6 +1,66 @@
 # HANDOFF
 
-## Current handoff snapshot — 2026-07-31
+## Current handoff snapshot — 2026-07-31 (evening, case-promotion session)
+
+Read `AGENTS.md` first. This session built the case-promotion pipeline
+(roadmap item 10, now checked), promoted three new validated baselines, and
+compiled (but did not test) the polaris `xgca` binary. Everything below is
+committed on `main`; the working tree should be clean except optional
+`.cache/` files.
+
+### What exists now
+
+| Thing | State |
+|---|---|
+| `kb/cases/` | **4 validated baselines**: `ecbc` (stellar, core ES delta-f), `st40-heatload` (polaris, edge ES total-f), `asdex-imode` (polaris, edge ES I-mode), `kstar-rmp` (polaris, edge ES RMP). Each passed `xgc --dryrun`; none of the three polaris cases is runtime-tested (stepping) yet. |
+| `kb/cases/drafts/` | 16 drafts. The NT/PT torque family (n598/599/606/607/608/609/626/629, all "Used for Paper") is the main promotion backlog; it needs the xgca binary. `draft-n594fr` is inconclusive ("not that good") — do not promote. |
+| `tools/case_promotion.py` | Notebook join, outcome classification (negation-aware), binary-era detection (xgc-eem/xgc-es/xgca), name-note mismatch detection, variant tagging, two-phase drafting. MCP tools: `rank_promotion_candidates`, `plan_case_promotion`, `write_draft_case`. |
+| `Other_data/simulation_note_XGC1.xlsx` | The researcher's per-run notebook, 2008–2026, joined by simulation number. **Read-only evidence — never edit it.** 139/140 numbered archive files have entries. n645/n646 have no rows yet (user may add them). |
+| polaris `xgca` | Built 2026-07-31 (`cmake -DXGCA=ON`, `ninja -j 8 xgca`, commit f805e6223): `/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgca`, 671 MB, recorded as `xgc.xgca_exe` in machines.yaml. **Compiled only — zero testing.** |
+| polaris login nodes | Cannot run the CUDA xgc build at all (NVML broken, Kokkos aborts with cudaErrorNoDevice). All dryruns go through 1-node/10-min `debug`-queue jobs (~0.003 node-hour each; pattern in `/grand/TokamakProfile/shku/n620fr_dryrun/dryrun.pbs`). ControlMaster alias is now `polaris4` (login-01 session died). |
+| tests | 78 passing (`uv run python -m unittest discover tests`). |
+
+### Known traps recorded this session (do not rediscover them)
+
+1. **Binary eras**: EM runs used the `xgc-eem` binary; their inputs carry no
+   field-model switch and the unified binary defaults to electrostatic. Any
+   EM-era promotion MUST add `sml_electromagnetic=.true.` or it will silently
+   run the wrong physics. All 16 EM-era n500+ inputs lack the switch.
+   `classify_code_column`/`plan_case_promotion` warn automatically.
+2. **kstar-rmp blocking gap**: the input references `rmp_k030306_n1_q4.bp`
+   but only `rmp_k030306_n1.bp` exists in polaris `XGC_inputs/`. The dryrun
+   does not read ptb_3db files, so it cannot catch this. Resolve with the
+   researcher before any real run.
+3. **Marker-type trap** (ecbc pattern, recurs): notebook says delta-f
+   ("ES - df") but archived inputs declare no `ptl_marker_type`, so current
+   XGC runs TotalF. Recorded in `asdex-imode` notes; decide before production.
+4. **Dryrun int32 overflow**: 1-rank dryrun of large cases reports negative
+   particle counts and a bogus 0.000 GB total (kstar-rmp did). Issue text
+   ready in the conversation log/`kb/cases/kstar-rmp.yaml` note; re-run with
+   production `-n_ranks` for real numbers.
+5. **n592/n593 double numbering**: both numbers have a d3d AND an ASDEX
+   file+note pair (detected by `name_note_mismatch`). Needs researcher
+   correction in the notebook or filenames.
+6. **Migration table is stable**: the same ~11 removed/deprecated parameters
+   (neu_* grid family, sml_f0_grid*, f0_update_analytic_alpha rename,
+   sml_special, smooth_rad_efield, sml_poisson_solver_type) cleared all three
+   polaris promotions on the first try. Reuse it from any promoted case YAML.
+
+### Recommended continuation order (next session)
+
+1. **xgca smoke test**: debug-queue `xgca --dryrun` on a torque-family input
+   (e.g. `input_backup/n606pe_NT_torque_xgca_adjust_omg2_from_604`;
+   geometry `d193793_torque_nt_addx.*` — verify presence in XGC_inputs
+   first). If it passes, promote the torque family (8 drafts, all
+   "Used for Paper").
+2. **Runtime test one polaris baseline**: short stepping run (st40-heatload,
+   ~16 ranks over 4 nodes, sml_mstep small, sml_restart=.false.) to close
+   `runtime_tested: false`. Requires human approval + resource plan.
+3. **kstar-rmp RMP file**: ask the researcher about `rmp_k030306_n1_q4.bp`.
+4. **data_analyzer PR #51 migration** (below, unchanged from the previous
+   snapshot) is still open.
+
+## Previous snapshot — 2026-07-31 (morning)
 
 Read `AGENTS.md` before doing anything. The immediate objective is to finish
 the bounded `data_analyzer` integration against XGC-Analysis PR #51 and then
