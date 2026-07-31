@@ -74,6 +74,17 @@ _SUCCESS_PATTERNS = [
     r"\bworks\s+fine\b",
     r"성공",
 ]
+# Negations that turn a success word into its opposite ("not that good",
+# "not good", "no good"). Checked before success words get credit.
+_NEGATED_SUCCESS_PATTERNS = [
+    r"\bnot\s+(?:that\s+|so\s+|very\s+)?good\b",
+    r"\bno\s+good\b",
+    r"\bnot\s+ok\b",
+    r"\bdidn'?t\s+work\b",
+    r"\bdoes\s*n[o']t\s+work\b",
+    r"좋지\s*않",
+    r"안\s*좋",
+]
 _CAUTION_PATTERNS = [
     r"\bpreliminar",
     r"\btoo\s+(?:high|low|large|small)\b",
@@ -213,9 +224,17 @@ def classify_outcome(text: str) -> dict[str, Any]:
                 found.append(match.group(0))
         return found
 
+    negated = _hits(_NEGATED_SUCCESS_PATTERNS)
     failure = _hits(_FAILURE_PATTERNS)
     success = _hits(_SUCCESS_PATTERNS)
     caution = _hits(_CAUTION_PATTERNS)
+
+    if negated:
+        # "not that good" contains "good"; strip the false success credit and
+        # treat the negation itself as caution-grade evidence, not failure --
+        # the run completed, the physics just disappointed.
+        success = []
+        caution = negated + caution
 
     if failure:
         outcome = "failed"

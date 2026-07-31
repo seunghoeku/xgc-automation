@@ -1,0 +1,181 @@
+# KSTAR RMP — fourth validated baseline for the physics_advisor KB.
+#
+# Promoted from the input archive via tools/case_promotion.py. n613fr is the
+# longer turbulence follow-up of the n603 RMP chain (notebook: "q=4 case,
+# turbulence simulation."); the migrated input passes `xgc --dryrun` on
+# polaris against XGC f805e6223.
+#
+# Values here are recorded from the actual input file, not inferred.
+
+name: kstar-rmp
+description: >
+  KSTAR shot 30306 (q=4) RMP turbulence case. Electrostatic XGC1 with a
+  perturbed magnetic field read from an RMP file (ptb_3db), edge domain
+  including SOL, collisions on, rotation profile loaded.
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/n613fr_dryrun
+input_file_dir: /grand/TokamakProfile/shku/XGC_inputs
+
+provenance:
+  archive_file: input_backup/n613fr_KSTART_30306_q4_rmp_turbulence
+  simulation_number: 613
+  original_machine: frontier
+  notebook:
+    sheet: y2025
+    shot: n613fr
+    description: "KSTAR 30306 q4 RMP, longer simulation"
+    note: "q=4 case, turbulence simulation."
+    date: 2025-10-11
+    code_column: "ES"          # xgc-es binary era
+  related_runs:
+    - {shot: n603fr/n603pe, note: "first KSTAR 30306 q4 RMP runs (same setup)"}
+    - {shot: n594fr, note: "earlier KSTAR RMP; notebook says results were
+        'not that good' -- do not promote"}
+
+validated:
+  date: 2026-07-31
+  machine: polaris
+  xgc_commit: f805e6223
+  input_md5: c8d5762661830b70187deb3217b8cd8c
+  dryrun: ACCEPTED            # debug-queue job 7307766, 6 s wall, exit 0
+  n_ranks: 1
+  runtime_tested: false
+
+physics:
+  model: electrostatic        # dryrun: "Field model: electrostatic"
+  flavor: XGC1
+  delta_f: false              # no ptl_marker_type declared -> TotalF default
+  boundary: edge              # sml_bounce=0, outpsi=1.10
+  device: KSTAR, shot 30306 @ 7.9 s, q=4
+  rmp:
+    enabled: sml_3db_on=.true.
+    file: rmp_k030306_n1_q4.bp    # see warnings: only rmp_k030306_n1.bp exists
+    ntor: 1
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0}
+  toroidal:
+    nphi_total: 32
+    wedge_n: 1                # full torus; RMP breaks toroidal symmetry
+  radial_domain:
+    inpsi: 0.0
+    outpsi: 1.10
+  extras:
+    collisions: col_mode=4
+    rotation: omega_k030306_7900.prf
+    neutrals: sml_neutral on (old neu_* grid params removed in migration)
+
+numerics:
+  dt: 1.0e-3                  # sml_dt, toroidal transit times
+  mstep: 400
+  num_per_vertex: [8000, 8000]
+  f0_grid: {nmu: 32, nvp: 17, smu_max: 4.0, vp_max: 4.0}
+
+resource_estimate:
+  n_ranks: 1
+  vertices_5d: 813064032
+  note: >
+    The 1-rank dryrun's particle-count estimate overflowed a 32-bit integer
+    (reported -1.29e9 ptl) because 8000 ptl/vertex x 101M mesh vertices
+    exceeds int32 at a single rank. Re-run the dryrun with a production
+    -n_ranks for meaningful memory and resolution numbers.
+
+input_files:                  # referenced in place under input_file_dir
+  mesh:
+    - k030306_rmp_xgc1_rmp_May_2025.node
+    - k030306_rmp_xgc1_rmp_May_2025.ele
+    - k030306_rmp_xgc1_rmp_May_2025.flx.aif
+  equilibrium: k030306.7900.eqd
+  profiles:
+    density: ne_k030306_7900.prf
+    temp_electron: te_k030306_7900.prf
+    temp_ion: ti_k030306_7900.prf
+    flow: omega_k030306_7900.prf
+  rmp_field: rmp_k030306_n1_q4.bp   # MISSING on polaris; see warnings
+
+# Migration applied 2026-07-31 (same table as st40-heatload/asdex-imode).
+migration:
+  removed_parameters:
+    - {from: neu_col_mode, to: null}
+    - {from: neu_cx_period, to: null}
+    - {from: neu_grid_mode, to: null}
+    - {from: neu_grid_max_psi, to: null}
+    - {from: neu_full_grid, to: null}
+    - {from: sml_f0_grid_alpha, to: null, note: "was 0.0"}
+    - {from: sml_f0_grid_alpha_start, to: null}
+    - {from: f0_update_analytic_alpha, to: f0_update_alpha, note: "renamed"}
+    - {from: sml_special, to: null}
+    - {from: smooth_rad_efield, to: null}
+    - {from: sml_poisson_solver_type, to: null}
+  path_changes:
+    - {parameter: sml_input_file_dir,
+       from: '../XGC_inputs/',
+       to: '/grand/TokamakProfile/shku/XGC_inputs/'}
+
+notes:
+  - "RMP field file: the input names rmp_k030306_n1_q4.bp but only
+     rmp_k030306_n1.bp exists in XGC_inputs on polaris. The dryrun does not
+     read the ptb_3db file, so this was not caught. Before any real run,
+     either locate the q4 file (kronos backup?) or confirm with the
+     researcher that rmp_k030306_n1.bp is the right field."
+  - "Marker type undeclared -> TotalF by default (same trap as asdex-imode;
+     here the runs were labelled plain ES, so TotalF is plausibly intended)."
+  - "sml_restart=.true. in the baseline; a fresh run must set it false."
+  - "wedge_n=1 (full torus) + nphi_total=32 makes this expensive; the n603
+     chain ran at production scale on frontier/perlmutter."
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: KSTAR device
+      patterns: ['\bKSTAR\b', '\b30306\b', '케이스타']
+    - label: RMP / perturbed field
+      patterns: ['\bRMP\b', 'resonant\s+magnetic', 'perturb(?:ed|ation)s?\s+
+                 (?:magnetic|field)', '\b3db\b', '섭동\s*자기장', '공명\s*자기']
+    - label: edge or SOL domain
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+    - label: electrostatic
+      patterns: ['\belectrostatic\b', '정전기']
+    - label: turbulence
+      patterns: ['\bturbulence\b', '난류']
+    - label: collisional
+      patterns: ['\bcollision(?:s|al)?\b', '충돌']
+  exclusions:
+    - label: electromagnetic
+      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      reason: this baseline is electrostatic (RMP enters as a prescribed
+        perturbed field via ptb_3db, not self-consistent EM)
+    - label: core-only turbulence
+      patterns: ['\bcore[\s-]*only\b', '코어\s*난류']
+      reason: this is an edge case (sml_bounce=0, outpsi=1.10)
+    - label: delta-f
+      patterns: ['\bdelta[\s-]*f\b', '델타[\s-]*f']
+      reason: this baseline uses TotalF markers
+    - label: ELM
+      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      reason: RMP suppression context but not an ELM crash baseline
+    - label: other devices
+      patterns: ['\bITER\b', '\bD3D\b', '\bDIII[\s-]?D\b', '\bASDEX\b',
+                 '\bST[\s-]?40\b', '\bTCV\b', '\bNSTX\b', '\bJET\b',
+                 '\bC[\s-]?Mod\b']
+      reason: this baseline is KSTAR geometry; other devices need their own case
+  baseline_parameters:
+    sml_3db_on: true
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.10
+    sml_dt: 1.0e-3
+    sml_mstep: 400
+    sml_nphi_total: 32
+    sml_wedge_n: 1
+    col_mode: 4
+    sml_restart: true
+  warnings:
+    - >
+      BLOCKING for real runs: the RMP field file rmp_k030306_n1_q4.bp is not
+      in XGC_inputs on polaris (only rmp_k030306_n1.bp is). The dryrun does
+      not read this file, so validation did not catch it.
+    - >
+      runtime_tested is false; the notebook outcome for the n603/n613 chain
+      records intent but no explicit success/failure wording.

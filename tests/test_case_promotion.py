@@ -185,6 +185,25 @@ class CasePromotionTests(unittest.TestCase):
         self.assertEqual(cp.classify_outcome("too large flux?")["outcome"], "inconclusive")
         self.assertEqual(cp.classify_outcome("")["outcome"], "unknown")
 
+    def test_negated_success_is_not_success(self) -> None:
+        # The n594fr case: "Results are not that good" must not rank as
+        # success just because it contains "good".
+        result = cp.classify_outcome("Results are not that good")
+        self.assertEqual(result["outcome"], "inconclusive")
+        self.assertEqual(result["success_evidence"], [])
+        self.assertTrue(
+            any("not that good" in e for e in result["caution_evidence"])
+        )
+        self.assertEqual(cp.classify_outcome("not good")["outcome"], "inconclusive")
+        self.assertEqual(cp.classify_outcome("no good")["outcome"], "inconclusive")
+        # Plain positives still work.
+        self.assertEqual(cp.classify_outcome("good")["outcome"], "success")
+        # Negation plus explicit failure stays failed.
+        self.assertEqual(
+            cp.classify_outcome("not good, failed at step 10")["outcome"],
+            "failed",
+        )
+
     # -- ranking ---------------------------------------------------------------
 
     def test_ranking_orders_success_before_unknown_before_failed(self) -> None:
