@@ -31,10 +31,13 @@ overlays.
 ## Implemented workflow
 
 `physics_advisor` matches a natural-language physics request to facts and
-exclusions recorded in `kb/cases/`. It never invents numerical values. With
-the current single-case knowledge base, it recommends ECBC only for a
-compatible electrostatic core request and reports electromagnetic, edge-SOL,
-ELM, or collisional requests as unsupported.
+exclusions recorded in `kb/cases/`. It never invents numerical values. The
+knowledge base currently holds five validated baselines (`ecbc` core ES
+delta-f, `st40-heatload` edge heat-load, `asdex-imode` edge I-mode,
+`kstar-rmp` RMP turbulence, `tcv-xgca-sheath` XGCa sheath); requests outside
+their recorded physics (e.g. electromagnetic turbulence, ELM crashes, other
+devices) are reported as unsupported rather than forced onto the closest
+case.
 
 The returned case and explicit overrides flow through `plan_input` for XGC
 metadata validation and a human-readable diff before anything can be written.

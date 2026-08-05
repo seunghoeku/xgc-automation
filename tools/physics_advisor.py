@@ -10,8 +10,10 @@ XGC values.  Instead it:
    rules; and
 4. returns the evidence, limitations, and next input-builder action.
 
-With only one validated case in the knowledge base, "unsupported" is a useful
-answer.  It prevents an apparently precise but unvalidated input proposal.
+"Unsupported" is a useful answer: it prevents an apparently precise but
+unvalidated input proposal.  The knowledge base grows through the case
+promotion pipeline (tools/case_promotion.py), which drafts new baselines from
+archived inputs plus the researcher's recorded outcomes.
 """
 
 from __future__ import annotations

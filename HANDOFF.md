@@ -770,7 +770,8 @@ cd ~/git/XGC-Devel/build && cmake --build . -j 16 --target xgc
 
 The login node's default `python3` is **3.6**, too old for XGC's utils. Use
 `/projects/XGC/STELLAR/Software/install/python-venv/bin/python3.12`
-(hardcoded as `REMOTE_PYTHON` in `tools/namelist.py`).
+(configured as `xgc.remote_python` for stellar in `machines.yaml`; it was a
+hardcoded constant in `tools/namelist.py` until the 2026-08 generalization).
 
 | Item | Value |
 |---|---|

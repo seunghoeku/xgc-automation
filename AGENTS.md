@@ -34,10 +34,13 @@ locally.
 | Machine | Center | Scheduler | Auth | Scratch |
 |---|---|---|---|---|
 | Perlmutter | NERSC | Slurm (`sbatch/squeue/scancel`) | sshproxy → 24h SSH key | `$PSCRATCH` |
-| Polaris | ALCF | PBS (`qsub/qstat/qdel`) | ssh tunnel/port forwarding + MFA | `/grand/TokamakProfile` |
+| Polaris | ALCF | PBS (`qsub/qstat/qdel`) | ssh tunnel/port forwarding + MFA | `/grand/<project>` |
 
-`machines.yaml` plus the `hpc_runner` tool absorb the differences between machines.
-Higher-level logic must remain unaware of the machine type.
+`machines.yaml` (committed, machine-universal facts) plus the gitignored
+`machines.local.yaml` overlay (per-user bindings: username, account, paths,
+personal builds — see `docs/setup-new-user.md`) and the `hpc_runner` tool
+absorb the differences between machines. Higher-level logic must remain
+unaware of the machine type.
 
 ## MCP Tool Layers (to implement)
 1. `preflight` — Is ohmic reachable? Is the Perlmutter key valid for 24h? Is the
@@ -63,8 +66,10 @@ Higher-level logic must remain unaware of the machine type.
   timestamp-based `run_id` values.
 
 ## Portability (macOS first, Linux compatible)
-- Implement real SSH work in Python (paramiko/asyncssh) rather than parsing CLI
-  output → avoids BSD/GNU CLI differences.
+- SSH work goes through `tools/ssh.py`: argv-list subprocess calls against
+  the user's ControlMaster socket (no shell-string parsing, no BSD/GNU CLI
+  differences; a Python SSH library became unnecessary once multiplexing was
+  adopted).
 - No hardcoded paths (`~`, `$PSCRATCH`). Distribute with `uv`/`pipx`.
 - ssh multiplexing: `ControlMaster auto` / `ControlPersist 8h` /
   `ControlPath ~/.ssh/cm-%r@%h:%p`.
@@ -130,6 +135,8 @@ Higher-level logic must remain unaware of the machine type.
    Is a VPN required locally?
 2. XGC version (XGC1 vs XGCa), primary physics interest (core turbulence /
    edge-SOL / ELM).
-3. Do we have past successful inputs/geqdsk files for the physics_advisor KB?
+3. ~~Do we have past successful inputs/geqdsk files for the physics_advisor
+   KB?~~ Answered: yes — `input_backup/` plus the simulation notebook feed
+   the case promotion pipeline (roadmap item 10); five baselines promoted.
 4. Should we also use the Superfacility API for job submission?
 5. Output data volume and scratch cleanup policy.

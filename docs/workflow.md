@@ -140,12 +140,16 @@ it. `submit_job` does this automatically from the plan.
 
 ## Reference case: ECBC
 
-`/home/seungku/tmp/test_ecbc` — ECBC electrostatic delta-f, core simulation,
-n=6. Recorded in `kb/cases/ecbc.yaml`.
+ECBC electrostatic delta-f, core simulation, n=6. Recorded in
+`kb/cases/ecbc.yaml`; its `case_dir` is the original author's stellar home
+directory. Another user who cannot read it should follow the reconstruction
+options the tools print (or see `docs/setup-new-user.md` §5) and rebind via
+`kb/cases/ecbc.local.yaml`.
 
 **Status: passes cleanly** (0 removed, 0 deprecated, 0 warnings) as of
-2026-07-28 against XGC-Devel `256c3098`. At 64 ranks: 0.146 GB per rank against
-375.9 GB available, 0.0517 particles per 5D vertex.
+2026-07-28 against XGC-Devel `39c5c89f` (the commit recorded in the case
+YAML). At 64 ranks: 0.146 GB per rank against 375.9 GB available, 0.0517
+particles per 5D vertex.
 
 It did not start out that way. The original predated current XGC and was
 rejected outright; it was migrated on 2026-07-28, with the original preserved at

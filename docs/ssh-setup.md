@@ -109,13 +109,14 @@ ssh -O exit stellar
 - `stellar.princeton.edu` is reachable externally.
 - `polaris` was reached manually in 2026-07; the automation still requires
   the user-created MFA session and reuses its ControlMaster.
-- Perlmutter access was verified in 2026-08 with the `perlmutter` alias,
-  NERSC key/certificate, account `m499`, and `/pscratch/sd/s/sku`. CPU builds,
-  login-node dryruns, Slurm submission, restart, and bounded result analysis
-  all worked. A general production XGC executable is intentionally not selected
-  in `machines.yaml`; the verified reduced-adiabatic build is campaign-specific.
-- Frontier access was verified in 2026-08 with the `frontier` alias. The shared
-  Python 3.14.6 environment is
-  `/lustre/orion/proj-shared/fus183/shku/conda_env/myenv`. Frontier remains an
-  analysis/access note, not an enabled XGC submission target, until an XGC
-  executable and resource profile are reviewed.
+- Perlmutter access was verified in 2026-08 with the `perlmutter` alias and
+  the NERSC key/certificate (original project's account and scratch, now
+  bound via `machines.local.yaml`). CPU builds, login-node dryruns, Slurm
+  submission, restart, and bounded result analysis all worked. A general
+  production XGC executable is intentionally not selected; the verified
+  reduced-adiabatic build is campaign-specific.
+- Frontier access was verified in 2026-08 with the `frontier` alias, using a
+  project-shared conda Python environment (bind yours in
+  `machines.local.yaml` if you use frontier for analysis). Frontier remains
+  an analysis/access note, not an enabled XGC submission target, until an
+  XGC executable and resource profile are reviewed.
