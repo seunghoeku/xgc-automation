@@ -9,7 +9,7 @@ ControlMaster socket.
 
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar flux perlmutter polaris polaris1
+Host stellar flux perlmutter polaris polaris1 frontier
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
@@ -31,6 +31,17 @@ Host polaris
 Host polaris1
     HostName polaris.alcf.anl.gov
     User shku
+
+Host perlmutter
+    HostName perlmutter.nersc.gov
+    User sku
+    IdentityFile ~/.ssh/nersc
+    CertificateFile ~/.ssh/nersc-cert.pub
+    IdentitiesOnly yes
+
+Host frontier
+    HostName frontier.olcf.ornl.gov
+    User shku
 ```
 
 The `ControlPath` directory must already exist:
@@ -46,6 +57,8 @@ limit (~104 characters). Keeping it directly under `~/.ssh/` as shown is safe.
 
 ```bash
 ssh stellar        # Duo/password prompt. The master persists 8h even after you exit.
+ssh perlmutter     # refresh the NERSC sshproxy certificate first when needed
+ssh frontier       # Frontier PASSCODE is entered by the human here
 ```
 
 To start only a background master:
@@ -57,16 +70,28 @@ ssh -MNf stellar
 ## 3. Check the state
 
 ```bash
-ssh -O check stellar     # "Master running (pid=NNNN)" means healthy
+ssh -O check stellar     # "Master running (pid=NNNN)" means the local master exists
+ssh -o BatchMode=yes stellar true  # confirms a tool command channel also works
 ```
 
-The `preflight` tool runs exactly this command. How to read its output:
+The `preflight` tool runs both checks. For `sshproxy` hosts it also reads the
+certificate selected by `ssh -G` and checks its validity window locally with
+`ssh-keygen`; it never prompts or authenticates. How to read its output:
 
 | `control_master` value | Meaning | Action |
 |---|---|---|
-| `alive: true` | Socket is live, no re-auth needed | none |
+| `alive: true`, `command_channel_usable: true` | Socket and tool channel work | none |
+| `alive: true`, `command_channel_usable: false` | Local master exists but remote channels hang/reject | close the occupied interactive shell, or `ssh -O exit HOST` and reconnect |
 | `multiplexing_configured: false` | No ControlMaster entry in `~/.ssh/config` | do step 1 |
 | `alive: false` (but configured) | Master is absent or expired | do step 2 |
+
+For Perlmutter, `ssh_certificate.valid: false` means the NERSC certificate must
+be refreshed through the user's `sshproxy` workflow before submission.
+
+Frontier has been observed to allow the original interactive shell while
+rejecting an additional multiplexed command channel. In that state, exit the
+remote interactive shell once while leaving the master alive, then rerun
+preflight. A live `ssh -O check` result alone is not sufficient.
 
 ## 4. Close the session
 
@@ -81,4 +106,13 @@ ssh -O exit stellar
 - `stellar.princeton.edu` is reachable externally.
 - `polaris` was reached manually in 2026-07; the automation still requires
   the user-created MFA session and reuses its ControlMaster.
-- Perlmutter connectivity has not yet been verified in this project.
+- Perlmutter access was verified in 2026-08 with the `perlmutter` alias,
+  NERSC key/certificate, account `m499`, and `/pscratch/sd/s/sku`. CPU builds,
+  login-node dryruns, Slurm submission, restart, and bounded result analysis
+  all worked. A general production XGC executable is intentionally not selected
+  in `machines.yaml`; the verified reduced-adiabatic build is campaign-specific.
+- Frontier access was verified in 2026-08 with the `frontier` alias. The shared
+  Python 3.14.6 environment is
+  `/lustre/orion/proj-shared/fus183/shku/conda_env/myenv`. Frontier remains an
+  analysis/access note, not an enabled XGC submission target, until an XGC
+  executable and resource profile are reviewed.

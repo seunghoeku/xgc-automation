@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 import urllib.error
 import urllib.request
 from typing import Any
@@ -51,6 +50,7 @@ from tools import input_archive
 from tools import machines as m
 from tools import physics_advisor as pa
 from tools import simulation_registry as sr
+from tools import ssh as ssh_transport
 
 mcp = FastMCP("xgc-tools")
 
@@ -98,28 +98,21 @@ def _control_socket_alive(ssh_host: str, timeout: float = 5.0) -> dict[str, Any]
     session themselves. We never authenticate on their behalf (AGENTS.md,
     absolute rule 3).
     """
-    try:
-        proc = subprocess.run(
-            ["ssh", "-O", "check", ssh_host],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except FileNotFoundError:
-        return {"alive": False, "detail": "ssh executable not found"}
-    except subprocess.TimeoutExpired:
-        return {"alive": False, "detail": "ssh -O check timed out"}
-
-    # When alive, ssh prints "Master running (pid=...)" to stderr and returns 0
-    msg = (proc.stderr or proc.stdout or "").strip()
-    alive = proc.returncode == 0
+    alive, msg = ssh_transport.control_socket_alive(ssh_host, timeout=timeout)
     # Distinguish "no ControlPath configured at all" from "master is dead"
     configured = "no controlpath" not in msg.lower()
-    return {
+    result = {
         "alive": alive,
         "multiplexing_configured": configured,
         "detail": msg or ("master running" if alive else "no master"),
     }
+    if alive:
+        usable, channel_detail = ssh_transport.command_channel_usable(
+            ssh_host, timeout=max(timeout, 10.0)
+        )
+        result["command_channel_usable"] = usable
+        result["command_channel_detail"] = channel_detail
+    return result
 
 
 def _ohmic_reachable(timeout: float = 4.0) -> dict[str, Any]:
@@ -173,9 +166,12 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
         # MFA machines: a live ControlMaster socket is required to send commands
         # without re-authenticating.
         control = None
+        certificate = None
         ssh_alias = auth.get("ssh_config_host")
         if ssh_alias and not m.is_placeholder(ssh_alias):
             control = _control_socket_alive(ssh_alias)
+            if auth.get("method") == "sshproxy":
+                certificate = ssh_transport.certificate_status(ssh_alias)
 
         # Only fields that decide whether submission is possible count as blockers
         blockers = [f for f in unfilled if f.startswith("scheduler.")]
@@ -193,13 +189,29 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
                     f"ssh ControlMaster not running — run `ssh {ssh_alias}` yourself to "
                     f"authenticate via MFA; the session is then reused"
                 )
+        elif control is not None and not control.get("command_channel_usable", True):
+            actions.append(
+                f"ssh master exists but cannot open a command channel — close any "
+                f"interactive shell using the only channel, or run `ssh -O exit "
+                f"{ssh_alias}` and reconnect; do not submit until a BatchMode `true` probe succeeds"
+            )
         if blockers:
             actions.append(
                 f"scheduler settings unconfirmed: {', '.join(blockers)} — "
                 f"do not submit until resolved"
             )
+        if certificate is not None and not certificate.get("valid", False):
+            actions.append(
+                f"SSH certificate is missing or expired ({certificate.get('detail')}) — "
+                "refresh it with the user's NERSC sshproxy workflow"
+            )
 
-        if blockers or ssh_ok is False:
+        if (
+            blockers
+            or ssh_ok is False
+            or (certificate is not None and not certificate.get("valid", False))
+            or (control is not None and not control.get("command_channel_usable", True))
+        ):
             status = "fail"
         elif unfilled or (control is not None and not control["alive"]):
             status = "warn"
@@ -214,6 +226,7 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
             "mfa": bool(auth.get("mfa")),
             "ssh_port_22_reachable": ssh_ok,
             "control_master": control,
+            "ssh_certificate": certificate,
             "unfilled_config_fields": unfilled,
             "submit_blockers": blockers,
             "next_actions": actions,

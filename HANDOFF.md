@@ -1,5 +1,29 @@
 # HANDOFF
 
+## 2026-08-05 access hardening
+
+Recent reduced-adiabatic work established real Perlmutter access and exposed a
+ControlMaster edge case also seen on Frontier and Polaris. The automation now
+checks both `ssh -O check` and a bounded BatchMode `true` command channel; a
+local master process that cannot open commands is a preflight failure rather
+than a false success. NERSC `sshproxy` certificate validity is also read from
+the effective SSH alias and checked locally.
+
+`machines.yaml` now records the verified Perlmutter identity (`sku`), host,
+account `m499`, absolute scratch root, CPU debug defaults, and the shared Slurm
+template. The previous config referenced a nonexistent
+`templates/perlmutter.sbatch.j2`; that defect is fixed. The campaign-specific
+reduced-adiabatic CPU build at commit `8a27511f` is recorded under
+`observed_builds`, but `xgc.exe` remains unset so it cannot silently become the
+general production binary. Perlmutter Slurm scripts now default to email
+notifications `BEGIN,END,FAIL` for `sku@pppl.gov`.
+
+Frontier access (`shku@frontier.olcf.ornl.gov`) and Python 3.14.6 environment
+`/lustre/orion/proj-shared/fus183/shku/conda_env/myenv` are documented in
+`docs/ssh-setup.md`. Frontier is deliberately not added as a submission target:
+no reviewed XGC executable or scheduler resource profile was established in
+that session. Preserve the untracked `runs/radia-*` provenance directories.
+
 ## Current handoff snapshot — 2026-07-31 (evening, case-promotion session)
 
 Read `AGENTS.md` first. This session built the case-promotion pipeline

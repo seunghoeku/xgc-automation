@@ -15,9 +15,12 @@ than blocking on an interactive prompt.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Sequence
 
 
@@ -73,6 +76,129 @@ def control_socket_alive(ssh_host: str, timeout: float = 5.0) -> tuple[bool, str
     msg = (proc.stderr or proc.stdout or "").strip()
     alive = proc.returncode == 0
     return alive, msg or ("master running" if alive else "no master")
+
+
+def command_channel_usable(
+    ssh_host: str, timeout: float = 10.0
+) -> tuple[bool, str]:
+    """Check that a live master can actually open a non-interactive channel.
+
+    ``ssh -O check`` only checks the local master process. A stale Polaris
+    connection, or a Frontier connection whose sole allowed channel is still
+    occupied by an interactive shell, can pass that check while every tool
+    command hangs. This bounded ``true`` probe distinguishes those states.
+
+    Returns:
+        ``(usable, detail)``. Never raises and never authenticates because
+        BatchMode is mandatory.
+    """
+    try:
+        proc = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", ssh_host, "true"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return False, "ssh executable not found"
+    except subprocess.TimeoutExpired:
+        return False, f"non-interactive command channel timed out after {timeout}s"
+
+    msg = (proc.stderr or proc.stdout or "").strip()
+    usable = proc.returncode == 0
+    return usable, msg or ("command channel usable" if usable else "command channel rejected")
+
+
+def certificate_status(ssh_host: str, timeout: float = 5.0) -> dict[str, Any] | None:
+    """Inspect the OpenSSH certificate selected by an SSH config alias.
+
+    Returns ``None`` when the alias has no certificate configured. The check is
+    local and read-only; it does not contact the remote host or authenticate.
+    """
+    try:
+        config = subprocess.run(
+            ["ssh", "-G", ssh_host],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return {"present": False, "valid": False, "detail": "ssh executable not found"}
+    except subprocess.TimeoutExpired:
+        return {"present": False, "valid": False, "detail": "ssh -G timed out"}
+
+    certificate = None
+    for line in config.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key.lower() == "certificatefile" and value and value.lower() != "none":
+            certificate = value.strip()
+            break
+    if certificate is None:
+        return None
+
+    path = Path(certificate).expanduser()
+    if not path.exists():
+        return {
+            "path": str(path),
+            "present": False,
+            "valid": False,
+            "detail": "configured certificate file is missing",
+        }
+
+    try:
+        decoded = subprocess.run(
+            ["ssh-keygen", "-L", "-f", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return {
+            "path": str(path),
+            "present": True,
+            "valid": False,
+            "detail": f"could not inspect certificate: {exc}",
+        }
+    if decoded.returncode != 0:
+        return {
+            "path": str(path),
+            "present": True,
+            "valid": False,
+            "detail": (decoded.stderr or "ssh-keygen rejected certificate").strip(),
+        }
+
+    match = re.search(
+        r"Valid:\s+from\s+(\S+)\s+to\s+(\S+)", decoded.stdout
+    )
+    if match is None:
+        return {
+            "path": str(path),
+            "present": True,
+            "valid": False,
+            "detail": "certificate validity window was not found",
+        }
+
+    try:
+        valid_from = datetime.fromisoformat(match.group(1))
+        valid_to = datetime.fromisoformat(match.group(2))
+        now = datetime.now()
+        valid = valid_from <= now <= valid_to
+    except ValueError:
+        return {
+            "path": str(path),
+            "present": True,
+            "valid": False,
+            "detail": "certificate validity window could not be parsed",
+        }
+
+    return {
+        "path": str(path),
+        "present": True,
+        "valid": valid,
+        "valid_from": valid_from.isoformat(),
+        "valid_to": valid_to.isoformat(),
+        "detail": "certificate is current" if valid else "certificate is not current",
+    }
 
 
 def require_session(ssh_host: str) -> None:

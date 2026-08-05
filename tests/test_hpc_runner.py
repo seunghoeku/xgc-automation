@@ -275,5 +275,44 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertEqual(result["source"], "pbs")
 
 
+class PerlmutterPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = {
+            "scheduler": {
+                "type": "slurm",
+                "submit_tpl": "templates/slurm.sbatch.j2",
+            },
+            "paths": {"run_root": "/pscratch/sd/s/sku/xgc-runs"},
+            "xgc": {"exe": None, "modules": []},
+            "defaults": {
+                "account": "m499",
+                "qos": "debug",
+                "constraint": "cpu",
+                "nodes": 1,
+                "ntasks_per_node": 32,
+                "cpus_per_task": 8,
+                "walltime": "00:30:00",
+                "mail_type": "BEGIN,END,FAIL",
+                "mail_user": "sku@pppl.gov",
+            },
+        }
+
+    def test_hello_world_uses_shared_slurm_template_and_mail_notifications(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-access-check",
+                hello_world=True,
+            )
+
+        self.assertIn("#SBATCH --account=m499", plan.script)
+        self.assertIn("#SBATCH --qos=debug", plan.script)
+        self.assertIn("#SBATCH --constraint=cpu", plan.script)
+        self.assertIn("#SBATCH --mail-type=BEGIN,END,FAIL", plan.script)
+        self.assertIn("#SBATCH --mail-user=sku@pppl.gov", plan.script)
+        self.assertIn("srun -n 32 hostname", plan.script)
+        self.assertEqual(plan.resources["mail_user"], "sku@pppl.gov")
+
+
 if __name__ == "__main__":
     unittest.main()

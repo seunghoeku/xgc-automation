@@ -81,13 +81,16 @@ Higher-level logic must remain unaware of the machine type.
 
 ## Current Phase / Next Steps (Roadmap)
 - [x] 1. `preflight` tool — check connectivity and authentication state
-- [x] 2. Finalize `machines.yaml` (stellar done; Polaris paths and PBS
-      resources plus its compiled executable are recorded;
-      flux scheduler still unconfirmed, Perlmutter inaccessible)
+- [x] 2. Finalize `machines.yaml` (stellar and Polaris done; Perlmutter
+      access/account/scratch/Slurm settings are verified, but its general
+      production `xgc.exe` remains deliberately unset; flux is unconfirmed)
 - [x] 3. `hpc_runner` MCP — submit/status/cancel/output (slurm+pbs).
       push/pull exist in `tools/ssh.py` but are not yet exposed as MCP tools.
 - [x] 4. Successful hello-world sbatch round trip — stellar, jobs 2888408/2888413,
-      exit 0:0. PBS path is implemented but untested (no reachable PBS machine).
+      exit 0:0. Polaris PBS also passed live. Perlmutter CPU XGC build, dryrun,
+      Slurm jobs, restarts, and reduced output analysis were exercised in the
+      reduced-adiabatic campaign; a canonical automation hello-world/provenance
+      round trip is still useful after selecting a production executable.
 - [x] 5. `input_builder` + `validator` — `validator` via `xgc --dryrun` on the
       login node (`tools/dryrun.py`), wired in as a pre-submit gate.
       `input_builder` builds from validated baselines in `kb/cases/`, reusing

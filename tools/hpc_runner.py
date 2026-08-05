@@ -119,6 +119,8 @@ def prepare_submission(
     partition: str | None = None,
     qos: str | None = None,
     constraint: str | None = None,
+    mail_type: str | None = None,
+    mail_user: str | None = None,
     xgc_exe: str | None = None,
     run_id: str | None = None,
     simulation_id: str | None = None,
@@ -153,6 +155,8 @@ def prepare_submission(
     partition = partition or defaults.get("partition") or defaults.get("queue")
     qos = qos or defaults.get("qos")
     constraint = constraint or defaults.get("constraint")
+    mail_type = mail_type or defaults.get("mail_type")
+    mail_user = mail_user or defaults.get("mail_user")
     filesystems = (
         defaults.get("filesystems")
         or cfg.get("scheduler", {}).get("filesystems")
@@ -241,6 +245,8 @@ def prepare_submission(
         queue=partition,
         qos=qos,
         constraint=constraint,
+        mail_type=mail_type,
+        mail_user=mail_user,
         filesystems=filesystems,
         pbs_system=pbs_system,
         ntasks_per_node=ntasks_per_node,
@@ -268,6 +274,8 @@ def prepare_submission(
         "partition": partition,
         "filesystems": filesystems,
         "qos": qos,
+        "mail_type": mail_type,
+        "mail_user": mail_user,
         "scheduler": scheduler.type_name,
         "executable": exe or "(hello-world: hostname)",
     }
