@@ -1,0 +1,56 @@
+# machines.local.yaml — YOUR bindings for the machines in machines.yaml.
+#
+#   cp machines.local.yaml.example machines.local.yaml   # then edit
+#
+# This file is gitignored: it holds usernames, accounts, personal paths, and
+# the names of YOUR ~/.ssh/config aliases. It is deep-merged over
+# machines.yaml (dicts merge; scalars/lists here replace the committed
+# value). You only need entries for machines you actually use, and only for
+# the fields you are overriding.
+#
+# The ssh_config_host values must match Host aliases in your ~/.ssh/config
+# with ControlMaster multiplexing configured — see docs/ssh-setup.md.
+# Run `preflight` after editing to see what is still missing.
+
+perlmutter:
+  user: alice
+  auth:
+    ssh_config_host: perlmutter      # your alias name (any name is fine)
+  paths:
+    scratch: /pscratch/sd/a/alice    # echo $PSCRATCH
+    run_root: /pscratch/sd/a/alice/xgc-runs
+  defaults:
+    account: m0000                   # your NERSC project
+    mail_user: alice@example.org
+
+polaris:
+  user: alice
+  auth:
+    ssh_config_host: polaris1        # whichever login node your alias targets
+  paths:
+    scratch: /grand/YourProject/alice
+    run_root: /grand/YourProject/alice/xgc-runs
+  xgc:
+    # Your own build (docs/build-polaris.md). Leave out if you have none yet.
+    exe: /grand/YourProject/alice/XGC-Devel/build/bin/xgc
+    xgca_exe: /grand/YourProject/alice/XGC-Devel/build/bin/xgca
+    src: /grand/YourProject/alice/XGC-Devel
+    build: /grand/YourProject/alice/XGC-Devel/build
+    env_script: /grand/YourProject/alice/XGC-Devel/quickstart/modules_and_env/polaris.sh
+  defaults:
+    account: YourProject             # ALCF allocation/project name
+
+stellar:
+  user: alice
+  auth:
+    ssh_config_host: stellar
+  paths:
+    scratch: /scratch/gpfs/alice
+    run_root: /scratch/gpfs/alice/xgc-runs
+  xgc:
+    exe: /home/alice/git/XGC-Devel/build/bin/xgc
+    src: /home/alice/git/XGC-Devel
+    # env_script and remote_python are shared site installs and already set
+    # in machines.yaml; override only if you use your own environment.
+  defaults:
+    account: pppl

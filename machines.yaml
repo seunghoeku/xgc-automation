@@ -1,16 +1,22 @@
-# machines.yaml — HPC machine definitions (single source of truth)
-# The hpc_runner tool reads this file to absorb scheduler/auth/path differences.
-# Values written as <...> are placeholders and must be filled in for the real
-# environment.
+# machines.yaml — HPC machine definitions (committed, machine-universal facts)
+#
+# This file holds only what is true for EVERY user of a machine: hosts,
+# schedulers, queue shapes, shared installs, data policies.
+#
+# Per-user bindings (username, account, scratch paths, personal XGC builds,
+# ssh alias names) live in machines.local.yaml, which is gitignored. Copy
+# machines.local.yaml.example, fill in your values, and keep it next to this
+# file. Values written as <...> are placeholders; preflight reports any that
+# are still unfilled, and submission is blocked until the blocking ones are.
 
 perlmutter:
   center: nersc
   host: perlmutter.nersc.gov
-  user: sku
+  user: <nersc_username>
   auth:
     method: sshproxy            # run sshproxy once a day to issue a 24h key
     key_ttl_hours: 24
-    ssh_config_host: perlmutter # alias supplies IdentityFile + CertificateFile
+    ssh_config_host: <ssh_alias>  # alias supplies IdentityFile + CertificateFile
   scheduler:
     type: slurm
     submit: sbatch
@@ -18,23 +24,15 @@ perlmutter:
     cancel: scancel
     submit_tpl: templates/slurm.sbatch.j2
   paths:
-    scratch: /pscratch/sd/s/sku
-    run_root: /pscratch/sd/s/sku/xgc-runs
+    scratch: <pscratch_path>        # echo $PSCRATCH on a login node
+    run_root: <pscratch_path>/xgc-runs
   xgc:
-    # Access, Slurm, CPU compilation, login-node dryrun, and real CPU runs were
-    # verified in the reduced-adiabatic campaign. Do not make that feature
-    # branch the general automation default; select a production executable
-    # explicitly after its commit and runtime environment are reviewed.
+    # No general production executable is selected yet (see AGENTS.md).
+    # Record your build under machines.local.yaml when you have one.
     exe: null
     modules: []
-    observed_builds:
-      reduced_adiabatic_cpu:
-        exe: /pscratch/sd/s/sku/codex_work/XGC-Devel-reduced-adia/build_cpu/bin/xgc
-        env_script: /pscratch/sd/s/sku/codex_work/XGC-Devel-reduced-adia/quickstart/modules_and_env/perlmutter_cpu.sh
-        commit: 8a27511f53b0f5dcdbafb9b5c903586f28787d2d
-        runtime_tested: true
   defaults:
-    account: m499
+    account: <nersc_account>
     qos: debug
     constraint: cpu
     nodes: 1
@@ -42,16 +40,16 @@ perlmutter:
     cpus_per_task: 8
     walltime: "00:30:00"
     mail_type: BEGIN,END,FAIL
-    mail_user: sku@pppl.gov
+    mail_user: <email>
 
 polaris:
   center: alcf
   host: polaris.alcf.anl.gov
-  user: shku
+  user: <alcf_username>
   auth:
     method: ssh_tunnel          # local port forwarding + MFA
     local_port: 2222
-    ssh_config_host: polaris4   # Polaris login node 4 ControlMaster alias
+    ssh_config_host: <ssh_alias>  # a Polaris login-node ControlMaster alias
   scheduler:
     type: pbs
     submit: qsub
@@ -60,47 +58,31 @@ polaris:
     submit_tpl: templates/polaris.pbs.j2
     system: polaris
     filesystems: home:grand
-    verified:
+    verified:                   # live round trip 2026-07-30 (project history)
       submit: true
       status: true
       output: true
       cancel: false
       job_id: 7301673.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov
   paths:
-    scratch: /grand/TokamakProfile/shku
-    run_root: /grand/TokamakProfile/shku/xgc-runs
+    scratch: <project_or_scratch_path>   # e.g. /grand/<project>/<user>
+    run_root: <project_or_scratch_path>/xgc-runs
   xgc:
-    # This remains the last verified GCC 13 build. Upstream master now targets
-    # the GCC 14/CUDA 12.8.1 toolchain recorded below; switch exe/build only
-    # after a clean build and compute-node smoke test succeed.
-    exe: /grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc
-    # xgca (neoclassical) built 2026-07-31 with cmake -DXGCA=ON, same build
-    # dir/commit f805e6223. Compiled only -- no dryrun or runtime test yet.
-    xgca_exe: /grand/TokamakProfile/shku/XGC-Devel/build/bin/xgca
-    src: /grand/TokamakProfile/shku/XGC-Devel
-    build: /grand/TokamakProfile/shku/XGC-Devel/build
+    # Personal builds belong in machines.local.yaml. Build procedure and the
+    # login-node GPU/NVML limitation: docs/build-polaris.md. The dryrun must
+    # run via a 1-node debug-queue job, not on a login node.
+    exe: null
+    xgca_exe: null
+    src: null
+    build: null
     build_type: RelWithDebInfo
-    env_script: /grand/TokamakProfile/shku/XGC-Devel/quickstart/modules_and_env/polaris.sh
-    # This build is not linked with the Cray GTL library. Enabling
-    # MPICH_GPU_SUPPORT_ENABLED would make MPI initialization abort.
+    env_script: null
+    # Builds without the Cray GTL library must keep this false; enabling
+    # MPICH_GPU_SUPPORT_ENABLED makes MPI initialization abort.
     gpu_aware_mpi: false
     modules: []
-    verified:
-      configure: true
-      compiled: true
-      runtime_tested: false
-      commit: 60bef3bcef9fdab9709cab43d52a28dd89d8cb6f
-    target_toolchain:
-      source_commit: f805e622307546a4cb29f7bd097bac70ae95eed0
-      setup_commit: 7c3d278f24ff461843f58641ebb8ca8e621fea6f
-      compiler: gcc14
-      cuda: 12.8.1
-      dependencies: /grand/TokamakProfile/hager/Software/install
-      source: /grand/TokamakProfile/shku/XGC-Devel-gcc14
-      build: /grand/TokamakProfile/shku/XGC-Devel-gcc14/build
-      verified: false
   defaults:
-    account: TokamakProfile
+    account: <alcf_project>
     # Four-node prototype jobs fit debug-scaling; prod requires at least 10.
     queue: debug-scaling
     nodes: 4
@@ -112,10 +94,10 @@ polaris:
 stellar:
   center: princeton
   host: stellar.princeton.edu
-  user: seungku
+  user: <princeton_username>
   auth:
     method: ssh_controlmaster    # MFA (Duo): human authenticates once, socket reused
-    ssh_config_host: stellar     # ~/.ssh/config alias (see common.ssh_multiplexing)
+    ssh_config_host: <ssh_alias> # ~/.ssh/config alias (see common.ssh_multiplexing)
     mfa: true
   scheduler:
     type: slurm
@@ -124,20 +106,21 @@ stellar:
     cancel: scancel
     submit_tpl: templates/slurm.sbatch.j2
   paths:
-    scratch: /scratch/gpfs/seungku
-    run_root: /scratch/gpfs/seungku/xgc-runs
+    scratch: <scratch_path>          # e.g. /scratch/gpfs/<user>
+    run_root: <scratch_path>/xgc-runs
   xgc:
     # Build procedure and the -O2 compiler crash: docs/build-stellar.md
-    exe: /home/seungku/git/XGC-Devel/build/bin/xgc
-    src: /home/seungku/git/XGC-Devel
+    exe: null                    # personal build -> machines.local.yaml
+    src: null
     build_type: Release          # RelWithDebInfo crashes icpx 2024.2 — do not use
+    # Shared site install; the same for every stellar user:
     env_script: /projects/XGC/STELLAR/Software/bin/set_up_xgc.stellar
+    # Interpreter new enough to import XGC's utils/input_gui (login default
+    # python3 is 3.6). Shared venv, same for every stellar user:
+    remote_python: /projects/XGC/STELLAR/Software/install/python-venv/bin/python3.12
     modules: []                  # env_script performs all module loads
-    verified:
-      commit: 39c5c89f           # XGC-Devel fix_comments, build verified 2026-07-28
-      runtime_tested: true       # ecbc ran real physics on job 2888698 (2026-07-28)
   defaults:
-    account: pppl
+    account: <slurm_account>     # e.g. pppl
     partition: all               # all(491 nodes) / pppl(126) / gpu(7) / bigmem / serial
     nodes: 1
     walltime: "00:10:00"         # partition limit is 15-00:01:00
@@ -148,7 +131,7 @@ flux:
   user: <pppl_username>
   auth:
     method: ssh_controlmaster
-    ssh_config_host: flux
+    ssh_config_host: <ssh_alias>
     mfa: true
   scheduler:
     type: <slurm|pbs>            # unconfirmed — do not submit until filled in

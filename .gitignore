@@ -21,3 +21,5 @@ runs/**/*.bp.dir/
 
 # OS
 .DS_Store
+machines.local.yaml
+kb/cases/*.local.yaml
