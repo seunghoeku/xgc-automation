@@ -131,28 +131,27 @@ advisor:
   minimum_match_signals: 2
   match_signals:
     - label: electrostatic
-      patterns: ['\belectrostatic\b', '정전기']
+      patterns: ['\belectrostatic\b']
     - label: core domain
-      patterns: ['\bcore\b', '코어', '노심']
+      patterns: ['\bcore\b']
     - label: reduced delta-f markers
-      patterns: ['\breduced[\s-]*delta[\s-]*f\b', '\bdelta[\s-]*f\b', '델타[\s-]*f']
+      patterns: ['\breduced[\s-]*delta[\s-]*f\b', '\bdelta[\s-]*f\b']
     - label: ITG or core turbulence
-      patterns: ['\bITG\b', '\bcore turbulence\b', '코어 난류', 'ITG 난류']
+      patterns: ['\bITG\b', '\bcore turbulence\b']
     - label: collisionless
-      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b', '무충돌', '충돌\s*없']
+      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b']
   exclusions:
     - label: electromagnetic
-      patterns: ['\belectromagnetic\b', '전자기']
+      patterns: ['\belectromagnetic\b']
       reason: ECBC is electrostatic, not electromagnetic
     - label: edge-SOL
-      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off']
       reason: ECBC is a core case and excludes open field lines
     - label: ELM
-      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      patterns: ['\bELM\b', 'edge[\s-]*localized']
       reason: ECBC is not an ELM baseline
     - label: enabled collisions
-      patterns: ['\bcollisional\b', '\bcollisions?\s+(?:on|enabled|required)\b',
-                 '충돌\s*(?:포함|활성|켜)']
+      patterns: ['\bcollisional\b', '\bcollisions?\s+(?:on|enabled|required)\b']
       reason: ECBC has collisions disabled
   baseline_parameters:
     ptl_marker_type: [ReducedDeltaF, ReducedDeltaF]

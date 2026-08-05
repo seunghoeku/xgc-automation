@@ -134,40 +134,36 @@ advisor:
   minimum_match_signals: 2
   match_signals:
     - label: ASDEX Upgrade device
-      patterns: ['\bASDEX(?:[\s-]*U(?:pgrade)?)?\b', '\bAUG\b', '\bau37980\b',
-                 '아스덱스']
+      patterns: ['\bASDEX(?:[\s-]*U(?:pgrade)?)?\b', '\bAUG\b', '\bau37980\b']
     - label: I-mode
-      patterns: ['\bI[\s-]?mode\b', 'I[\s-]?모드']
+      patterns: ['\bI[\s-]?mode\b']
     - label: edge or SOL domain
-      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off']
     - label: electrostatic
-      patterns: ['\belectrostatic\b', '정전기']
+      patterns: ['\belectrostatic\b']
     - label: edge turbulence
-      patterns: ['\bedge\s+turbulence\b', '\bpedestal\b', '엣지\s*난류',
-                 '페데스탈']
+      patterns: ['\bedge\s+turbulence\b', '\bpedestal\b']
     - label: collisionless
-      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b', '무충돌']
+      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b']
     - label: rotation or flipped field
-      patterns: ['\brotation\b', '\btoroidal\s+flow\b', '\bflip(?:ped)?\s+B\b',
-                 '회전', '역방향\s*자기장']
+      patterns: ['\brotation\b', '\btoroidal\s+flow\b', '\bflip(?:ped)?\s+B\b']
   exclusions:
     - label: electromagnetic
-      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      patterns: ['\belectromagnetic\b', '\bEM\b']
       reason: this baseline is electrostatic; the EM variant (n640pe, xgc-eem
         era) is only an unvalidated archive entry needing
         sml_electromagnetic=.true.
     - label: core-only turbulence
-      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b', '코어\s*난류']
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b']
       reason: this is an edge case (sml_bounce=0, outpsi=1.12)
     - label: enabled collisions
-      patterns: ['\bcollisional\b', '\bcollisions?\s+(?:on|enabled|required)\b',
-                 '충돌\s*(?:포함|활성|켜)']
+      patterns: ['\bcollisional\b', '\bcollisions?\s+(?:on|enabled|required)\b']
       reason: collisions are off (col_mode=0)
     - label: ELM
-      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      patterns: ['\bELM\b', 'edge[\s-]*localized']
       reason: not an ELM baseline
     - label: heat load
-      patterns: ['\bheat[\s-]*(?:load|flux)\b', '\blambda[_\s-]*q\b', '열\s*부하']
+      patterns: ['\bheat[\s-]*(?:load|flux)\b', '\blambda[_\s-]*q\b']
       reason: use st40-heatload for divertor heat-load studies; this case has
         no sheath heat-load diagnostics configured
     - label: other devices

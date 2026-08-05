@@ -127,32 +127,31 @@ advisor:
     - label: ST40 device
       patterns: ['\bST[\s-]?40\b', '\b11013565\b']
     - label: edge or SOL domain
-      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', 'divertor',
-                 '엣지', '가장자리', '스크레이프']
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', 'divertor']
     - label: heat load / heat flux width
       patterns: ['\bheat[\s-]*(?:load|flux)\b', '\blambda[_\s-]*q\b',
-                 '\bEich\b', '열\s*부하', '열\s*유속']
+                 '\bEich\b']
     - label: electrostatic
-      patterns: ['\belectrostatic\b', '정전기']
+      patterns: ['\belectrostatic\b']
     - label: total-f markers
-      patterns: ['\btotal[\s-]*f\b', '\bfull[\s-]*f\b', '토탈[\s-]*f']
+      patterns: ['\btotal[\s-]*f\b', '\bfull[\s-]*f\b']
     - label: collisional with neutrals
-      patterns: ['\bcollision(?:s|al)?\b', '\bneutrals?\b', '충돌', '중성']
+      patterns: ['\bcollision(?:s|al)?\b', '\bneutrals?\b']
     - label: spherical tokamak
-      patterns: ['\bspherical\s+tokamak\b', '구형\s*토카막']
+      patterns: ['\bspherical\s+tokamak\b']
   exclusions:
     - label: electromagnetic
-      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      patterns: ['\belectromagnetic\b', '\bEM\b']
       reason: this baseline is electrostatic (an EM ST40 variant, n502su, exists
         only as an unvalidated archive entry)
     - label: core-only turbulence
-      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b', '코어\s*난류']
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b']
       reason: this is an edge/SOL heat-load case (sml_bounce=0, outpsi=1.15)
     - label: delta-f
-      patterns: ['\bdelta[\s-]*f\b', '델타[\s-]*f']
+      patterns: ['\bdelta[\s-]*f\b']
       reason: this baseline uses TotalF markers
     - label: ELM
-      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      patterns: ['\bELM\b', 'edge[\s-]*localized']
       reason: not an ELM baseline
     - label: other devices
       patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b',

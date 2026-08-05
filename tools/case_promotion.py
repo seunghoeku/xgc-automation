@@ -65,14 +65,12 @@ _FAILURE_PATTERNS = [
     r"\bnan\b",
     r"\bproblem(?:atic)?\b",
     r"\bstop(?:ped)?\s+due\s+to\b",
-    r"실패",
 ]
 _SUCCESS_PATTERNS = [
     r"\bok\b",
     r"\bused\s+for\s+paper\b",
     r"\bgood\b",
     r"\bworks\s+fine\b",
-    r"성공",
 ]
 # Negations that turn a success word into its opposite ("not that good",
 # "not good", "no good"). Checked before success words get credit.
@@ -82,8 +80,6 @@ _NEGATED_SUCCESS_PATTERNS = [
     r"\bnot\s+ok\b",
     r"\bdidn'?t\s+work\b",
     r"\bdoes\s*n[o']t\s+work\b",
-    r"좋지\s*않",
-    r"안\s*좋",
 ]
 _CAUTION_PATTERNS = [
     r"\bpreliminar",

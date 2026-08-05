@@ -70,7 +70,6 @@ def _explicit_overrides(description: str) -> tuple[dict[str, Any], list[str]]:
 
     step_patterns = [
         r"\b(?:run\s+for\s+)?(\d[\d_,]*)\s*(?:time\s*)?steps?\b",
-        r"(\d[\d_,]*)\s*(?:스텝|단계)",
     ]
     for pattern in step_patterns:
         found = re.search(pattern, description, flags=re.IGNORECASE)
@@ -85,8 +84,6 @@ def _explicit_overrides(description: str) -> tuple[dict[str, Any], list[str]]:
     fresh_patterns = [
         r"\b(?:fresh|new)\s+(?:run|simulation)\b",
         r"\bwithout\s+(?:a\s+)?restart\b",
-        r"(?:새|신규)\s*(?:실행|계산|시뮬레이션)",
-        r"재시작\s*(?:없이|안\s*하고)",
     ]
     if _contains(description, fresh_patterns):
         overrides["sml_restart"] = False

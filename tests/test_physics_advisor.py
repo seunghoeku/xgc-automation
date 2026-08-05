@@ -76,8 +76,11 @@ class PhysicsAdvisorTests(unittest.TestCase):
         self.assertEqual(result["status"], "unsupported")
         self.assertEqual(result["candidates"], [])
 
-    def test_korean_request_is_supported(self) -> None:
-        result = pa.advise("무충돌 정전기 코어 ITG 난류를 25단계 새 계산으로 실행")
+    def test_explicit_english_step_and_fresh_run_request_is_supported(self) -> None:
+        result = pa.advise(
+            "Run a fresh simulation for 25 steps using collisionless "
+            "electrostatic core ITG physics."
+        )
 
         self.assertEqual(result["status"], "recommended")
         self.assertEqual(result["proposal"]["overrides"]["sml_mstep"], 25)

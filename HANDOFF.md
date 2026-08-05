@@ -720,14 +720,14 @@ ae335db fix(ecbc): migrate reference input to current XGC, declare ReducedDeltaF
 8a30e41 docs: mark roadmap items 1-4 complete
 8a818b2 feat: hpc_runner — submit/status/cancel with human-in-the-loop gate
 068752e docs: translate all repo content to English
-84e6e51 docs: stellar 빌드 절차 기록  (pre-English-switch)
-93c0dbd fix: opencode.json provider 중복 정의 제거   (pre-English-switch)
+84e6e51 docs: record stellar build procedure (pre-English-switch)
+93c0dbd fix: remove duplicate opencode.json provider definition (pre-English-switch)
 ```
 
 Net: **+3044 / −334** across 27 files. ~2000 lines of that is `tools/`.
 
-The two oldest commit messages are in Korean, from before the English-only
-instruction. The human explicitly chose not to rewrite that history.
+The two oldest commit messages originally used non-English descriptions. This
+handoff translates their summaries without rewriting Git history.
 
 ### XGC clone — `~/Documents/git/XGC-Devel`
 

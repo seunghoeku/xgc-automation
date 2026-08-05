@@ -129,31 +129,31 @@ advisor:
   minimum_match_signals: 2
   match_signals:
     - label: KSTAR device
-      patterns: ['\bKSTAR\b', '\b30306\b', '케이스타']
+      patterns: ['\bKSTAR\b', '\b30306\b']
     - label: RMP / perturbed field
       patterns: ['\bRMP\b', 'resonant\s+magnetic', 'perturb(?:ed|ation)s?\s+
-                 (?:magnetic|field)', '\b3db\b', '섭동\s*자기장', '공명\s*자기']
+                 (?:magnetic|field)', '\b3db\b']
     - label: edge or SOL domain
-      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off']
     - label: electrostatic
-      patterns: ['\belectrostatic\b', '정전기']
+      patterns: ['\belectrostatic\b']
     - label: turbulence
-      patterns: ['\bturbulence\b', '난류']
+      patterns: ['\bturbulence\b']
     - label: collisional
-      patterns: ['\bcollision(?:s|al)?\b', '충돌']
+      patterns: ['\bcollision(?:s|al)?\b']
   exclusions:
     - label: electromagnetic
-      patterns: ['\belectromagnetic\b', '\bEM\b', '전자기']
+      patterns: ['\belectromagnetic\b', '\bEM\b']
       reason: this baseline is electrostatic (RMP enters as a prescribed
         perturbed field via ptb_3db, not self-consistent EM)
     - label: core-only turbulence
-      patterns: ['\bcore[\s-]*only\b', '코어\s*난류']
+      patterns: ['\bcore[\s-]*only\b']
       reason: this is an edge case (sml_bounce=0, outpsi=1.10)
     - label: delta-f
-      patterns: ['\bdelta[\s-]*f\b', '델타[\s-]*f']
+      patterns: ['\bdelta[\s-]*f\b']
       reason: this baseline uses TotalF markers
     - label: ELM
-      patterns: ['\bELM\b', 'edge[\s-]*localized', '엘름']
+      patterns: ['\bELM\b', 'edge[\s-]*localized']
       reason: RMP suppression context but not an ELM crash baseline
     - label: other devices
       patterns: ['\bITER\b', '\bD3D\b', '\bDIII[\s-]?D\b', '\bASDEX\b',
