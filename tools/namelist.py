@@ -17,8 +17,10 @@ on the remote machine, while this tool runs locally. So we export it once as
 JSON over ssh and cache it under .cache/. The cache is keyed by the XGC commit,
 so it refreshes automatically when the source changes.
 
-Note the login node's default python3 is 3.6, too old for XGC's utils
-(`from __future__ import annotations` fails). We use the project's 3.12 venv.
+The remote interpreter must be new enough to import XGC's utils (login-node
+default python3 is often too old: stellar ships 3.6, where
+`from __future__ import annotations` fails). Each machine therefore declares
+`xgc.remote_python` in machines.yaml / machines.local.yaml.
 """
 
 from __future__ import annotations
@@ -35,8 +37,18 @@ from tools import ssh
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = PROJECT_ROOT / ".cache"
 
-# Interpreter new enough to import XGC's utils. The login node default is 3.6.
-REMOTE_PYTHON = "/projects/XGC/STELLAR/Software/install/python-venv/bin/python3.12"
+
+def _remote_python_for(machine: str, cfg: dict[str, Any]) -> str:
+    """The configured remote interpreter for XGC's utils on this machine."""
+    candidate = cfg.get("xgc", {}).get("remote_python")
+    if not candidate or m.is_placeholder(candidate):
+        raise NamelistError(
+            f"xgc.remote_python is not configured for {machine!r}. Set it in "
+            f"machines.yaml (shared install) or machines.local.yaml (personal "
+            f"venv) to a python >= 3.7 that can import XGC's utils/input_gui. "
+            f"The login-node default python3 is often too old."
+        )
+    return candidate
 
 
 class NamelistError(RuntimeError):
@@ -124,7 +136,7 @@ def _remote_python(machine: str, code: str, **subs: str) -> str:
 
     result = ssh.run(
         host,
-        [REMOTE_PYTHON, "-c", preamble + code],
+        [_remote_python_for(machine, cfg), "-c", preamble + code],
         timeout=180.0,
     )
     if not result.ok:

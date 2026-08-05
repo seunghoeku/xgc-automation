@@ -139,7 +139,16 @@ def load_simulation_notes(path: Path | None = None) -> list[SimulationNote]:
     """
     notes_path = path or NOTES_PATH
     if not notes_path.is_file():
-        raise CasePromotionError(f"simulation notebook not found: {notes_path}")
+        raise CasePromotionError(
+            f"simulation notebook not found: {notes_path}. Case promotion "
+            f"joins the input archive with the original researcher's run "
+            f"notebook (an .xlsx with one sheet per year and shot#/note "
+            f"columns), which is personal research data and not distributed "
+            f"with this repository. Without it, promotion ranking is "
+            f"unavailable -- but the validated baselines in kb/cases/ and "
+            f"the drafts in kb/cases/drafts/ already carry the relevant "
+            f"notebook evidence and remain fully usable."
+        )
 
     try:
         import openpyxl

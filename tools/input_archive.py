@@ -146,16 +146,26 @@ def _filename_tags(name: str) -> list[str]:
 
 
 def _machine_names(codes: list[str]) -> list[str]:
+    """Decode filename machine codes using the simulation registry's map.
+
+    kb/simulation_registry.yaml owns the machine<->code mapping (it mints the
+    IDs these filenames carry); falling back to a small builtin copy keeps
+    archive inspection usable if the registry is unreadable.
+    """
     code_to_machine = {
-        "pe": "perlmutter",
-        "po": "polaris",
-        "au": "aurora",
-        "do": "doudna",
-        "fr": "frontier",
-        "su": "summit",
-        "st": "stellar",
-        "fl": "flux",
+        "pe": "perlmutter", "po": "polaris", "au": "aurora", "do": "doudna",
+        "fr": "frontier", "su": "summit", "st": "stellar", "fl": "flux",
     }
+    registry = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
+    try:
+        import yaml
+
+        data = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+        declared = data.get("machine_codes") or {}
+        if declared:
+            code_to_machine = {code: name for name, code in declared.items()}
+    except (OSError, ValueError):
+        pass
     return [code_to_machine.get(code, f"unknown:{code}") for code in codes]
 
 
@@ -259,7 +269,14 @@ def inspect_archive(
     if max_files < 1 or max_files > 2_000:
         raise InputArchiveError("max_files must be between 1 and 2000")
     if not ARCHIVE_DIR.is_dir():
-        raise InputArchiveError(f"input archive not found: {ARCHIVE_DIR}")
+        raise InputArchiveError(
+            f"input archive not found: {ARCHIVE_DIR}. This directory holds "
+            f"the original researcher's historical XGC inputs (read-only "
+            f"evidence for case promotion) and is not distributed with the "
+            f"repository. Without it, archive inspection and promotion are "
+            f"unavailable; the validated baselines in kb/cases/ do not "
+            f"depend on it."
+        )
 
     current_parameters, metadata_source = _metadata_parameter_names(metadata_path)
     all_files = sorted(path for path in ARCHIVE_DIR.rglob("*") if path.is_file())

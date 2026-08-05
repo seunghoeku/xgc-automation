@@ -400,9 +400,12 @@ def inspect_run(
     _, remote = _remote_run_dir(machine, run_id)
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
+    # The inventory script needs only the stdlib, so the system python3 is an
+    # acceptable fallback; prefer the machine's configured analysis python.
+    python = (cfg.get("analysis") or {}).get("python", "python3")
     result = ssh.run(
         host,
-        ["python3", "-c", _REMOTE_INVENTORY, remote, str(max_entries)],
+        [python, "-c", _REMOTE_INVENTORY, remote, str(max_entries)],
         timeout=180.0,
     )
     if not result.ok:
