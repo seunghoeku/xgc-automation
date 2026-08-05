@@ -71,18 +71,23 @@ Replacing either artifact requires `confirm_overwrite=True`.
 ### Remote analysis environment
 
 The remote Python must be able to import the updated `xgc_analysis` package.
-The reducer uses the machine's XGC environment script by default. A machine
-can override the runtime in `machines.yaml`:
+The reducer uses the machine's XGC environment script by default. Since your
+XGC-Analysis checkout is personal, the `analysis:` block belongs in your
+gitignored `machines.local.yaml` (the `.example` shows it under perlmutter):
 
 ```yaml
-analysis:
-  python: python3
-  pythonpath: /remote/path/to/XGC-Analysis
-  env_script: /remote/path/to/analysis-environment.sh
+perlmutter:
+  analysis:
+    python: python3
+    pythonpath: /remote/path/to/XGC-Analysis
+    env_script: /remote/path/to/analysis-environment.sh
 ```
 
 `pythonpath` may also be a list. These are remote paths and must be configured
-per machine; the automation code does not hardcode a developer checkout.
+per machine; the automation code does not hardcode a developer checkout. No
+machine ships with an `analysis:` block preconfigured — without one,
+`oned_profiles` fails with a "No module named 'xgc_analysis'" hint and the
+bounded `inventory` product still works (it needs only the stdlib).
 
 The compatible branches inspected during implementation were:
 

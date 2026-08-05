@@ -22,6 +22,12 @@ perlmutter:
   defaults:
     account: m0000                   # your NERSC project
     mail_user: alice@example.org
+  # Only needed for analyze_run's oned_profiles product: where YOUR
+  # XGC-Analysis checkout lives on the machine (docs/data-analysis.md).
+  analysis:
+    python: /path/to/your/python3    # must be able to import xgc_analysis
+    pythonpath: /path/to/XGC_reader  # parent of the xgc_analysis package
+    # env_script: /path/sourced/before/running (optional)
 
 polaris:
   user: alice
@@ -32,6 +38,8 @@ polaris:
     run_root: /grand/YourProject/alice/xgc-runs
   xgc:
     # Your own build (docs/build-polaris.md). Leave out if you have none yet.
+    # exe/src/env_script are read by the tools; xgca_exe and build are
+    # recorded metadata (useful provenance, not consumed by code today).
     exe: /grand/YourProject/alice/XGC-Devel/build/bin/xgc
     xgca_exe: /grand/YourProject/alice/XGC-Devel/build/bin/xgca
     src: /grand/YourProject/alice/XGC-Devel

@@ -282,7 +282,7 @@ class PerlmutterPlanTests(unittest.TestCase):
                 "type": "slurm",
                 "submit_tpl": "templates/slurm.sbatch.j2",
             },
-            "paths": {"run_root": "/pscratch/sd/s/sku/xgc-runs"},
+            "paths": {"run_root": "/pscratch/sd/a/alice/xgc-runs"},
             "xgc": {"exe": None, "modules": []},
             "defaults": {
                 "account": "m0000",

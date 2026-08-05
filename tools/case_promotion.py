@@ -21,6 +21,7 @@ Finalizing a draft into ``kb/cases/`` stays a human step.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,7 +32,15 @@ import yaml
 from tools import input_archive
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-NOTES_PATH = PROJECT_ROOT / "Other_data" / "simulation_note_XGC1.xlsx"
+# The researcher's run notebook. Another user can point the pipeline at their
+# own notebook (same shape: one sheet per year, shot#/description/code/note
+# columns) via the environment variable without editing code.
+NOTES_PATH = Path(
+    os.environ.get(
+        "XGC_SIMULATION_NOTEBOOK",
+        PROJECT_ROOT / "Other_data" / "simulation_note_XGC1.xlsx",
+    )
+)
 DRAFTS_DIR = PROJECT_ROOT / "kb" / "cases" / "drafts"
 
 _SHOT_NUMBER_RE = re.compile(r"(?:^|[^0-9])(\d{2,4})(?:[^0-9]|$)")

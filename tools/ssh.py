@@ -360,12 +360,16 @@ def host_for(machine_cfg: dict[str, Any]) -> str:
 
     Prefers the ~/.ssh/config alias, since that is where ControlMaster lives.
     """
+    from tools import machines as m
+
     auth = machine_cfg.get("auth", {})
     alias = auth.get("ssh_config_host")
-    if alias and not (isinstance(alias, str) and alias.startswith("<")):
+    if alias and not m.is_placeholder(alias):
         return alias
 
     user, host = machine_cfg.get("user"), machine_cfg.get("host")
     if not host:
         raise SSHError("machine definition has neither ssh_config_host nor host")
+    if m.is_placeholder(user):
+        user = None  # fall back to the local username rather than "<...>@host"
     return f"{user}@{host}" if user else host
