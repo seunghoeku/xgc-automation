@@ -169,18 +169,18 @@ class PolarisPlanTests(unittest.TestCase):
                 "system": "polaris",
                 "filesystems": "home:grand",
             },
-            "paths": {"run_root": "/grand/TokamakProfile/shku/xgc-runs"},
+            "paths": {"run_root": "/grand/SomeProject/alice/xgc-runs"},
             "xgc": {
-                "exe": "/grand/TokamakProfile/shku/XGC-Devel/build/bin/xgc",
+                "exe": "/grand/SomeProject/alice/XGC-Devel/build/bin/xgc",
                 "gpu_aware_mpi": False,
                 "env_script": (
-                    "/grand/TokamakProfile/shku/XGC-Devel/"
+                    "/grand/SomeProject/alice/XGC-Devel/"
                     "quickstart/modules_and_env/polaris.sh"
                 ),
                 "modules": [],
             },
             "defaults": {
-                "account": "TokamakProfile",
+                "account": "SomeProject",
                 "queue": "debug-scaling",
                 "nodes": 4,
                 "ntasks_per_node": 4,
@@ -204,7 +204,7 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertIn("#PBS -l place=scatter", directives)
         self.assertIn("#PBS -l filesystems=home:grand", directives)
         self.assertIn("#PBS -q debug-scaling", directives)
-        self.assertIn("#PBS -A TokamakProfile", directives)
+        self.assertIn("#PBS -A SomeProject", directives)
         self.assertIn("mpiexec --np 16 -ppn 4", plan.script)
         self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
         self.assertIn(
@@ -285,7 +285,7 @@ class PerlmutterPlanTests(unittest.TestCase):
             "paths": {"run_root": "/pscratch/sd/s/sku/xgc-runs"},
             "xgc": {"exe": None, "modules": []},
             "defaults": {
-                "account": "m499",
+                "account": "m0000",
                 "qos": "debug",
                 "constraint": "cpu",
                 "nodes": 1,
@@ -293,7 +293,7 @@ class PerlmutterPlanTests(unittest.TestCase):
                 "cpus_per_task": 8,
                 "walltime": "00:30:00",
                 "mail_type": "BEGIN,END,FAIL",
-                "mail_user": "sku@pppl.gov",
+                "mail_user": "alice@example.org",
             },
         }
 
@@ -305,13 +305,13 @@ class PerlmutterPlanTests(unittest.TestCase):
                 hello_world=True,
             )
 
-        self.assertIn("#SBATCH --account=m499", plan.script)
+        self.assertIn("#SBATCH --account=m0000", plan.script)
         self.assertIn("#SBATCH --qos=debug", plan.script)
         self.assertIn("#SBATCH --constraint=cpu", plan.script)
         self.assertIn("#SBATCH --mail-type=BEGIN,END,FAIL", plan.script)
-        self.assertIn("#SBATCH --mail-user=sku@pppl.gov", plan.script)
+        self.assertIn("#SBATCH --mail-user=alice@example.org", plan.script)
         self.assertIn("srun -n 32 hostname", plan.script)
-        self.assertEqual(plan.resources["mail_user"], "sku@pppl.gov")
+        self.assertEqual(plan.resources["mail_user"], "alice@example.org")
 
 
 if __name__ == "__main__":

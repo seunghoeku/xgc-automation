@@ -9,12 +9,19 @@ Perlmutter/Polaris over SSH.
 > See `AGENTS.md` for the detailed design and rules. opencode loads that file
 > automatically at startup.
 
+**New user?** Start with `docs/setup-new-user.md`: create your
+`machines.local.yaml` from the example, set up SSH ControlMaster aliases,
+and run `preflight`. Committed config holds only machine-universal facts;
+everything personal (usernames, accounts, paths, builds) lives in gitignored
+overlays.
+
 ## Directory layout
 
 | Path | Purpose |
 |---|---|
 | `tools/` | MCP tool layer (`preflight`, `hpc_runner`, ...) |
-| `machines.yaml` | HPC machine definitions (single source of truth) |
+| `machines.yaml` | HPC machine facts (committed, machine-universal) |
+| `machines.local.yaml` | Your per-user bindings (gitignored; copy the `.example`) |
 | `templates/` | Jinja2 templates for job scripts and XGC input |
 | `docs/` | Setup and per-machine build notes |
 | `kb/` | Knowledge base for physics_advisor |

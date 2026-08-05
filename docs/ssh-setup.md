@@ -7,9 +7,16 @@ ControlMaster socket.
 
 ## 1. Add to `~/.ssh/config`
 
+Alias names are your choice -- the contract is that each name matches
+`auth.ssh_config_host` in your `machines.local.yaml` (see
+`docs/setup-new-user.md`). Tip for Polaris: aliases pinned to a specific
+login node (e.g. `polaris1` -> `polaris-login-01.alcf.anl.gov`) let you move
+to another node when one misbehaves, by editing one line in
+`machines.local.yaml`.
+
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar flux perlmutter polaris polaris1 frontier
+Host stellar flux perlmutter polaris1 frontier
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
@@ -24,24 +31,20 @@ Host flux
     HostName flux.pppl.gov
     User <pppl_username>
 
-Host polaris
-    HostName polaris.alcf.anl.gov
-    User shku
-
 Host polaris1
-    HostName polaris.alcf.anl.gov
-    User shku
+    HostName polaris-login-01.alcf.anl.gov
+    User <alcf_username>
 
 Host perlmutter
     HostName perlmutter.nersc.gov
-    User sku
+    User <nersc_username>
     IdentityFile ~/.ssh/nersc
     CertificateFile ~/.ssh/nersc-cert.pub
     IdentitiesOnly yes
 
 Host frontier
     HostName frontier.olcf.ornl.gov
-    User shku
+    User <olcf_username>
 ```
 
 The `ControlPath` directory must already exist:
