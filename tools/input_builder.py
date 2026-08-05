@@ -46,6 +46,8 @@ def list_cases() -> list[dict[str, Any]]:
     if not CASES_DIR.exists():
         return cases
     for path in sorted(CASES_DIR.glob("*.yaml")):
+        if path.name.endswith(".local.yaml"):
+            continue  # per-user site bindings, not cases themselves
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         cases.append(
             {
@@ -61,12 +63,63 @@ def list_cases() -> list[dict[str, Any]]:
 
 
 def load_case(name: str) -> dict[str, Any]:
-    """Load one baseline case definition."""
+    """Load one baseline case definition, with an optional local override.
+
+    Case YAMLs record the directories where the original author validated
+    them (their provenance). Another user typically cannot read those
+    directories, so a gitignored ``kb/cases/<name>.local.yaml`` may override
+    site bindings -- ``case_dir``, ``input_file_dir``, ``machine`` -- to point
+    at that user's own restaged copy. Physics content is not overridable this
+    way; restage and re-validate instead.
+    """
     path = CASES_DIR / f"{name}.yaml"
     if not path.exists():
         known = [c["name"] for c in list_cases()]
         raise InputBuildError(f"unknown case {name!r}; known cases: {known}")
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    case = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    local_path = CASES_DIR / f"{name}.local.yaml"
+    if local_path.exists():
+        local = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}
+        allowed = {"case_dir", "input_file_dir", "machine", "backup_dir"}
+        unknown = set(local) - allowed
+        if unknown:
+            raise InputBuildError(
+                f"{local_path.name} may only override site bindings "
+                f"{sorted(allowed)}, not {sorted(unknown)}. Physics changes "
+                f"belong in a new validated case."
+            )
+        case.update(local)
+        case["local_override"] = str(local_path)
+    return case
+
+
+def _case_dir_access_help(case: str, case_def: dict[str, Any], path: str) -> str:
+    """Actionable message when a baseline's remote directory is unreadable."""
+    machine = case_def.get("machine", "?")
+    archive = (case_def.get("provenance") or {}).get("archive_file")
+    lines = [
+        f"cannot access {path} on {machine} -- the {case!r} baseline was "
+        f"validated in its author's directory, which your account may not "
+        f"be able to read.",
+        "Options:",
+        "  1. Ask the directory owner to grant read access (or to copy the "
+        "case into shared project space).",
+    ]
+    step = 2
+    if archive:
+        lines.append(
+            f"  {step}. Reconstruct it yourself: the exact input is "
+            f"{archive} in this repository, and the case YAML's migration: "
+            f"section lists every change that made it pass xgc --dryrun. "
+            f"Stage it in your own space and re-run validate_input."
+        )
+        step += 1
+    lines.append(
+        f"  {step}. After restaging, create kb/cases/{case}.local.yaml "
+        f"(gitignored) overriding case_dir/input_file_dir with your paths."
+    )
+    return "\n".join(lines)
 
 
 @dataclass
@@ -114,10 +167,15 @@ def describe_parameter(machine: str, name: str) -> dict[str, Any]:
     return out
 
 
-def _read_remote_text(machine: str, path: str) -> str:
+def _read_remote_text(
+    machine: str, path: str, *, case: str | None = None,
+    case_def: dict[str, Any] | None = None,
+) -> str:
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
     if not ssh.exists(host, path):
+        if case and case_def is not None:
+            raise InputBuildError(_case_dir_access_help(case, case_def, path))
         raise InputBuildError(f"{path} not found on {machine}")
     return ssh.read_file(host, path)
 
@@ -146,7 +204,7 @@ def plan_input(
     source_path = f"{case_dir}/input"
 
     metadata = nlm.load_metadata(machine)
-    original = _read_remote_text(machine, source_path)
+    original = _read_remote_text(machine, source_path, case=case, case_def=case_def)
 
     # Validate everything before touching the text, so a bad override cannot
     # leave a half-applied result.
@@ -294,6 +352,9 @@ def stage_case(
 
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
+
+    if not ssh.exists(host, case_dir):
+        raise InputBuildError(_case_dir_access_help(case, case_def, case_dir))
 
     if ssh.exists(host, target_dir):
         listing = ssh.run(host, ["ls", "-A", target_dir])
