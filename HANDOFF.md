@@ -1,6 +1,109 @@
 # HANDOFF
 
-## 2026-08-05 Fable 5 handoff: current project summary
+## 2026-08-05 handoff to Codex: generalization session complete
+
+Read `AGENTS.md` first (safety rules, architecture, roadmap). This session
+generalized the repository from a single-researcher setup to a multi-user
+layout. All work is committed on `main` (HEAD `0ae9ae6`, 7 commits this
+session, 93 tests passing, working tree clean). The user will provide the
+next objective separately.
+
+### What changed in this session (commits 0c51973..0ae9ae6)
+
+1. **Config split** (`0c51973`): `machines.yaml` now holds only
+   machine-universal facts (hosts, schedulers, queue shapes, shared site
+   installs). All personal bindings moved to `machines.local.yaml` —
+   gitignored, deep-merged over the base by `tools/machines.py`
+   (`load_machines`; dicts merge, scalars/lists replace). The original
+   researcher's values are preserved in his local file, so behavior on this
+   checkout is unchanged. `machines.local.yaml.example` documents every
+   field. Unfilled fields stay `<placeholders>`; `preflight` reports them.
+2. **Hardcode removal** (`e23c938`): `REMOTE_PYTHON` (stellar venv path,
+   was applied to every machine) became per-machine `xgc.remote_python`
+   config. Missing `Other_data/` notebook or `input_backup/` archive now
+   produce self-explaining errors (they are the original researcher's
+   personal data; promotion tooling degrades gracefully, kb/cases baselines
+   keep working).
+3. **KB case portability** (`f551bfa`): case YAMLs keep the author's
+   validation directories as provenance, but when `case_dir` is unreadable
+   the tools now print three options (request access / reconstruct from
+   `provenance.archive_file` + `migration:` table / rebind via gitignored
+   `kb/cases/<name>.local.yaml`, which may override ONLY site bindings —
+   physics overrides are rejected).
+4. **Onboarding docs** (`9f7278b`): `docs/setup-new-user.md` is the
+   complete new-user checklist (ssh alias contract, overlay file, absent
+   personal data, first-run smoke sequence). `docs/ssh-setup.md`
+   neutralized.
+5. **Submission safety symmetry** (`f3e0553`): SlurmScheduler now rejects
+   `<placeholder>` account/partition/qos/constraint/mail_user/mail_type
+   before rendering, matching the PBS adapter. Previously sbatch received
+   literal `<nersc_account>` (opaque failure) and `<email>` mail_user
+   *succeeded silently*.
+6. **Consistency sweep** (`d0bfb85`, `0ae9ae6`): `analysis:` block now
+   exampled (was documented but shown nowhere); `XGC_SIMULATION_NOTEBOOK`
+   env var lets another user supply their own notebook; asyncssh dependency
+   dropped (never imported); README/AGENTS/workflow stale claims fixed
+   (KB has 5 cases, not 1; ECBC validation commit is `39c5c89f`).
+
+### Contracts Codex must preserve
+
+- **Two-layer config**: never write personal values (usernames, accounts,
+  emails, personal build paths) into committed files. They belong in
+  `machines.local.yaml` or `kb/cases/*.local.yaml` (both gitignored).
+- **Placeholder discipline**: `<...>` strings mean "unfilled"; `null` means
+  "intentionally none". `machines.is_placeholder` is the single test for
+  this — schedulers, preflight, ssh.host_for, and namelist all rely on it.
+- **kb `.local.yaml` whitelist**: only `case_dir`, `input_file_dir`,
+  `machine`, `backup_dir` may be overridden. Physics changes require a new
+  validated case (enforced in `input_builder.load_case`).
+- **Historical documents** (HANDOFF sections below, docs/build-*.md,
+  runs/): these record the original researcher's paths as provenance. Do
+  not "generalize" them retroactively; only fix statements that misdescribe
+  current code behavior.
+- All prior contracts stand: human approval before submission/deletion,
+  dryrun gate, bounded remote reduction (never transfer `.bp`), provenance
+  records under `runs/`, sequential simulation IDs.
+
+### Verification shortcuts
+
+```
+uv run python -m unittest discover tests      # 93 tests
+uv run python - <<'EOF'                        # overlay sanity
+from tools import machines as m
+print({n: m.get_machine(n).get("user") for n in m.machine_names()})
+EOF
+```
+
+`preflight` (MCP) per machine shows remaining unfilled fields. Polaris note:
+CUDA builds cannot dryrun on login nodes (broken NVML) — use a 1-node
+debug-queue job (`docs/build-polaris.md`, pattern in
+`/grand/TokamakProfile/shku/n620fr_dryrun/dryrun.pbs`).
+
+### Open items inherited by the next session
+
+- xgca binary on polaris: compiled (`xgc.xgca_exe` in the user's local
+  overlay), **never dryrun/runtime tested**. Needed by the NT/PT torque
+  draft family (8 drafts in `kb/cases/drafts/`, notebook says "Used for
+  Paper"). An `xgca --dryrun` debug-queue smoke test is the natural next
+  step; note the tooling currently reads only `xgc.exe`, so either pass
+  `xgc_exe=` explicitly or extend dryrun/submission to select the xgca
+  binary for XGCa cases.
+- kstar-rmp baseline: BLOCKING for real runs — input references
+  `rmp_k030306_n1_q4.bp`, but only `rmp_k030306_n1.bp` exists in polaris
+  `XGC_inputs/`. Dryrun cannot catch this (ptb_3db files are not read).
+  Ask the researcher.
+- Three polaris baselines (st40-heatload, asdex-imode, kstar-rmp) have
+  `runtime_tested: false` — a short stepping run would close them.
+- n592/n593 double numbering in the notebook/archive (d3d vs ASDEX pairs)
+  awaits the researcher's correction; `name_note_mismatch` flags them.
+- n645/n646 have archived inputs but no notebook rows yet.
+- data_analyzer PR #51 migration (see the earlier snapshot below) remains
+  open; `oned_profiles` is still unverified against a real HPC run dir.
+- The dryrun int32 overflow (negative particle counts at 1 rank on large
+  cases) has issue text drafted in `kb/cases/kstar-rmp.yaml` notes; not yet
+  filed with the XGC team.
+
+## Previous snapshot — 2026-08-05 Fable 5 (pre-generalization summary)
 
 Read `AGENTS.md` for the governing safety rules and architecture. This section
 is a current-state summary of completed work. The user will provide the next
