@@ -1,5 +1,94 @@
 # HANDOFF
 
+## 2026-08-05 Fable 5 handoff: current project summary
+
+Read `AGENTS.md` for the governing safety rules and architecture. This section
+is a current-state summary of completed work. The user will provide the next
+objective separately.
+
+### Project and workflow
+
+The repository implements a local-brain/remote-hands workflow for XGC. A local
+advisor selects only validated physics baselines and deterministic overrides;
+the user reviews generated input and resource plans; verified tools perform
+SSH, scheduler, transfer, dry-run, analysis, and provenance operations. Raw
+ADIOS2 output remains on the HPC system and only bounded summaries are pulled
+locally. Submission and destructive actions always require explicit human
+approval.
+
+Implemented components include:
+
+- connectivity and authentication preflight, including ControlMaster command
+  channel validation and NERSC certificate checks;
+- Slurm and PBS planning, submission, status, cancellation, and output tools;
+- case staging, XGC input construction, metadata validation, and remote
+  `xgc --dryrun` as a pre-submit gate;
+- a conservative knowledge-base physics advisor that refuses unsupported
+  physics instead of inventing parameters;
+- global sequential simulation IDs plus timestamped run IDs and input/output
+  provenance;
+- bounded remote output inventory and XGC-Analysis-backed `oned_profiles`
+  reduction, producing small JSON and SVG products locally;
+- historical input/notebook joining, outcome classification, binary-era
+  detection, and case promotion tooling.
+
+### Validated cases and data
+
+Five cases are recorded under `kb/cases/`:
+
+- `ecbc`: Stellar, electrostatic core reduced-delta-f;
+- `st40-heatload`: Polaris, electrostatic total-f edge heat load;
+- `asdex-imode`: Polaris, electrostatic I-mode edge case;
+- `kstar-rmp`: Polaris, electrostatic RMP case;
+- `tcv-xgca-sheath`: Perlmutter, runtime-tested TCV XGCa regular-sheath case.
+
+The original spreadsheet is
+`Other_data/simulation_note_XGC1.xlsx`; it is read-only scientific evidence.
+The historical input collection is under `input_backup/`. Recent, higher-number
+inputs were prioritized because old inputs belong to older XGC schemas and
+binary eras. Simulation IDs use one global sequence and machine suffixes such
+as `pe`, `po`, `au`, `do`, `fr`, `st`, and combined forms such as `pe_po`.
+
+### HPC and build state
+
+- Stellar: Slurm hello-world, XGC dry-run, and a short real ECBC run were
+  completed. The verified Release build avoids the icpx 2024.2 `-O2`
+  vectorizer crash. See `docs/build-stellar.md`.
+- Polaris: PBS hello-world and compute-node dry-runs passed. The GCC 13 XGC
+  build is the verified fallback. An XGCa executable was compiled but not
+  runtime-tested. The newer GCC 14/CUDA 12.8.1 setup and dependency paths are
+  recorded without replacing the fallback. See `docs/build-polaris.md`.
+- Perlmutter: access, NERSC certificate handling, CPU build/dry-run, Slurm jobs,
+  restarts, and reduced-output analysis were exercised. The reduced-adiabatic
+  executable remains campaign-specific and is not the general default.
+- Frontier: access and the analysis Python environment were recorded, but it
+  is not configured as a submission target because no reviewed general XGC
+  executable/resource profile was established.
+
+### Analysis integration
+
+XGC-Analysis PR #51 was benchmarked independently from its master base on the
+large Polaris NT directory. The main historical delay came from catalog
+construction rather than reading requested arrays. Required-product discovery
+and selective open reduced the relevant workflow from tens of seconds to about
+one second or less, depending on cache state. XGC_reader branch `XGC_analysis`
+was updated to use PR #51's `exclude_products` and `build_manifest=False`
+interface. Detailed measurements and revisions remain in later sections of
+this file.
+
+### Repository state
+
+- Branch: `main`; committed HEAD: `1e806c7`
+  (`Enforce English-only repository text`).
+- `main` is synchronized with `origin/main` before this handoff edit.
+- The test suite passed at HEAD: 83 tests.
+- All tracked repository text is English-only. The regression test is
+  `tests/test_english_only.py`.
+- The only intended tracked working-tree change is this `HANDOFF.md` update.
+- Preserve the five untracked `runs/radia-*` directories; they are user-owned
+  reduced-adiabatic provenance records.
+- GitHub CLI authentication was expired, but SSH Git push succeeded.
+
 ## 2026-08-05 TCV XGCa example
 
 `kb/cases/tcv-xgca-sheath.yaml` records the Perlmutter
