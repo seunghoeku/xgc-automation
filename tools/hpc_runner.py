@@ -226,6 +226,11 @@ def prepare_submission(
             {
                 "account": account,
                 "queue": partition,
+                "partition": partition,
+                "qos": qos,
+                "constraint": constraint,
+                "mail_user": mail_user,
+                "mail_type": mail_type,
                 "filesystems": filesystems,
                 "system": pbs_system,
             }

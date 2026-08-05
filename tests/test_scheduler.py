@@ -89,7 +89,7 @@ class PBSSchedulerTests(unittest.TestCase):
 
     def test_required_pbs_resources_are_validated(self) -> None:
         valid = {
-            "account": "TokamakProfile",
+            "account": "SomeProject",
             "queue": "debug-scaling",
             "filesystems": "home:grand",
             "system": "polaris",
@@ -102,6 +102,40 @@ class PBSSchedulerTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 with self.assertRaisesRegex(sched.SchedulerError, missing):
                     self.scheduler.validate_resources(invalid)
+
+
+class SlurmSchedulerValidationTests(unittest.TestCase):
+    """Placeholders must be blocked before a Slurm script is rendered.
+
+    sbatch accepts `--account=<nersc_account>` textually; mail_user with a
+    placeholder even *succeeds* silently. The adapter must catch both.
+    """
+
+    def setUp(self) -> None:
+        self.scheduler = sched.SlurmScheduler()
+
+    def test_filled_or_absent_values_pass(self) -> None:
+        # Absent optional fields are fine (partition-less sites exist); only
+        # unfilled <placeholders> are configuration errors.
+        self.scheduler.validate_resources({})
+        self.scheduler.validate_resources(
+            {"account": "m0000", "mail_user": "alice@example.org",
+             "partition": None, "qos": "debug"}
+        )
+
+    def test_placeholder_values_are_rejected_by_name(self) -> None:
+        cases = {
+            "account": "<nersc_account>",
+            "partition": "<partition>",
+            "qos": "<qos>",
+            "constraint": "<constraint>",
+            "mail_user": "<email>",
+            "mail_type": "<mail_type>",
+        }
+        for label, value in cases.items():
+            with self.subTest(field=label):
+                with self.assertRaisesRegex(sched.SchedulerError, label):
+                    self.scheduler.validate_resources({label: value})
 
 
 class SchedulerFactoryTests(unittest.TestCase):

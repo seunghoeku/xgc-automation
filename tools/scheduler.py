@@ -106,6 +106,28 @@ class SlurmScheduler(Scheduler):
     def cancel_argv(self, job_id: str) -> list[str]:
         return ["scancel", job_id]
 
+    def validate_resources(self, resources: dict[str, Any]) -> None:
+        """Reject unfilled placeholders before a script is rendered.
+
+        sbatch happily accepts ``--account=<nersc_account>`` and either
+        rejects it opaquely or -- worse, for mail_user -- succeeds silently
+        with a broken value. Catch these here, symmetrically with the PBS
+        adapter, so the failure names the field instead of the symptom.
+        """
+        placeholders = [
+            label
+            for label in ("account", "partition", "qos", "constraint",
+                          "mail_user", "mail_type")
+            if str(resources.get(label) or "").startswith("<")
+        ]
+        if placeholders:
+            raise SchedulerError(
+                "Slurm submission configuration has unfilled placeholders: "
+                + ", ".join(placeholders)
+                + ". Set them in machines.local.yaml (see the .example) or "
+                "pass them in the submission request."
+            )
+
     def accounting_argv(self, job_id: str) -> list[str]:
         """Query sacct for a finished job's state and exit code."""
         return ["sacct", "-j", job_id, "-n", "-P", "-o", "State,ExitCode"]
