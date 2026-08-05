@@ -83,6 +83,25 @@ class PhysicsAdvisorTests(unittest.TestCase):
         self.assertEqual(result["proposal"]["overrides"]["sml_mstep"], 25)
         self.assertFalse(result["proposal"]["overrides"]["sml_restart"])
 
+    def test_recommends_tcv_xgca_regular_sheath_case(self) -> None:
+        result = pa.advise(
+            "TCV 69271 negative-triangularity XGCa regular sheath model"
+        )
+
+        self.assertEqual(result["status"], "recommended")
+        self.assertEqual(result["selected_case"]["name"], "tcv-xgca-sheath")
+        self.assertEqual(result["selected_case"]["machine"], "perlmutter")
+        self.assertIn("sml_sheath_mode", result["proposal"]["baseline_parameters"])
+
+    def test_regular_sheath_case_rejects_gyraze_request(self) -> None:
+        result = pa.advise("TCV XGCa Gyraze surrogate sheath")
+
+        candidate = next(
+            item for item in result["candidates"]
+            if item["case"] == "tcv-xgca-sheath"
+        )
+        self.assertTrue(candidate["excluded"])
+
 
 if __name__ == "__main__":
     unittest.main()

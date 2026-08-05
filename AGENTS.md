@@ -116,9 +116,14 @@ Higher-level logic must remain unaware of the machine type.
       (xgc-eem/xgc-es/xgca) and name-note mismatches, and drafts kb cases
       under `kb/cases/drafts/`. Three baselines were promoted and
       dryrun-validated on polaris via debug-queue jobs: st40-heatload
-      (n620fr), asdex-imode (n566pe), kstar-rmp (n613fr). KB now has 4 cases.
+      (n620fr), asdex-imode (n566pe), kstar-rmp (n613fr). Together with ECBC
+      and the historical TCV XGCa baseline below, KB now has 5 cases.
       Open: torque family needs the freshly built (untested) xgca binary;
       kstar-rmp needs its missing RMP field file before a real run.
+      A fifth historical baseline, tcv-xgca-sheath (n641pe/sheath_m1_3), is
+      runtime-validated on Perlmutter with XGCa. It is the regular-sheath
+      reference, not the sibling Gyraze-surrogate variant; current-master
+      dryrun remains required before reuse.
 
 ## Open Questions to Resolve First
 1. **ohmic.pppl.gov API spec** — OpenAI-compatible? Authentication (key/SSO/IP)?

@@ -1,5 +1,19 @@
 # HANDOFF
 
+## 2026-08-05 TCV XGCa example
+
+`kb/cases/tcv-xgca-sheath.yaml` records the Perlmutter
+`n641pe_TCV_xgca_gyraze/sheath_m1_3` case as a historical, runtime-tested XGCa
+TCV baseline. Job 55052276 completed steps 1-100 and printed `XGC finished!`;
+restart job 55053763 reached step 180 before the 30-minute scheduler limit.
+The exact runtime input is the regular sheath mode-1/factor-3 comparison, not
+the Gyraze surrogate: it omits `sml_sheath_use_gyraze_surrogate`. Do not confuse
+it with sibling `gyraze_m1_3` or with the non-identical archive input. Reuse
+still requires a current-XGCa dryrun and an explicitly selected executable.
+The reusable `case_dir` is the small curated input-only directory
+`/pscratch/sd/s/sku/xgc-automation-baselines/tcv-xgca-sheath`; do not point
+`stage_case` at the 3.3 GB completed run or it will copy BP output.
+
 ## 2026-08-05 access hardening
 
 Recent reduced-adiabatic work established real Perlmutter access and exposed a

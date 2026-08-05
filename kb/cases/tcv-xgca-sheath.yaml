@@ -1,0 +1,220 @@
+# TCV XGCa sheath — runtime-tested neoclassical edge reference case.
+#
+# This is the regular-sheath comparison member of the n641pe TCV XGCa/Gyraze
+# campaign. It is intentionally distinct from the sibling gyraze_m1_3 case:
+# the exact runtime input inspected here does not enable the Gyraze surrogate.
+
+name: tcv-xgca-sheath
+description: >
+  TCV shot 69271 negative-triangularity XGCa edge case with the regular sheath
+  model, sheath mode 1, and initial sheath-potential factor 3.0. Total-f
+  kinetic electrons and deuterium, collisions and neutrals enabled. This is
+  the non-Gyraze reference for the n641pe sheath-model comparison campaign.
+
+machine: perlmutter
+case_dir: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-xgca-sheath
+input_file_dir: /pscratch/sd/s/sku/XGC_inputs
+
+provenance:
+  runtime_case_dir: /pscratch/sd/s/sku/n641pe_TCV_xgca_gyraze/sheath_m1_3
+  curated_baseline:
+    path: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-xgca-sheath
+    files: [input, adios2cfg.xml, petsc.rc, BASELINE_PROVENANCE.txt]
+    note: "Small input-only baseline; completed 3.3 GB BP output was not copied."
+  archive_file: input_backup/n641pe_TCV_xgca_gyraze
+  simulation_number: 641
+  variant: sheath_m1_3
+  notebook:
+    sheet: y2026
+    shot: n641pe
+    description: "gyraze surrogate - TCV"
+    note: "multiple simulations of different sheath models and density scan"
+    date: 2026-07-17
+    code_column: xgca
+  runtime_input:
+    sha256: ba7a4bed1a1a328d370d1e8c5ce0ffaf35c975abd1403ce31327141158974f82
+    fort_input_used_sha256: 3a73740065d3cd57467e31215a35a16841e1d7cd6bd232fc80f0b2c632516d3b
+  source:
+    checkout: /pscratch/sd/s/sku/XGC-Devel2
+    commit: bccd22d48dc0a6b223fa74c6b4a5c557dc08e5e7
+    commit_subject: "Merge branch 'master' into gyraze_interface"
+    executable: /pscratch/sd/s/sku/XGC-Devel2/build_gyraze_cpu/bin/xgca
+  related_variants:
+    - gyraze_m1_3
+    - sheath_m1_10x
+    - sheath_m1_100x
+    - sheath_m3_2
+    - sheath_m3_10x
+    - sheath_m3_100x
+
+validated:
+  date: 2026-06-25
+  machine: perlmutter
+  xgc_commit: bccd22d48dc0a6b223fa74c6b4a5c557dc08e5e7
+  input_sha256: ba7a4bed1a1a328d370d1e8c5ce0ffaf35c975abd1403ce31327141158974f82
+  dryrun: not_recorded
+  n_ranks: 64
+  runtime_tested: true
+  runtime_evidence:
+    - job_id: 55052276
+      state: COMPLETED
+      exit_code: "0:0"
+      elapsed: "00:27:10"
+      steps: "1-100"
+      result: "XGC finished!"
+    - job_id: 55053763
+      state: TIMEOUT
+      elapsed: "00:30:27"
+      steps: "101-180"
+      result: "scheduler time limit; no preceding physics error"
+  final_checkpoint_step: 180
+
+physics:
+  model: neoclassical
+  flavor: XGCa
+  device: "TCV shot 69271, negative triangularity"
+  delta_f: false
+  boundary: edge
+  sheath:
+    implementation: regular
+    mode: 1
+    adjust: true
+    initial_potential_factor: 3.0
+    adjust_factor: 1.0
+    gyraze_surrogate: false
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF}
+  toroidal:
+    nphi_total: 1
+    wedge_n: 1
+  radial_domain:
+    inpsi: 0.0
+    outpsi: 1.12
+  extras:
+    collisions: col_mode=4
+    neutrals: enabled
+    sources: disabled
+
+numerics:
+  dt: 2.0e-3
+  mstep_per_submission: 100
+  restart: true
+  restart_write_period: 20
+  active_num_per_vertex: [10000, 10000]
+  input_num_per_vertex_raw: [10000, 10000, 50]
+  f0_grid: {nmu: 30, nvp: 18, smu_max: 4.0, vp_max: 4.0}
+
+resource_measured:
+  machine: perlmutter
+  constraint: cpu
+  account: m499
+  qos: debug
+  nodes: 8
+  ranks: 64
+  ranks_per_node: 8
+  threads_per_rank: 32
+  walltime: "00:30:00"
+  note: >
+    The first 100-step segment completed in 27m10s. The restart advanced from
+    step 101 to 180 before the 30-minute scheduler limit.
+
+input_files:
+  mesh:
+    - tcv69271_nt_apr_20_2026.node
+    - tcv69271_nt_apr_20_2026.ele
+    - tcv69271_nt_apr_20_2026.flx.aif
+  equilibrium: tcv69271_t1.1_NT.eqd
+  profiles:
+    density: ne_tcv69271_t1.1_NT.prf
+    temp_electron: te_tcv69271_t1.1_NT.prf
+    temp_ion: ti_tcv69271_t1.1_NT.prf
+  other: [adios2cfg.xml, petsc.rc]
+  verified_present_on_perlmutter: true
+
+output_products_observed:
+  - xgc.oneddiag.bp
+  - xgc.sheathdiag.bp
+  - xgc.heatdiag2.bp
+  - xgc.2d.*.bp
+  - xgc.f2d.*.bp
+  - xgc.f0.*.bp
+  - restart checkpoint through step 180
+
+notes:
+  - >
+    This exact sheath_m1_3 input is not a Gyraze-surrogate input. It has no
+    sml_sheath_use_gyraze_surrogate setting. Use sibling gyraze_m1_3 for the
+    surrogate comparison; do not infer behavior from the parent directory name.
+  - >
+    The archive input is not byte-identical to the runtime input: the archive
+    enables the Gyraze surrogate and uses ne_tcv69271_t1.1_NT_100.prf, while
+    sheath_m1_3 disables the surrogate by omission and uses
+    ne_tcv69271_t1.1_NT.prf.
+  - >
+    The successful run used a campaign-specific XGCa feature-branch binary.
+    The current general Perlmutter xgc.exe is deliberately unset in
+    machines.yaml. Select and verify an XGCa executable before staging a new run.
+  - >
+    sml_restart=.true. is part of this historical baseline. A fresh run must
+    set it false; a continuation must verify timestep.dat and the matching
+    restart checkpoint first.
+  - >
+    Current-schema dryrun was not recorded. Runtime success validates the
+    historical binary/input pair, not automatic compatibility with current
+    XGCa master.
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: TCV device
+      patterns: ['\bTCV\b', '\b69271\b']
+    - label: XGCa or neoclassical
+      patterns: ['\bXGCa\b', '\bneoclassical\b', '신고전']
+    - label: regular sheath model
+      patterns: ['\bregular[\s-]*sheath\b', '\bsheath[\s-]*model\b',
+                 '일반\s*쉬스', '쉬스\s*모델']
+    - label: negative triangularity
+      patterns: ['\bnegative[\s-]*triangularity\b', '\bNT\b', '음의\s*삼각도']
+    - label: edge domain
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '엣지', '가장자리']
+    - label: collisional
+      patterns: ['\bcollision(?:s|al)?\b', '충돌']
+  exclusions:
+    - label: Gyraze surrogate
+      patterns: ['\bGyraze\b', '\bsurrogate\b', '서로게이트', '대리\s*모델']
+      reason: this is the regular-sheath reference; use the sibling
+        gyraze_m1_3 case for the Gyraze surrogate
+    - label: XGC1 turbulence
+      patterns: ['\bXGC1\b', '\bturbulence\b', '난류']
+      reason: this is an XGCa neoclassical sheath case, not an XGC1 turbulence baseline
+    - label: core-only domain
+      patterns: ['\bcore[\s-]*only\b', '코어\s*전용']
+      reason: this case includes the edge/SOL domain through outpsi=1.12
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b',
+                 '\bASDEX\b', '\bST[\s-]?40\b', '\bNSTX\b', '\bJET\b']
+      reason: this baseline uses TCV geometry
+  baseline_parameters:
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.12
+    sml_dt: 2.0e-3
+    sml_mstep: 100
+    sml_nphi_total: 1
+    sml_wedge_n: 1
+    sml_sheath_mode: 1
+    sml_sheath_adjust: true
+    sml_sheath_init_pot_factor: 3.0
+    sml_sheath_adjust_factor: 1.0
+    col_mode: 4
+    sml_restart: true
+  warnings:
+    - >
+      Historical runtime validation used XGCa commit bccd22d4 and a
+      campaign-specific CPU binary; run a current-schema dryrun before reuse.
+    - >
+      This is the regular-sheath reference, not a Gyraze surrogate case.
+    - >
+      The baseline is a restart input. Verify checkpoint provenance or override
+      sml_restart=false for a fresh run.
