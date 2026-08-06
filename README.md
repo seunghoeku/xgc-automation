@@ -10,10 +10,11 @@ Perlmutter/Polaris over SSH.
 > automatically at startup.
 
 **New user?** Start with `docs/setup-new-user.md`: create your
-`machines.local.yaml` from the example, set up SSH ControlMaster aliases,
-and run `preflight`. Committed config holds only machine-universal facts;
-everything personal (usernames, accounts, paths, builds) lives in gitignored
-overlays.
+`machines.local.yaml` from the example, set up SSH authentication aliases,
+and run `preflight`. MFA hosts use ControlMaster, while Perlmutter uses its
+NERSC sshproxy key/certificate directly. Committed config holds only
+machine-universal facts; everything personal (usernames, accounts, paths,
+builds) lives in gitignored overlays.
 
 ## Directory layout
 

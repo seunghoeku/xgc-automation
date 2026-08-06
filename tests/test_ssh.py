@@ -62,5 +62,65 @@ class CertificateStatusTests(unittest.TestCase):
         self.assertEqual(status["path"], certificate)
 
 
+class DirectKeyTransportTests(unittest.TestCase):
+    def test_sshproxy_run_forces_direct_public_key_connection(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["ssh"], returncode=0, stdout="ok\n", stderr=""
+        )
+        target = ssh.SSHTarget("perlmutter", "sshproxy")
+        certificate = {"present": True, "valid": True, "detail": "current"}
+
+        with (
+            patch.object(ssh, "certificate_status", return_value=certificate),
+            patch.object(ssh, "control_socket_alive") as control,
+            patch.object(subprocess, "run", return_value=completed) as run,
+        ):
+            result = ssh.run(target, ["hostname"], check=True)
+
+        self.assertEqual(result.stdout, "ok\n")
+        control.assert_not_called()
+        argv = run.call_args.args[0]
+        self.assertIn("ControlMaster=no", argv)
+        self.assertIn("ControlPath=none", argv)
+        self.assertIn("IdentitiesOnly=yes", argv)
+        self.assertIn("PreferredAuthentications=publickey", argv)
+        self.assertEqual(argv[-2:], ["perlmutter", "hostname"])
+
+    def test_sshproxy_rejects_expired_certificate_before_connecting(self) -> None:
+        target = ssh.SSHTarget("perlmutter", "sshproxy")
+        certificate = {"present": True, "valid": False, "detail": "expired"}
+
+        with (
+            patch.object(ssh, "certificate_status", return_value=certificate),
+            patch.object(subprocess, "run") as run,
+        ):
+            with self.assertRaisesRegex(ssh.SSHError, "missing or expired"):
+                ssh.run(target, ["true"])
+
+        run.assert_not_called()
+
+    def test_controlmaster_auth_still_requires_a_live_session(self) -> None:
+        target = ssh.SSHTarget("polaris4", "ssh_tunnel")
+        with patch.object(
+            ssh, "control_socket_alive", return_value=(False, "no master")
+        ):
+            with self.assertRaisesRegex(ssh.SSHError, "no live ssh session"):
+                ssh.run(target, ["true"])
+
+    def test_host_for_carries_the_authentication_method(self) -> None:
+        target = ssh.host_for(
+            {
+                "host": "perlmutter.nersc.gov",
+                "user": "alice",
+                "auth": {
+                    "method": "sshproxy",
+                    "ssh_config_host": "perlmutter",
+                },
+            }
+        )
+
+        self.assertEqual(target, ssh.SSHTarget("perlmutter", "sshproxy"))
+
+
 if __name__ == "__main__":
     unittest.main()

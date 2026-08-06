@@ -163,15 +163,27 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
         if host and not m.is_placeholder(host):
             ssh_ok = _tcp_reachable(host, 22)
 
-        # MFA machines: a live ControlMaster socket is required to send commands
-        # without re-authenticating.
+        # MFA machines require a live ControlMaster. NERSC sshproxy machines
+        # instead use their current key/certificate directly and explicitly
+        # bypass multiplexing.
         control = None
         certificate = None
+        direct_key = None
         ssh_alias = auth.get("ssh_config_host")
         if ssh_alias and not m.is_placeholder(ssh_alias):
-            control = _control_socket_alive(ssh_alias)
             if auth.get("method") == "sshproxy":
                 certificate = ssh_transport.certificate_status(ssh_alias)
+                if certificate is None:
+                    certificate = {
+                        "present": False,
+                        "valid": False,
+                        "detail": "no CertificateFile is configured for the SSH alias",
+                    }
+                if certificate.get("valid", False):
+                    usable, detail = ssh_transport.direct_key_channel_usable(ssh_alias)
+                    direct_key = {"usable": usable, "detail": detail}
+            else:
+                control = _control_socket_alive(ssh_alias)
 
         # Only fields that decide whether submission is possible count as blockers
         blockers = [f for f in unfilled if f.startswith("scheduler.")]
@@ -205,11 +217,17 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
                 f"SSH certificate is missing or expired ({certificate.get('detail')}) — "
                 "refresh it with the user's NERSC sshproxy workflow"
             )
+        if direct_key is not None and not direct_key["usable"]:
+            actions.append(
+                f"direct SSH key connection failed ({direct_key['detail']}) — "
+                "verify IdentityFile/CertificateFile in the SSH alias and refresh sshproxy"
+            )
 
         if (
             blockers
             or ssh_ok is False
             or (certificate is not None and not certificate.get("valid", False))
+            or (direct_key is not None and not direct_key["usable"])
             or (control is not None and not control.get("command_channel_usable", True))
         ):
             status = "fail"
@@ -226,6 +244,7 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
             "mfa": bool(auth.get("mfa")),
             "ssh_port_22_reachable": ssh_ok,
             "control_master": control,
+            "direct_key_connection": direct_key,
             "ssh_certificate": certificate,
             "unfilled_config_fields": unfilled,
             "submit_blockers": blockers,

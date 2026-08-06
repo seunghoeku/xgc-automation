@@ -16,7 +16,9 @@ perlmutter:
   auth:
     method: sshproxy            # run sshproxy once a day to issue a 24h key
     key_ttl_hours: 24
-    ssh_config_host: <ssh_alias>  # alias supplies IdentityFile + CertificateFile
+    # Alias supplies IdentityFile + CertificateFile. The transport forces
+    # ControlMaster=no and ControlPath=none for independent key connections.
+    ssh_config_host: <ssh_alias>
   scheduler:
     type: slurm
     submit: sbatch

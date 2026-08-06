@@ -8,14 +8,17 @@
 # value). You only need entries for machines you actually use, and only for
 # the fields you are overriding.
 #
-# The ssh_config_host values must match Host aliases in your ~/.ssh/config
-# with ControlMaster multiplexing configured — see docs/ssh-setup.md.
+# The ssh_config_host values must match Host aliases in your ~/.ssh/config.
+# MFA hosts use ControlMaster; Perlmutter uses the NERSC key/certificate
+# directly with multiplexing disabled. See docs/ssh-setup.md.
 # Run `preflight` after editing to see what is still missing.
 
 perlmutter:
   user: alice
   auth:
-    ssh_config_host: perlmutter      # your alias name (any name is fine)
+    # Alias must select IdentityFile and CertificateFile. Do not enable
+    # ControlMaster for it; the tools also force multiplexing off.
+    ssh_config_host: perlmutter
   paths:
     scratch: /pscratch/sd/a/alice    # echo $PSCRATCH
     run_root: /pscratch/sd/a/alice/xgc-runs

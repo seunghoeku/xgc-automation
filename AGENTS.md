@@ -25,7 +25,9 @@ locally.
    transfers, the LLM must not invent shell commands — use the defined tools
    (`hpc_runner`, etc.).
 3. **Humans handle authentication**: never enter MFA codes or passwords on the
-   user's behalf. The user establishes the session; reuse it via ssh ControlMaster.
+   user's behalf. Reuse human-established ControlMaster sessions for MFA hosts.
+   Perlmutter is the exception: use the current NERSC sshproxy key/certificate
+   directly, with SSH multiplexing disabled.
 4. **Protect the allocation**: present node-count and wall-time estimates before
    submitting a job.
 5. **Record provenance**: track which input produced which output.
@@ -66,13 +68,14 @@ unaware of the machine type.
   timestamp-based `run_id` values.
 
 ## Portability (macOS first, Linux compatible)
-- SSH work goes through `tools/ssh.py`: argv-list subprocess calls against
-  the user's ControlMaster socket (no shell-string parsing, no BSD/GNU CLI
-  differences; a Python SSH library became unnecessary once multiplexing was
-  adopted).
+- SSH work goes through `tools/ssh.py`: argv-list subprocess calls against the
+  user's ControlMaster socket for MFA hosts, or the current NERSC sshproxy
+  key/certificate for Perlmutter (no shell-string parsing or BSD/GNU CLI
+  differences).
 - No hardcoded paths (`~`, `$PSCRATCH`). Distribute with `uv`/`pipx`.
-- ssh multiplexing: `ControlMaster auto` / `ControlPersist 8h` /
-  `ControlPath ~/.ssh/cm-%r@%h:%p`.
+- MFA-host multiplexing: `ControlMaster auto` / `ControlPersist 8h` /
+  `ControlPath ~/.ssh/cm-%r@%h:%p`. Perlmutter must use `ControlMaster no` and
+  `ControlPath none`.
 
 ## Build Automation
 - Automation is still out of scope. However, executables are not always available,

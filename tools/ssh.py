@@ -2,9 +2,10 @@
 
 All remote execution and file transfer goes through here. Two invariants:
 
-1. We never authenticate. Commands run over an existing ControlMaster socket
-   that the user opened (AGENTS.md, absolute rule 3). If the socket is not
-   alive, we fail with an actionable message instead of prompting.
+1. We never perform interactive authentication. MFA-protected hosts reuse a
+   ControlMaster session opened by the user. NERSC ``sshproxy`` hosts use the
+   user's existing short-lived key and certificate directly, with SSH
+   multiplexing explicitly disabled.
 2. Commands are passed as argument lists and quoted with shlex, never
    interpolated into a shell string. This keeps the "deterministic actions go
    through tools" rule honest (absolute rule 2).
@@ -30,6 +31,14 @@ class SSHError(RuntimeError):
     This is distinct from a command that ran and returned nonzero; that is
     reported through CommandResult.returncode.
     """
+
+
+@dataclass(frozen=True)
+class SSHTarget:
+    """Resolved SSH host plus the configured authentication method."""
+
+    host: str
+    auth_method: str | None = None
 
 
 @dataclass
@@ -107,6 +116,33 @@ def command_channel_usable(
     msg = (proc.stderr or proc.stdout or "").strip()
     usable = proc.returncode == 0
     return usable, msg or ("command channel usable" if usable else "command channel rejected")
+
+
+def direct_key_channel_usable(
+    ssh_host: str, timeout: float = 20.0
+) -> tuple[bool, str]:
+    """Probe a non-multiplexed public-key SSH connection.
+
+    This is intended for NERSC ``sshproxy`` certificates. It cannot prompt and
+    cannot reuse or create a ControlMaster socket.
+    """
+    argv = ["ssh", *_direct_key_options(), "-o", f"ConnectTimeout={int(timeout)}"]
+    argv.extend([ssh_host, "true"])
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 2.0,
+        )
+    except FileNotFoundError:
+        return False, "ssh executable not found"
+    except subprocess.TimeoutExpired:
+        return False, f"direct key connection timed out after {timeout}s"
+
+    msg = (proc.stderr or proc.stdout or "").strip()
+    usable = proc.returncode == 0
+    return usable, msg or ("direct key connection usable" if usable else "direct key connection rejected")
 
 
 def certificate_status(ssh_host: str, timeout: float = 5.0) -> dict[str, Any] | None:
@@ -201,12 +237,51 @@ def certificate_status(ssh_host: str, timeout: float = 5.0) -> dict[str, Any] | 
     }
 
 
-def require_session(ssh_host: str) -> None:
-    """Fail unless a live ControlMaster session exists.
+def _normalize_target(target: str | SSHTarget) -> SSHTarget:
+    return target if isinstance(target, SSHTarget) else SSHTarget(target)
 
-    We deliberately refuse to open one ourselves: doing so would trigger an MFA
-    prompt that the user, not the tool, must answer.
-    """
+
+def _direct_key_options() -> list[str]:
+    """SSH options that forbid ControlMaster use and interactive fallback."""
+    return [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "PreferredAuthentications=publickey",
+    ]
+
+
+def _connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
+    """Validate the configured authentication and return SSH CLI options."""
+    resolved = _normalize_target(target)
+    if resolved.auth_method == "sshproxy":
+        certificate = certificate_status(resolved.host)
+        if certificate is None:
+            raise SSHError(
+                f"no SSH certificate is configured for {resolved.host!r}; "
+                "set CertificateFile in the SSH alias and refresh it with the "
+                "user's NERSC sshproxy workflow"
+            )
+        if not certificate.get("valid", False):
+            raise SSHError(
+                f"SSH certificate for {resolved.host!r} is missing or expired "
+                f"({certificate.get('detail')}); refresh it with the user's "
+                "NERSC sshproxy workflow"
+            )
+        return resolved.host, _direct_key_options()
+
+    require_session(resolved.host)
+    return resolved.host, ["-o", "BatchMode=yes"]
+
+
+def require_session(ssh_host: str) -> None:
+    """Fail unless a live ControlMaster session exists for an MFA host."""
     alive, detail = control_socket_alive(ssh_host)
     if alive:
         return
@@ -223,7 +298,7 @@ def require_session(ssh_host: str) -> None:
 
 
 def run(
-    ssh_host: str,
+    ssh_host: str | SSHTarget,
     argv: Sequence[str],
     *,
     timeout: float = 120.0,
@@ -234,13 +309,14 @@ def run(
     """Run a command on the remote host over the existing ssh session.
 
     Args:
-        ssh_host: ~/.ssh/config alias with ControlMaster configured.
+        ssh_host: resolved target. ``sshproxy`` targets use a direct key;
+            other targets require a configured ControlMaster alias.
         argv: command as an argument list; quoted with shlex before sending.
         cwd: remote working directory, if any.
         env_script: script to source first (e.g. a machine's XGC env script).
         check: raise SSHError on nonzero exit.
     """
-    require_session(ssh_host)
+    host, options = _connection_options(ssh_host)
 
     remote = shlex.join(argv)
     if cwd:
@@ -250,7 +326,7 @@ def run(
         # a half-configured environment.
         remote = f"set -e; source {shlex.quote(env_script)} >/dev/null 2>&1; {remote}"
 
-    full = ["ssh", "-o", "BatchMode=yes", ssh_host, remote]
+    full = ["ssh", *options, host, remote]
     try:
         proc = subprocess.run(full, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -265,16 +341,22 @@ def run(
     return result.check() if check else result
 
 
-def write_file(ssh_host: str, remote_path: str, content: str, *, timeout: float = 60.0) -> None:
+def write_file(
+    ssh_host: str | SSHTarget,
+    remote_path: str,
+    content: str,
+    *,
+    timeout: float = 60.0,
+) -> None:
     """Write text to a remote path by streaming it over stdin.
 
     Avoids a temp file on the local side and avoids embedding the content in the
     command line, which would break on quoting and hit ARG_MAX.
     """
-    require_session(ssh_host)
+    host, options = _connection_options(ssh_host)
 
     remote = f"cat > {shlex.quote(remote_path)}"
-    full = ["ssh", "-o", "BatchMode=yes", ssh_host, remote]
+    full = ["ssh", *options, host, remote]
     try:
         proc = subprocess.run(
             full, input=content, capture_output=True, text=True, timeout=timeout
@@ -286,23 +368,29 @@ def write_file(ssh_host: str, remote_path: str, content: str, *, timeout: float 
         raise SSHError(f"failed to write {remote_path}: {proc.stderr.strip()}")
 
 
-def read_file(ssh_host: str, remote_path: str, *, timeout: float = 60.0) -> str:
+def read_file(
+    ssh_host: str | SSHTarget, remote_path: str, *, timeout: float = 60.0
+) -> str:
     """Read a remote text file."""
     return run(ssh_host, ["cat", remote_path], timeout=timeout, check=True).stdout
 
 
-def mkdir_p(ssh_host: str, remote_path: str, *, timeout: float = 30.0) -> None:
+def mkdir_p(
+    ssh_host: str | SSHTarget, remote_path: str, *, timeout: float = 30.0
+) -> None:
     """Create a remote directory, including parents."""
     run(ssh_host, ["mkdir", "-p", remote_path], timeout=timeout, check=True)
 
 
-def exists(ssh_host: str, remote_path: str, *, timeout: float = 30.0) -> bool:
+def exists(
+    ssh_host: str | SSHTarget, remote_path: str, *, timeout: float = 30.0
+) -> bool:
     """Whether a remote path exists."""
     return run(ssh_host, ["test", "-e", remote_path], timeout=timeout).ok
 
 
 def pull(
-    ssh_host: str,
+    ssh_host: str | SSHTarget,
     remote_path: str,
     local_path: str,
     *,
@@ -310,14 +398,15 @@ def pull(
 ) -> CommandResult:
     """Copy a remote file or directory to the local filesystem via scp.
 
-    scp reuses the same ControlMaster socket as ssh.
+    SCP follows the target's authentication policy. NERSC ``sshproxy`` targets
+    explicitly bypass ControlMaster; MFA targets reuse the existing socket.
 
     Note: XGC output can reach terabytes. Only pull reduced products
     (AGENTS.md, data principles). Nothing here enforces that -- callers must.
     """
-    require_session(ssh_host)
+    host, options = _connection_options(ssh_host)
 
-    argv = ["scp", "-o", "BatchMode=yes", "-r", f"{ssh_host}:{remote_path}", local_path]
+    argv = ["scp", *options, "-r", f"{host}:{remote_path}", local_path]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -332,16 +421,16 @@ def pull(
 
 
 def push(
-    ssh_host: str,
+    ssh_host: str | SSHTarget,
     local_path: str,
     remote_path: str,
     *,
     timeout: float = 600.0,
 ) -> CommandResult:
     """Copy a local file or directory to the remote host via scp."""
-    require_session(ssh_host)
+    host, options = _connection_options(ssh_host)
 
-    argv = ["scp", "-o", "BatchMode=yes", "-r", local_path, f"{ssh_host}:{remote_path}"]
+    argv = ["scp", *options, "-r", local_path, f"{host}:{remote_path}"]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -355,21 +444,23 @@ def push(
     ).check()
 
 
-def host_for(machine_cfg: dict[str, Any]) -> str:
+def host_for(machine_cfg: dict[str, Any]) -> SSHTarget:
     """Resolve the ssh target for a machine definition.
 
-    Prefers the ~/.ssh/config alias, since that is where ControlMaster lives.
+    Prefers the ~/.ssh/config alias, which supplies either the ControlMaster
+    settings or the NERSC IdentityFile/CertificateFile pair.
     """
     from tools import machines as m
 
     auth = machine_cfg.get("auth", {})
     alias = auth.get("ssh_config_host")
     if alias and not m.is_placeholder(alias):
-        return alias
+        return SSHTarget(alias, auth.get("method"))
 
     user, host = machine_cfg.get("user"), machine_cfg.get("host")
     if not host:
         raise SSHError("machine definition has neither ssh_config_host nor host")
     if m.is_placeholder(user):
         user = None  # fall back to the local username rather than "<...>@host"
-    return f"{user}@{host}" if user else host
+    target = f"{user}@{host}" if user else host
+    return SSHTarget(target, auth.get("method"))

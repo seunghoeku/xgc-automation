@@ -15,17 +15,16 @@ page is the complete checklist.
 | An ohmic API key (`OHMIC_API_KEY` in your environment) | Local LLM endpoint; `preflight` checks reachability |
 | An XGC build on each machine, or willingness to build one | See `docs/build-<machine>.md`; `xgc --dryrun` is the input validator |
 
-## 2. SSH aliases and ControlMaster (the connection contract)
+## 2. SSH aliases and authentication (the connection contract)
 
-All remote work reuses an SSH session that **you** open. For each machine,
-add a `Host` alias to `~/.ssh/config` with ControlMaster multiplexing (see
-`docs/ssh-setup.md` for full examples):
+For MFA-protected machines, remote work reuses an SSH session that **you**
+open. Add a `Host` alias to `~/.ssh/config` with ControlMaster multiplexing
+(see `docs/ssh-setup.md` for full examples):
 
 ```
 Host mypolaris
   HostName polaris.alcf.anl.gov
   User <your_alcf_username>
-Host *
   ControlMaster auto
   ControlPersist 8h
   ControlPath ~/.ssh/cm-%r@%h:%p
@@ -35,6 +34,24 @@ The alias name is yours to choose -- the only rule is that
 `auth.ssh_config_host` in your `machines.local.yaml` must match it exactly.
 Authenticate once yourself (`ssh mypolaris`); the tools then reuse the
 socket and fail fast with instructions when it has expired.
+
+Perlmutter uses a different contract. Its alias selects the NERSC sshproxy
+key and certificate and disables multiplexing:
+
+```
+Host perlmutter
+  HostName perlmutter.nersc.gov
+  User <your_nersc_username>
+  IdentityFile ~/.ssh/nersc
+  CertificateFile ~/.ssh/nersc-cert.pub
+  IdentitiesOnly yes
+  PreferredAuthentications publickey
+  ControlMaster no
+  ControlPath none
+```
+
+Refresh the sshproxy certificate yourself when needed. The tools validate it
+and use independent BatchMode public-key connections; they never prompt.
 
 ## 3. machines.local.yaml (your bindings)
 
