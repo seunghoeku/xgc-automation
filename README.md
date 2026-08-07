@@ -53,6 +53,11 @@ product scans only top-level names, while `oned_profiles` uses XGC-Analysis
 logical-step selection remotely and saves bounded JSON plus a local SVG for
 the first/latest 1-D profiles.
 
+`xgc-remote-gui` opens XGC-Devel's existing Monitor against a remote simulation
+directory. It resolves recorded runs, validates the remote GUI environment,
+starts a loopback-only login-node server and SSH tunnel, and opens the local
+browser without submitting a scheduler job or transferring BP output.
+
 ## Docs
 
 - `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines
@@ -60,5 +65,6 @@ the first/latest 1-D profiles.
 - `docs/build-polaris.md` — verified Polaris environment and CMake configure
   plus the locally tested PBS resource profile
 - `docs/data-analysis.md` — remote reduction boundary and summary products
+- `docs/remote-gui.md` — launch the remote XGC_GUI Monitor through an SSH tunnel
 - `docs/simulation-ids.md` — sequential IDs, machine codes, and directories
 - `docs/input-archive.md` — recent-first archive inspection and migration policy

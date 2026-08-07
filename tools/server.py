@@ -26,6 +26,9 @@ Tools implemented so far:
   - cancel_job    : cancel a job, also gated on confirmation
   - job_output    : bounded tail of a run's stdout/stderr
   - analyze_run   : remotely reduce a run to a bounded local summary
+  - plan_remote_gui : resolve and validate an XGC_GUI Monitor target
+  - launch_remote_gui : start a remote Monitor and local SSH tunnel
+  - remote_gui_status / stop_remote_gui : manage launcher-owned GUI sessions
 
 Scientific data products and provenance hardening will be added following the
 roadmap.
@@ -49,6 +52,7 @@ from tools import input_builder as ib
 from tools import input_archive
 from tools import machines as m
 from tools import physics_advisor as pa
+from tools import remote_gui as rg
 from tools import simulation_registry as sr
 from tools import ssh as ssh_transport
 
@@ -657,6 +661,89 @@ def analyze_run(
         save=save,
         confirm_overwrite=confirm_overwrite,
     )
+
+
+@mcp.tool()
+def search_remote_gui_targets(
+    query: str,
+    machine: str | None = None,
+) -> dict[str, Any]:
+    """Search local run provenance for a remote XGC_GUI Monitor target."""
+    return {"matches": rg.search_provenance(query, machine=machine)}
+
+
+@mcp.tool()
+def plan_remote_gui(
+    machine: str,
+    remote_directory: str | None = None,
+    run_id: str | None = None,
+    simulation_id: str | None = None,
+    query: str | None = None,
+    source: str | None = None,
+    preset: str | None = None,
+    local_port: int | None = None,
+    remote_port: int | None = None,
+) -> dict[str, Any]:
+    """Resolve and validate a remote XGC_GUI launch without starting it.
+
+    Select exactly one of ``remote_directory``, ``run_id``, ``simulation_id``,
+    or ``query``. The check is read-only and uses no scheduler allocation.
+    """
+    return rg.plan_remote_gui(
+        machine,
+        remote_directory=remote_directory,
+        run_id=run_id,
+        simulation_id=simulation_id,
+        query=query,
+        source=source,
+        preset=preset,
+        local_port=local_port,
+        remote_port=remote_port,
+    ).to_dict()
+
+
+@mcp.tool()
+def launch_remote_gui(
+    machine: str,
+    remote_directory: str | None = None,
+    run_id: str | None = None,
+    simulation_id: str | None = None,
+    query: str | None = None,
+    source: str | None = None,
+    preset: str | None = None,
+    local_port: int | None = None,
+    remote_port: int | None = None,
+    open_browser: bool = True,
+) -> dict[str, Any]:
+    """Launch XGC-Devel's Monitor remotely and open its local tunnel URL.
+
+    This starts a login-node Flask process and an SSH tunnel only. It never
+    submits a scheduler job and never copies or modifies simulation output.
+    """
+    plan = rg.plan_remote_gui(
+        machine,
+        remote_directory=remote_directory,
+        run_id=run_id,
+        simulation_id=simulation_id,
+        query=query,
+        source=source,
+        preset=preset,
+        local_port=local_port,
+        remote_port=remote_port,
+    )
+    return rg.launch_remote_gui(plan, open_browser=open_browser)
+
+
+@mcp.tool()
+def remote_gui_status(session_id: str | None = None) -> dict[str, Any]:
+    """Show one or all local remote-GUI tunnel sessions."""
+    return rg.remote_gui_status(session_id)
+
+
+@mcp.tool()
+def stop_remote_gui(session_id: str) -> dict[str, Any]:
+    """Stop one launcher-owned SSH tunnel and its remote GUI process."""
+    return rg.stop_remote_gui(session_id)
 
 
 def main() -> None:

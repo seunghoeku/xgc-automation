@@ -57,6 +57,8 @@ unaware of the machine type.
 6. `data_analyzer` — generate reduced products remotely → pull locally → plot
    (heat flux, profiles, spectra)
 7. `provenance` — input→output lineage (commit, hash, timestamp)
+8. `remote_gui` — resolve a remote simulation, start XGC-Devel's existing
+   Monitor on the login node, tunnel it to localhost, and manage its lifecycle
 
 ## Data Principles
 - XGC output is ADIOS2 (`.bp`) and can reach several TB. **Never download it all.**
@@ -132,6 +134,14 @@ unaware of the machine type.
       runtime-validated on Perlmutter with XGCa. It is the regular-sheath
       reference, not the sibling Gyraze-surrogate variant; current-master
       dryrun remains required before reuse.
+- [x] 11. Remote XGC_GUI launcher (`tools/remote_gui.py`) — the
+      `xgc-remote-gui` CLI and matching MCP tools resolve explicit paths or
+      local provenance, validate the remote GUI/Python environment, load an
+      optional `.xgcg` preset, start a loopback-only login-node Monitor and SSH
+      tunnel, open the local browser, and provide status/stop lifecycle tools.
+      Perlmutter uses independent sshproxy key connections; no scheduler job
+      or BP transfer is involved. A live Perlmutter plan/open/status/stop round
+      trip passed against the TCV reduced-adiabatic run on 2026-08-07.
 
 ## Open Questions to Resolve First
 1. **ohmic.pppl.gov API spec** — OpenAI-compatible? Authentication (key/SSO/IP)?

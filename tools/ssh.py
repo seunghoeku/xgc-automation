@@ -257,7 +257,7 @@ def _direct_key_options() -> list[str]:
     ]
 
 
-def _connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
+def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
     """Validate the configured authentication and return SSH CLI options."""
     resolved = _normalize_target(target)
     if resolved.auth_method == "sshproxy":
@@ -316,7 +316,7 @@ def run(
         env_script: script to source first (e.g. a machine's XGC env script).
         check: raise SSHError on nonzero exit.
     """
-    host, options = _connection_options(ssh_host)
+    host, options = connection_options(ssh_host)
 
     remote = shlex.join(argv)
     if cwd:
@@ -353,7 +353,7 @@ def write_file(
     Avoids a temp file on the local side and avoids embedding the content in the
     command line, which would break on quoting and hit ARG_MAX.
     """
-    host, options = _connection_options(ssh_host)
+    host, options = connection_options(ssh_host)
 
     remote = f"cat > {shlex.quote(remote_path)}"
     full = ["ssh", *options, host, remote]
@@ -404,7 +404,7 @@ def pull(
     Note: XGC output can reach terabytes. Only pull reduced products
     (AGENTS.md, data principles). Nothing here enforces that -- callers must.
     """
-    host, options = _connection_options(ssh_host)
+    host, options = connection_options(ssh_host)
 
     argv = ["scp", *options, "-r", f"{host}:{remote_path}", local_path]
     try:
@@ -428,7 +428,7 @@ def push(
     timeout: float = 600.0,
 ) -> CommandResult:
     """Copy a local file or directory to the remote host via scp."""
-    host, options = _connection_options(ssh_host)
+    host, options = connection_options(ssh_host)
 
     argv = ["scp", *options, "-r", local_path, f"{host}:{remote_path}"]
     try:

@@ -11,6 +11,9 @@ dependencies = [
     "openpyxl>=3.1.5",
 ]
 
+[project.scripts]
+xgc-remote-gui = "tools.remote_gui:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -73,6 +73,12 @@ tells you exactly what still blocks submission. Machine-universal values
 (schedulers, queues, shared site installs like stellar's `env_script` and
 `remote_python`) are already set and normally need no override.
 
+To use the remote XGC_GUI Monitor, also set `gui.source` to an XGC-Devel
+checkout containing `utils/input_gui/app.py` and `gui.python` to an interpreter
+that imports Flask, NumPy, Matplotlib, and ADIOS2. `gui.env_script` is optional.
+Run `uv run xgc-remote-gui plan ...` before opening a session; see
+`docs/remote-gui.md`.
+
 ## 4. Data you will NOT have (and what still works)
 
 Two directories are the original researcher's personal science record and

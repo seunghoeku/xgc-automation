@@ -25,6 +25,13 @@ perlmutter:
   defaults:
     account: m0000                   # your NERSC project
     mail_user: alice@example.org
+  # Remote XGC_GUI Monitor runtime. The Python environment must import flask,
+  # numpy, matplotlib, and adios2. No scheduler allocation is used.
+  gui:
+    source: /pscratch/sd/a/alice/XGC-Devel
+    python: /pscratch/sd/a/alice/venvs/xgc-gui/bin/python3
+    # env_script: /pscratch/sd/a/alice/env/xgc-gui.sh  # optional
+    # remote_port: 5080  # optional; otherwise a high port is selected
   # Only needed for analyze_run's oned_profiles product: where YOUR
   # XGC-Analysis checkout lives on the machine (docs/data-analysis.md).
   analysis:
@@ -50,6 +57,10 @@ polaris:
     env_script: /grand/YourProject/alice/XGC-Devel/quickstart/modules_and_env/polaris.sh
   defaults:
     account: YourProject             # ALCF allocation/project name
+  gui:
+    source: /grand/YourProject/alice/XGC-Devel
+    python: /grand/YourProject/alice/venvs/xgc-gui/bin/python3
+    # env_script: /grand/YourProject/alice/env/xgc-gui.sh
 
 stellar:
   user: alice
@@ -65,3 +76,7 @@ stellar:
     # in machines.yaml; override only if you use your own environment.
   defaults:
     account: pppl
+  gui:
+    source: /home/alice/git/XGC-Devel
+    python: /home/alice/venvs/xgc-gui/bin/python3
+    # env_script: /home/alice/env/xgc-gui.sh
