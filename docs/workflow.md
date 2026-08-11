@@ -118,6 +118,35 @@ caller:
 Always pass `case_dir` for real XGC runs. It is unnecessary for `hello_world`
 jobs, which do not read an input file.
 
+### Recommended future gate: executable availability
+
+Before a scientific job is submitted, the runner should verify the exact remote
+executable referenced by the rendered job script when its path was supplied or
+overridden externally, or when a significant amount of time has passed since
+the last successful validation. The check may run during planning or another
+pre-submit stage; it does not need to occur immediately before `sbatch` or
+`qsub`.
+
+The pre-submit check should:
+
+- resolve the final executable after all machine configuration and request
+  overrides have been applied;
+- require an absolute remote path for scientific jobs;
+- verify on the target machine that the path exists, is a regular file, and is
+  executable;
+- source the configured environment script first when executable validation
+  depends on that environment;
+- ensure that the checked path is identical to the path embedded in the job
+  script and provenance record;
+- block submission with an actionable error if validation fails; and
+- record the executable path and, when practical, its size, modification time,
+  checksum, or corresponding XGC commit in provenance.
+
+A recent successful validation or dryrun may be reused when the executable path
+and relevant file metadata remain unchanged. An older result should not be
+trusted indefinitely because the binary may have been removed or rebuilt.
+Scheduler-only `hello_world` jobs are exempt because they do not launch XGC.
+
 For PBS machines, the `partition` argument is interpreted as the PBS queue.
 Polaris defaults to `debug-scaling`; its PBS script also requires the
 configured account, system, and filesystem list. Missing required PBS
