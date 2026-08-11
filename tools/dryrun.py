@@ -193,6 +193,7 @@ def run_dryrun(
     *,
     n_ranks: int | None = None,
     xgc_exe: str | None = None,
+    env_script: str | None = None,
     timeout: float = 600.0,
 ) -> DryrunReport:
     """Run `xgc --dryrun` in a remote case directory on the login node.
@@ -202,6 +203,9 @@ def run_dryrun(
         remote_case_dir: directory holding `input`, `input_dir/`, etc.
         n_ranks: rank count the real job will use, so estimates match.
         xgc_exe: override the executable from machines.yaml.
+        env_script: override the environment script from machines.yaml, so a
+            build recorded under xgc.observed_builds is validated against its
+            own modules.
 
     Runs on the login node: single rank, seconds, no scheduler involvement.
     """
@@ -227,7 +231,9 @@ def run_dryrun(
         host,
         argv,
         cwd=remote_case_dir,
-        env_script=xgc_cfg.get("env_script"),
+        env_script=(
+            env_script if env_script is not None else xgc_cfg.get("env_script")
+        ),
         timeout=timeout,
     )
     # XGC writes diagnostics to stdout, but MPI_ABORT messaging goes to stderr;

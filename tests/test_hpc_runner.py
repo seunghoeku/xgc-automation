@@ -313,6 +313,51 @@ class PerlmutterPlanTests(unittest.TestCase):
         self.assertIn("srun -n 32 hostname", plan.script)
         self.assertEqual(plan.resources["mail_user"], "alice@example.org")
 
+    def test_build_overrides_are_rendered_and_recorded(self) -> None:
+        executable = "/pscratch/builds/xgca/bin/xgca"
+        env_script = "/pscratch/builds/xgca/setup.sh"
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-observed-build",
+                xgc_exe=executable,
+                env_script=env_script,
+            )
+
+        self.assertIn(f"source {env_script}", plan.script)
+        self.assertIn(f"srun -n 32 {executable}", plan.script)
+        self.assertEqual(plan.resources["executable"], executable)
+        self.assertEqual(plan.resources["env_script"], env_script)
+
+    def test_prebuilt_plan_passes_its_build_to_dryrun(self) -> None:
+        executable = "/pscratch/builds/xgca/bin/xgca"
+        env_script = "/pscratch/builds/xgca/setup.sh"
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-dryrun-build",
+                xgc_exe=executable,
+                env_script=env_script,
+            )
+
+        rejected = hr.dryrun.DryrunReport(ok=False, returncode=1)
+        with patch.object(hr.dryrun, "run_dryrun", return_value=rejected) as run:
+            result = hr.submit(
+                "perlmutter",
+                confirm=True,
+                plan=plan,
+                case_dir="/pscratch/cases/tcv",
+            )
+
+        self.assertFalse(result["submitted"])
+        run.assert_called_once_with(
+            "perlmutter",
+            "/pscratch/cases/tcv",
+            n_ranks=32,
+            xgc_exe=executable,
+            env_script=env_script,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

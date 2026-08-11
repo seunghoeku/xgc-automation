@@ -122,6 +122,7 @@ def prepare_submission(
     mail_type: str | None = None,
     mail_user: str | None = None,
     xgc_exe: str | None = None,
+    env_script: str | None = None,
     run_id: str | None = None,
     simulation_id: str | None = None,
     hello_world: bool = False,
@@ -134,6 +135,9 @@ def prepare_submission(
         partition: Slurm partition or PBS queue.
         hello_world: ignore XGC and run hostname through the site launcher.
         xgc_exe: override the executable from machines.yaml.
+        env_script: override the environment script from machines.yaml. Needed
+            when a build is recorded under xgc.observed_builds rather than as
+            the machine's default, since that build's modules live with it.
 
     Unspecified resource arguments fall back to the machine's `defaults`.
     """
@@ -141,6 +145,9 @@ def prepare_submission(
     scheduler = sched.get_scheduler(cfg)  # raises on unconfirmed schedulers
     defaults = cfg.get("defaults", {})
     xgc_cfg = cfg.get("xgc", {})
+    resolved_env_script = (
+        env_script if env_script is not None else xgc_cfg.get("env_script")
+    )
 
     run_id = run_id or new_run_id()
     if simulation_id and hello_world:
@@ -260,7 +267,7 @@ def prepare_submission(
         gpu_aware_mpi=bool(xgc_cfg.get("gpu_aware_mpi", False)),
         total_ranks=total_ranks,
         modules=xgc_cfg.get("modules") or [],
-        env_script=xgc_cfg.get("env_script"),
+        env_script=resolved_env_script,
         xgc_exe=exe,
         generated_at=_now().isoformat(),
         provenance_id=run_id,
@@ -283,6 +290,7 @@ def prepare_submission(
         "mail_user": mail_user,
         "scheduler": scheduler.type_name,
         "executable": exe or "(hello-world: hostname)",
+        "env_script": resolved_env_script,
     }
 
     return SubmissionPlan(
@@ -341,10 +349,14 @@ def submit(
 
     dryrun_report: dict[str, Any] | None = None
     if case_dir and not skip_dryrun:
+        # Validate with the same executable the job will run, not the
+        # machine default, which may be unset or a different build.
         report = dryrun.run_dryrun(
             plan.machine,
             case_dir,
             n_ranks=plan.resources.get("total_ranks"),
+            xgc_exe=plan.resources.get("executable"),
+            env_script=plan.resources.get("env_script"),
         )
         dryrun_report = report.to_dict()
         if report.blocking:
