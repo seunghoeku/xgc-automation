@@ -34,6 +34,26 @@ class OutputRunDirTests(unittest.TestCase):
 
         self.assertEqual(resolved, "/scratch/cases/ecbc-short")
 
+    def test_uses_classified_provenance_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp)
+            provenance_dir = runs_dir / "master" / "run-master"
+            provenance_dir.mkdir(parents=True)
+            (provenance_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "machine": "stellar",
+                        "remote_run_dir": "/scratch/cases/master-case",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(hr, "RUNS_DIR", runs_dir):
+                resolved = hr._output_run_dir("stellar", "run-master", self.cfg)
+
+        self.assertEqual(resolved, "/scratch/cases/master-case")
+
     def test_falls_back_to_run_root_without_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(hr, "RUNS_DIR", Path(tmp)):
@@ -123,6 +143,7 @@ class SimulationPlanTests(unittest.TestCase):
             "/scratch/xgc-runs/n645st_tcv_delta_f",
         )
         self.assertEqual(plan.job_name, "xgc-n645st")
+        self.assertEqual(plan.provenance_class, "master")
         self.assertEqual(plan.simulation["simulation_number"], 645)
         self.assertIn(
             "#SBATCH --output=/scratch/xgc-runs/n645st_tcv_delta_f/slurm-%j.out",
@@ -312,6 +333,7 @@ class PerlmutterPlanTests(unittest.TestCase):
         self.assertIn("#SBATCH --mail-user=alice@example.org", plan.script)
         self.assertIn("srun -n 32 hostname", plan.script)
         self.assertEqual(plan.resources["mail_user"], "alice@example.org")
+        self.assertEqual(plan.provenance_class, "test")
 
     def test_build_overrides_are_rendered_and_recorded(self) -> None:
         executable = "/pscratch/builds/xgca/bin/xgca"
@@ -357,6 +379,26 @@ class PerlmutterPlanTests(unittest.TestCase):
             xgc_exe=executable,
             env_script=env_script,
         )
+
+    def test_provenance_is_written_below_plan_class(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-test-record",
+                xgc_exe="/pscratch/builds/xgca/bin/xgca",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "RUNS_DIR", Path(tmp)):
+                path = hr._write_provenance(plan, {"run_id": plan.run_id})
+                expected = (
+                    Path(tmp)
+                    / "test"
+                    / "run-perlmutter-test-record"
+                    / "provenance.json"
+                )
+                self.assertEqual(path, expected)
+                self.assertTrue(expected.is_file())
 
 
 if __name__ == "__main__":

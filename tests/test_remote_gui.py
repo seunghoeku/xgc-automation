@@ -35,9 +35,17 @@ class RemoteGUITargetTests(unittest.TestCase):
         self.runs_patch.stop()
         self.tmp.cleanup()
 
-    def _write_run(self, run_id: str, **values: object) -> None:
+    def _write_run(
+        self,
+        run_id: str,
+        *,
+        provenance_class: str | None = None,
+        **values: object,
+    ) -> None:
         directory = self.runs_dir / run_id
-        directory.mkdir()
+        if provenance_class:
+            directory = self.runs_dir / provenance_class / run_id
+        directory.mkdir(parents=True)
         record = {
             "run_id": run_id,
             "machine": "perlmutter",
@@ -78,6 +86,26 @@ class RemoteGUITargetTests(unittest.TestCase):
 
         self.assertEqual(plan.target_source, "run:run-a")
         self.assertEqual(plan.remote_directory, "/pscratch/alice/run-a")
+
+    def test_plan_and_search_resolve_classified_provenance(self) -> None:
+        self._write_run(
+            "run-master",
+            provenance_class="master",
+            simulation_id="n645pe",
+            job_name="TCV master",
+        )
+        with patch.object(rg.m, "get_machine", return_value=MACHINE_CONFIG):
+            plan = rg.plan_remote_gui(
+                "perlmutter",
+                run_id="run-master",
+                local_port=51001,
+                remote_port=41001,
+                inspect_remote=False,
+            )
+        matches = rg.search_provenance("TCV master")
+
+        self.assertEqual(plan.remote_directory, "/pscratch/alice/run-master")
+        self.assertEqual(matches[0]["provenance_class"], "master")
 
     def test_query_requires_an_unambiguous_match(self) -> None:
         self._write_run("run-a", job_name="TCV comparison")

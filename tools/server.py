@@ -561,6 +561,7 @@ def submit_job(
     confirm: bool = False,
     case_dir: str | None = None,
     simulation_id: str | None = None,
+    provenance_class: str | None = None,
     job_name: str | None = None,
     nodes: int | None = None,
     walltime: str | None = None,
@@ -582,13 +583,17 @@ def submit_job(
     rejected input blocks submission. Always pass case_dir for real XGC runs.
     Do not set skip_dryrun unless the user explicitly asks for it.
 
-    On success, writes a provenance record to runs/<run_id>/.
+    On success, writes a provenance record below ``runs/master/`` or
+    ``runs/test/``. Registered simulations default to master; unregistered and
+    hello-world jobs default to test. Pass ``provenance_class="master"`` for an
+    intentional unregistered scientific run.
     """
     return hr.submit(
         machine,
         confirm=confirm,
         case_dir=case_dir,
         simulation_id=simulation_id,
+        provenance_class=provenance_class,
         skip_dryrun=skip_dryrun,
         job_name=job_name,
         nodes=nodes,
@@ -643,7 +648,7 @@ def analyze_run(
     The first product, ``inventory``, scans only the top-level run directory
     and records ADIOS2 product names plus small file metadata. It does not
     descend into or read any ``.bp`` product. The resulting JSON may be saved
-    under ``runs/<run_id>/summaries/`` for provenance.
+    under the selected run's ``summaries/`` directory for provenance.
 
     ``oned_profiles`` uses the XGC-Analysis fast catalog remotely to read only
     the first/latest logical steps of selected ``xgc.oneddiag.bp`` profile

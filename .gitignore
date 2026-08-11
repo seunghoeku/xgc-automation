@@ -16,6 +16,9 @@ venv/
 # XGC output (large; never kept locally)
 runs/**/*.bp
 runs/**/*.bp.dir/
+# Development and scheduler-test provenance is local-only. Curated master
+# provenance remains eligible for review and version control.
+runs/test/
 *.bp
 *.bp.dir/
 

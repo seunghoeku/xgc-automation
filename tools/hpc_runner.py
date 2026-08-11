@@ -11,8 +11,9 @@ Submission is deliberately staged (AGENTS.md, absolute rules 1 and 4):
 `submit` without `confirm=True` returns the plan and submits nothing. Both
 gates live here rather than in the MCP layer so they hold no matter who calls.
 
-Every submission writes a provenance record to runs/<run_id>/, including the
-dryrun report, so a run's validation state is recoverable later (rule 5).
+Every submission writes a provenance record below runs/master/ or runs/test/,
+including the dryrun report, so a run's validation state is recoverable later
+(rule 5).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools import dryrun
 from tools import machines as m
+from tools import provenance as prov
 from tools import scheduler as sched
 from tools import simulation_registry as sim_registry
 from tools import ssh
@@ -73,6 +75,7 @@ class SubmissionPlan:
     remote_run_dir: str
     remote_script_path: str
     simulation: dict[str, Any] | None
+    provenance_class: str
     resources: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
 
@@ -84,6 +87,7 @@ class SubmissionPlan:
             "remote_run_dir": self.remote_run_dir,
             "remote_script_path": self.remote_script_path,
             "simulation": self.simulation,
+            "provenance_class": self.provenance_class,
             "resources": self.resources,
             "warnings": self.warnings,
             "script": self.script,
@@ -125,6 +129,7 @@ def prepare_submission(
     env_script: str | None = None,
     run_id: str | None = None,
     simulation_id: str | None = None,
+    provenance_class: str | None = None,
     hello_world: bool = False,
     run_dir: str | None = None,
 ) -> SubmissionPlan:
@@ -138,6 +143,8 @@ def prepare_submission(
         env_script: override the environment script from machines.yaml. Needed
             when a build is recorded under xgc.observed_builds rather than as
             the machine's default, since that build's modules live with it.
+        provenance_class: local record class, ``master`` or ``test``. Registered
+            simulations default to master; other jobs default to test.
 
     Unspecified resource arguments fall back to the machine's `defaults`.
     """
@@ -152,6 +159,14 @@ def prepare_submission(
     run_id = run_id or new_run_id()
     if simulation_id and hello_world:
         raise SubmissionError("simulation_id cannot be used for a hello-world job")
+    try:
+        provenance_class = prov.classify(
+            provenance_class,
+            simulation_id=simulation_id,
+            hello_world=hello_world,
+        )
+    except prov.ProvenanceError as exc:
+        raise SubmissionError(str(exc)) from exc
     job_name = job_name or f"xgc-{simulation_id or run_id}"
     warnings: list[str] = []
     simulation: dict[str, Any] | None = None
@@ -301,14 +316,15 @@ def prepare_submission(
         remote_run_dir=remote_run_dir,
         remote_script_path=f"{remote_run_dir}/submit.sh",
         simulation=simulation,
+        provenance_class=provenance_class,
         resources=resources,
         warnings=warnings,
     )
 
 
 def _write_provenance(plan: SubmissionPlan, record: dict[str, Any]) -> Path:
-    """Persist the run record locally under runs/<run_id>/."""
-    run_dir = RUNS_DIR / plan.run_id
+    """Persist the run record under runs/master/ or runs/test/."""
+    run_dir = prov.record_dir(RUNS_DIR, plan.run_id, plan.provenance_class)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "submit.sh").write_text(plan.script, encoding="utf-8")
     meta_path = run_dir / "provenance.json"
@@ -396,6 +412,7 @@ def submit(
             plan.simulation.get("simulation_id") if plan.simulation else None
         ),
         "simulation": plan.simulation,
+        "provenance_class": plan.provenance_class,
         "resources": plan.resources,
         "xgc": {
             "exe": cfg.get("xgc", {}).get("exe"),
@@ -491,8 +508,12 @@ def _output_run_dir(machine: str, run_id: str, cfg: dict[str, Any]) -> str:
     if not run_id or Path(run_id).name != run_id or run_id in {".", ".."}:
         raise SubmissionError(f"invalid run_id {run_id!r}")
 
-    provenance_path = RUNS_DIR / run_id / "provenance.json"
-    if provenance_path.exists():
+    try:
+        found = prov.find_record(RUNS_DIR, run_id)
+    except prov.ProvenanceError as exc:
+        raise SubmissionError(str(exc)) from exc
+    if found:
+        _, provenance_path = found
         try:
             record = json.loads(provenance_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:

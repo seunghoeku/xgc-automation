@@ -118,6 +118,22 @@ caller:
 Always pass `case_dir` for real XGC runs. It is unnecessary for `hello_world`
 jobs, which do not read an input file.
 
+### Provenance classes
+
+New local submission records are separated by intent:
+
+- `runs/master/<run_id>/` contains curated scientific provenance. A registered
+  simulation with a `simulation_id` is always stored here. `master` describes
+  the provenance tier, not the current Git branch.
+- `runs/test/<run_id>/` contains development, unregistered, and scheduler
+  smoke-test provenance. `hello_world` jobs are always stored here, and this
+  directory is ignored by Git.
+
+An intentional scientific run without a `simulation_id`, such as a historical
+case that cannot yet be registered, must explicitly request
+`provenance_class="master"`. Existing records directly below `runs/<run_id>/`
+remain readable as legacy provenance; new records are never written there.
+
 ### Recommended future gate: executable availability
 
 Before a scientific job is submitted, the runner should verify the exact remote

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from tools import machines as m
+from tools import provenance as prov
 from tools import ssh
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -359,10 +360,13 @@ print(json.dumps(payload, separators=(",", ":")))
 def _run_record(run_id: str) -> tuple[Path, dict[str, Any]]:
     if not _RUN_ID_RE.fullmatch(run_id):
         raise DataAnalysisError(f"invalid run_id: {run_id!r}")
-    run_dir = RUNS_DIR / run_id
-    record_path = run_dir / "provenance.json"
-    if not record_path.is_file():
+    try:
+        found = prov.find_record(RUNS_DIR, run_id)
+    except prov.ProvenanceError as exc:
+        raise DataAnalysisError(str(exc)) from exc
+    if found is None:
         raise DataAnalysisError(f"provenance not found for run {run_id!r}")
+    run_dir, record_path = found
     try:
         record = json.loads(record_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -698,7 +702,7 @@ def analyze_run(
     save: bool = True,
     confirm_overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Create one reduced product and optionally save it under runs/<run_id>/.
+    """Create one reduced product and save it beside the run provenance.
 
     Creating a new derived summary is safe and local. Replacing an existing
     summary requires ``confirm_overwrite=True`` so callers cannot silently

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import machines as m
+from tools import provenance as prov
 from tools import ssh
 
 
@@ -85,9 +86,13 @@ def _validate_remote_path(value: str, label: str) -> str:
 def _load_provenance(run_id: str) -> dict[str, Any]:
     if not RUN_ID_RE.fullmatch(run_id):
         raise RemoteGUIError(f"invalid run_id: {run_id!r}")
-    path = RUNS_DIR / run_id / "provenance.json"
-    if not path.exists():
+    try:
+        found = prov.find_record(RUNS_DIR, run_id)
+    except prov.ProvenanceError as exc:
+        raise RemoteGUIError(str(exc)) from exc
+    if found is None:
         raise RemoteGUIError(f"local provenance not found for run_id {run_id!r}")
+    _, path = found
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -105,7 +110,7 @@ def search_provenance(query: str, *, machine: str | None = None) -> list[dict[st
     matches: list[dict[str, Any]] = []
     if not RUNS_DIR.exists():
         return matches
-    for path in sorted(RUNS_DIR.glob("*/provenance.json")):
+    for provenance_class, path in prov.iter_records(RUNS_DIR):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -116,6 +121,7 @@ def search_provenance(query: str, *, machine: str | None = None) -> list[dict[st
             continue
         fields = [
             path.parent.name,
+            provenance_class,
             record.get("run_id"),
             record.get("simulation_id"),
             record.get("job_id"),
@@ -132,6 +138,8 @@ def search_provenance(query: str, *, machine: str | None = None) -> list[dict[st
             matches.append(
                 {
                     "run_id": record.get("run_id") or path.parent.name,
+                    "provenance_class": record.get("provenance_class")
+                    or provenance_class,
                     "machine": record.get("machine"),
                     "simulation_id": record.get("simulation_id"),
                     "job_id": record.get("job_id"),

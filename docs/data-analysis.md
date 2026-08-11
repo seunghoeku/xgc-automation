@@ -30,7 +30,8 @@ The inventory:
 - records ADIOS2 product names and small-file metadata;
 - never descends into or reads a `.bp` product;
 - limits the number of returned entries and JSON payload size; and
-- stores the result in `runs/<run_id>/summaries/inventory.json`.
+- stores the result beside its provenance in
+  `runs/<class>/<run_id>/summaries/inventory.json`.
 
 If that file already exists, replacement is refused unless
 `confirm_overwrite=True`.
@@ -56,10 +57,10 @@ The radial grid is downsampled to at most `max_profile_points`.
 
 The local artifacts are:
 
-- `runs/<run_id>/summaries/oned_profiles.json`, including reader version,
+- `runs/<class>/<run_id>/summaries/oned_profiles.json`, including reader version,
   module path, checkout commit when available, exact logical steps,
   source/returned radial sizes, and raw diagnostic values; and
-- `runs/<run_id>/summaries/oned_profiles.svg`, rendered locally from that
+- `runs/<class>/<run_id>/summaries/oned_profiles.svg`, rendered locally from that
   bounded JSON without transferring a BP store.
 
 The temperature channel is deliberately labeled *perpendicular temperature*.

@@ -151,6 +151,26 @@ class DataAnalyzerTests(unittest.TestCase):
         self.assertEqual(remote_argv[0:2], ["python3", "-c"])
         self.assertIn("/scratch/run-1", remote_argv)
 
+    def test_classified_provenance_is_resolved(self) -> None:
+        classified_dir = self.runs_dir / "master" / "run-master"
+        classified_dir.mkdir(parents=True)
+        (classified_dir / "provenance.json").write_text(
+            json.dumps(
+                {
+                    "machine": "stellar",
+                    "remote_run_dir": "/scratch/run-master",
+                    "provenance_class": "master",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(da, "RUNS_DIR", self.runs_dir):
+            run_dir, record = da._run_record("run-master")
+
+        self.assertEqual(run_dir, classified_dir)
+        self.assertEqual(record["provenance_class"], "master")
+
     def test_analyze_saves_only_json_summary(self) -> None:
         with (
             patch.object(da, "RUNS_DIR", self.runs_dir),
