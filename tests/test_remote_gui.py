@@ -264,7 +264,7 @@ class RemoteGUISessionTests(unittest.TestCase):
         self.assertFalse(result["stopped"])
         kill.assert_not_called()
 
-    def test_restricted_ps_falls_back_to_pid_and_loopback_url(self) -> None:
+    def test_restricted_ps_falls_back_to_loopback_url(self) -> None:
         state = {
             "session_id": "gui-test",
             "pid": 12345,
@@ -272,7 +272,6 @@ class RemoteGUISessionTests(unittest.TestCase):
         }
         with (
             patch.object(rg, "_process_command", return_value=None),
-            patch.object(rg, "_pid_alive", return_value=True),
             patch.object(rg, "_url_ready", return_value=True),
         ):
             self.assertTrue(rg._owned_process_alive(state))

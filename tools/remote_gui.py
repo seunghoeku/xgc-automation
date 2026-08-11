@@ -467,14 +467,6 @@ def _process_command(pid: int) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    return True
-
-
 def _owned_process_alive(state: dict[str, Any]) -> bool:
     try:
         pid = int(state["pid"])
@@ -484,7 +476,11 @@ def _owned_process_alive(state: dict[str, Any]) -> bool:
     command = _process_command(pid)
     if command is None:
         url = str(state.get("plan", {}).get("local_url") or "")
-        return _pid_alive(pid) and bool(url) and _url_ready(url)
+        # Restricted launchers such as Codex may deny both `ps` and signal-0
+        # checks for a process that they started outside the sandbox. The
+        # session-specific loopback Monitor URL is then the usable ownership
+        # signal: no remote or non-loopback endpoint is consulted.
+        return bool(url) and _url_ready(url)
     return bool(
         command
         and "ssh" in command
