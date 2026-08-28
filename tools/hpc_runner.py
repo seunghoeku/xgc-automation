@@ -127,6 +127,7 @@ def prepare_submission(
     mail_user: str | None = None,
     xgc_exe: str | None = None,
     env_script: str | None = None,
+    xgc_commit: str | None = None,
     run_id: str | None = None,
     simulation_id: str | None = None,
     provenance_class: str | None = None,
@@ -143,6 +144,7 @@ def prepare_submission(
         env_script: override the environment script from machines.yaml. Needed
             when a build is recorded under xgc.observed_builds rather than as
             the machine's default, since that build's modules live with it.
+        xgc_commit: source commit corresponding to an executable override.
         provenance_class: local record class, ``master`` or ``test``. Registered
             simulations default to master; other jobs default to test.
 
@@ -193,6 +195,7 @@ def prepare_submission(
 
     if hello_world:
         exe = None
+        resolved_xgc_commit = None
     else:
         exe = xgc_exe or xgc_cfg.get("exe")
         if not exe:
@@ -202,6 +205,10 @@ def prepare_submission(
             )
         if m.is_placeholder(exe):
             raise SubmissionError(f"xgc.exe for {machine!r} is a placeholder: {exe}")
+        configured_exe = xgc_cfg.get("exe")
+        resolved_xgc_commit = xgc_commit
+        if resolved_xgc_commit is None and exe == configured_exe:
+            resolved_xgc_commit = xgc_cfg.get("verified", {}).get("commit")
 
     # A reserved simulation has one canonical directory shared across its
     # submission attempts/restarts. The timestamp run_id remains separate and
@@ -306,6 +313,7 @@ def prepare_submission(
         "scheduler": scheduler.type_name,
         "executable": exe or "(hello-world: hostname)",
         "env_script": resolved_env_script,
+        "xgc_commit": resolved_xgc_commit,
     }
 
     return SubmissionPlan(
@@ -330,6 +338,18 @@ def _write_provenance(plan: SubmissionPlan, record: dict[str, Any]) -> Path:
     meta_path = run_dir / "provenance.json"
     meta_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return meta_path
+
+
+def _xgc_provenance(plan: SubmissionPlan) -> dict[str, Any]:
+    """Record the build selected by the reviewed submission plan."""
+    executable = plan.resources.get("executable")
+    if executable == "(hello-world: hostname)":
+        executable = None
+    return {
+        "exe": executable,
+        "env_script": plan.resources.get("env_script"),
+        "commit": plan.resources.get("xgc_commit"),
+    }
 
 
 def submit(
@@ -414,10 +434,7 @@ def submit(
         "simulation": plan.simulation,
         "provenance_class": plan.provenance_class,
         "resources": plan.resources,
-        "xgc": {
-            "exe": cfg.get("xgc", {}).get("exe"),
-            "commit": cfg.get("xgc", {}).get("verified", {}).get("commit"),
-        },
+        "xgc": _xgc_provenance(plan),
         "scheduler_stdout": result.stdout.strip(),
         "case_dir": case_dir,
         "dryrun": dryrun_report,

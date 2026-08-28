@@ -5,6 +5,25 @@ boundary:
 
 > Reduce on the HPC machine; transfer only bounded summary products.
 
+## Login node versus compute node
+
+Execution placement is based primarily on what dominates the work:
+
+- bounded, file-access-dominant analysis may run on a login node for up to six
+  hours;
+- compute-dominant analysis must run through the scheduler even when it is
+  expected to finish quickly; and
+- any analysis with a runtime limit above six hours must run through the
+  scheduler regardless of workload character.
+
+The current `inventory` and `oned_profiles` reducers are classified as
+file-access-dominant: inventory reads only top-level metadata, while
+`oned_profiles` opens one diagnostic product and reads bounded variables at
+selected logical steps. Their returned JSON records the workload
+classification, runtime limit, execution mode, and decision reason. Future
+reducers must declare their workload character before they are allowed to run
+on a login node.
+
 ## Relationship to XGC GUI Monitor
 
 The XGC GUI Monitor supports both direct directory scanning and catalog-backed

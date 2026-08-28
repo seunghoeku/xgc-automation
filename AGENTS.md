@@ -40,6 +40,11 @@ The repository-wide SSH connection timeout is 60 seconds, defined by
 `SSH_CONNECT_TIMEOUT_SECONDS` in `tools/ssh.py`. Do not replace it with a
 shorter generic Perlmutter default.
 
+Remote analysis placement is determined primarily by workload character, not
+duration alone. Bounded file-access-dominant analysis may run on a login node
+for up to six hours. Compute-dominant analysis must use a scheduler allocation
+even when short, and any analysis exceeding six hours must use the scheduler.
+
 ## HPC Targets
 | Machine | Center | Scheduler | Auth | Scratch |
 |---|---|---|---|---|

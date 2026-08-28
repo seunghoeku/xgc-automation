@@ -32,11 +32,63 @@ DEFAULT_MAX_ENTRIES = 1_000
 DEFAULT_MAX_PROFILE_POINTS = 512
 MIN_PROFILE_POINTS = 16
 MAX_PROFILE_POINTS = 2_048
+LOGIN_NODE_MAX_RUNTIME_SECONDS = 6 * 60 * 60
+FILE_ACCESS_DOMINANT = "file_access_dominant"
+COMPUTE_DOMINANT = "compute_dominant"
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class DataAnalysisError(RuntimeError):
     """A run cannot be safely inspected or summarized."""
+
+
+def analysis_execution_policy(
+    workload_dominance: str,
+    runtime_limit_seconds: float,
+) -> dict[str, Any]:
+    """Choose login-node or scheduler execution from workload character.
+
+    Runtime is a secondary bound: file-access-dominant work may run on a login
+    node for at most six hours, while compute-dominant work always belongs on a
+    compute node even when its expected duration is short.
+    """
+    if workload_dominance not in {FILE_ACCESS_DOMINANT, COMPUTE_DOMINANT}:
+        raise DataAnalysisError(
+            "workload_dominance must be file_access_dominant or compute_dominant"
+        )
+    if runtime_limit_seconds <= 0:
+        raise DataAnalysisError("runtime_limit_seconds must be positive")
+
+    within_login_limit = runtime_limit_seconds <= LOGIN_NODE_MAX_RUNTIME_SECONDS
+    login_node_allowed = (
+        workload_dominance == FILE_ACCESS_DOMINANT and within_login_limit
+    )
+    if workload_dominance == COMPUTE_DOMINANT:
+        reason = "compute-dominant analysis requires scheduler execution"
+    elif not within_login_limit:
+        reason = "analysis exceeds the six-hour login-node limit"
+    else:
+        reason = (
+            "bounded file-access-dominant analysis is permitted on the login node"
+        )
+    return {
+        "workload_dominance": workload_dominance,
+        "runtime_limit_seconds": runtime_limit_seconds,
+        "login_node_max_runtime_seconds": LOGIN_NODE_MAX_RUNTIME_SECONDS,
+        "login_node_allowed": login_node_allowed,
+        "execution_mode": "login" if login_node_allowed else "scheduler",
+        "reason": reason,
+    }
+
+
+def _require_login_execution(
+    workload_dominance: str,
+    runtime_limit_seconds: float,
+) -> dict[str, Any]:
+    policy = analysis_execution_policy(workload_dominance, runtime_limit_seconds)
+    if not policy["login_node_allowed"]:
+        raise DataAnalysisError(policy["reason"])
+    return policy
 
 
 # This code runs remotely and prints one bounded JSON payload. It performs a
@@ -401,6 +453,8 @@ def inspect_run(
     if max_entries < 1 or max_entries > 10_000:
         raise DataAnalysisError("max_entries must be between 1 and 10000")
 
+    timeout = 180.0
+    execution = _require_login_execution(FILE_ACCESS_DOMINANT, timeout)
     _, remote = _remote_run_dir(machine, run_id)
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
@@ -410,7 +464,7 @@ def inspect_run(
     result = ssh.run(
         host,
         [python, "-c", _REMOTE_INVENTORY, remote, str(max_entries)],
-        timeout=180.0,
+        timeout=timeout,
     )
     if not result.ok:
         detail = (result.stderr or result.stdout).strip()[-1_000:]
@@ -431,6 +485,7 @@ def inspect_run(
 
     payload["run_id"] = run_id
     payload["machine"] = machine
+    payload["execution"] = execution
     return payload
 
 
@@ -484,6 +539,8 @@ def inspect_oned_profiles(
             f"{MAX_PROFILE_POINTS}"
         )
 
+    timeout = 300.0
+    execution = _require_login_execution(FILE_ACCESS_DOMINANT, timeout)
     _, remote = _remote_run_dir(machine, run_id)
     cfg = m.get_machine(machine)
     host = ssh.host_for(cfg)
@@ -496,7 +553,7 @@ def inspect_oned_profiles(
     result = ssh.run(
         host,
         argv,
-        timeout=300.0,
+        timeout=timeout,
         env_script=env_script,
     )
     if not result.ok:
@@ -534,6 +591,7 @@ def inspect_oned_profiles(
 
     payload["run_id"] = run_id
     payload["machine"] = machine
+    payload["execution"] = execution
     return payload
 
 

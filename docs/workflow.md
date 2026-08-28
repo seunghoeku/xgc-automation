@@ -158,6 +158,11 @@ The pre-submit check should:
 - record the executable path and, when practical, its size, modification time,
   checksum, or corresponding XGC commit in provenance.
 
+The submission provenance records the executable, environment script, and XGC
+commit selected by the reviewed plan. When an executable is overridden, its
+commit must be supplied explicitly; the configured default build's commit is
+not attributed to a different binary.
+
 A recent successful validation or dryrun may be reused when the executable path
 and relevant file metadata remain unchanged. An older result should not be
 trusted indefinitely because the binary may have been removed or rebuilt.
