@@ -25,6 +25,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
+SSH_CONNECT_TIMEOUT_SECONDS = 60.0
+
+
 class SSHError(RuntimeError):
     """Raised when the remote command could not be executed at all.
 
@@ -119,7 +122,7 @@ def command_channel_usable(
 
 
 def direct_key_channel_usable(
-    ssh_host: str, timeout: float = 20.0
+    ssh_host: str, timeout: float = SSH_CONNECT_TIMEOUT_SECONDS
 ) -> tuple[bool, str]:
     """Probe a non-multiplexed public-key SSH connection.
 
@@ -257,6 +260,11 @@ def _direct_key_options() -> list[str]:
     ]
 
 
+def _connect_timeout_options() -> list[str]:
+    """Return the repository-wide SSH connection timeout option."""
+    return ["-o", f"ConnectTimeout={int(SSH_CONNECT_TIMEOUT_SECONDS)}"]
+
+
 def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
     """Validate the configured authentication and return SSH CLI options."""
     resolved = _normalize_target(target)
@@ -274,10 +282,10 @@ def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
                 f"({certificate.get('detail')}); refresh it with the user's "
                 "NERSC sshproxy workflow"
             )
-        return resolved.host, _direct_key_options()
+        return resolved.host, [*_direct_key_options(), *_connect_timeout_options()]
 
     require_session(resolved.host)
-    return resolved.host, ["-o", "BatchMode=yes"]
+    return resolved.host, ["-o", "BatchMode=yes", *_connect_timeout_options()]
 
 
 def require_session(ssh_host: str) -> None:

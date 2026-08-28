@@ -18,6 +18,10 @@ locally.
   (job submission, file deletion, transfers) are performed by **verified code (tools)**.
 
 ## Absolute Rules (must be followed)
+0. **Project rules take precedence**: for operations performed through this
+   repository, this file and the deterministic `tools/` defaults override
+   generic HPC guidance such as `perlmutter-ops` when they conflict. Use
+   generic guidance only to fill gaps not covered here.
 1. **Human approval before submission**: always show a diff/summary and get user
    approval before `sbatch`/`qsub`, or before deleting/overwriting files
    (human-in-the-loop).
@@ -31,6 +35,10 @@ locally.
 4. **Protect the allocation**: present node-count and wall-time estimates before
    submitting a job.
 5. **Record provenance**: track which input produced which output.
+
+The repository-wide SSH connection timeout is 60 seconds, defined by
+`SSH_CONNECT_TIMEOUT_SECONDS` in `tools/ssh.py`. Do not replace it with a
+shorter generic Perlmutter default.
 
 ## HPC Targets
 | Machine | Center | Scheduler | Auth | Scratch |

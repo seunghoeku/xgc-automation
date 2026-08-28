@@ -84,6 +84,7 @@ class DirectKeyTransportTests(unittest.TestCase):
         self.assertIn("ControlPath=none", argv)
         self.assertIn("IdentitiesOnly=yes", argv)
         self.assertIn("PreferredAuthentications=publickey", argv)
+        self.assertIn("ConnectTimeout=60", argv)
         self.assertEqual(argv[-2:], ["perlmutter", "hostname"])
 
     def test_sshproxy_rejects_expired_certificate_before_connecting(self) -> None:
