@@ -80,3 +80,14 @@ stellar:
     source: /home/alice/git/XGC-Devel
     python: /home/alice/venvs/xgc-gui/bin/python3
     # env_script: /home/alice/env/xgc-gui.sh
+
+# Optional: mirror the simulation catalog to a Google Sheet
+# (docs/simulation-catalog.md). Requires `uv sync --extra sheets`, a service
+# account shared on the spreadsheet as Editor, and a key file kept OUTSIDE
+# this repository. Without this section the catalog and `xgc-sim` still work;
+# only the spreadsheet mirror is unavailable.
+common:
+  sheet_sync:
+    credentials: ~/.config/xgc/sheet-service-account.json
+    spreadsheet_id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
+    worksheet: simulations

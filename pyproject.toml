@@ -11,6 +11,13 @@ dependencies = [
     "openpyxl>=3.1.5",
 ]
 
+[project.optional-dependencies]
+# Google Sheets mirroring is optional: the catalog and its CLI work without it.
+sheets = [
+    "gspread>=6.0",
+    "google-auth>=2.28",
+]
+
 [project.scripts]
 xgc-remote-gui = "tools.remote_gui:main"
 xgc-sim = "tools.simcat_cli:main"

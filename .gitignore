@@ -1,6 +1,10 @@
 # secrets / local env
 .env
 .env.local
+# Google service account keys for the optional Sheets mirror. Keep them
+# outside the repository; this is a backstop, not the intended location.
+*service-account*.json
+*credentials*.json
 
 # derived from the remote XGC source; regenerated on demand, keyed by commit
 .cache/
