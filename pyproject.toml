@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 xgc-remote-gui = "tools.remote_gui:main"
+xgc-sim = "tools.simcat_cli:main"
 
 [build-system]
 requires = ["hatchling"]
