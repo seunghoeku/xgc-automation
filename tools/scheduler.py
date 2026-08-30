@@ -17,9 +17,14 @@ RUNNING = "running"
 COMPLETED = "completed"
 FAILED = "failed"
 CANCELLED = "cancelled"
+# Hitting the wall clock is its own outcome, not a failure. A long XGC run is
+# routinely sized to run out of time and restart from its checkpoint, so
+# folding TIMEOUT into FAILED would report normal operation as an error.
+# Whether the science finished is a separate question from how the job ended.
+TIMEOUT = "timeout"
 UNKNOWN = "unknown"
 
-TERMINAL_STATES = frozenset({COMPLETED, FAILED, CANCELLED})
+TERMINAL_STATES = frozenset({COMPLETED, FAILED, CANCELLED, TIMEOUT})
 
 # squeue/sacct state codes -> normalized. Slurm reports both long names and
 # 2-letter codes depending on format, so both are listed.
@@ -30,7 +35,7 @@ _SLURM_STATES = {
     "CG": RUNNING, "COMPLETING": RUNNING,
     "CD": COMPLETED, "COMPLETED": COMPLETED,
     "F": FAILED, "FAILED": FAILED,
-    "TO": FAILED, "TIMEOUT": FAILED,
+    "TO": TIMEOUT, "TIMEOUT": TIMEOUT,
     "NF": FAILED, "NODE_FAIL": FAILED,
     "OOM": FAILED, "OUT_OF_MEMORY": FAILED,
     "CA": CANCELLED, "CANCELLED": CANCELLED,

@@ -53,19 +53,38 @@ SCHEMA_VERSION = 1
 # Lifecycle of a simulation, in the order work normally progresses. `failed`
 # and `abandoned` are terminal off-ramps rather than a stage of progress.
 STATUSES = (
-    "reserved",   # number allocated, nothing staged yet
-    "staged",     # case files placed in the canonical directory
-    "submitted",  # at least one scheduler job accepted
-    "running",    # a job is executing
-    "completed",  # a job finished successfully
-    "failed",     # the last job ended in error
-    "analyzed",   # reduced products exist
-    "archived",   # output moved to long-term storage (HPSS)
-    "abandoned",  # deliberately dropped; number stays burned
+    "reserved",     # number allocated, nothing staged yet
+    "staged",       # case files placed in the canonical directory
+    "submitted",    # at least one scheduler job accepted
+    "running",      # a job is executing
+    "interrupted",  # last job hit the wall clock; restart to continue
+    "completed",    # the last job ran to a clean finish
+    "failed",       # the last job ended in error
+    "analyzed",     # reduced products exist
+    "archived",     # output moved to long-term storage (HPSS)
+    "abandoned",    # deliberately dropped; number stays burned
 )
 
-# Statuses that record how a run ended, as opposed to how far the work has got.
-_OUTCOME_STATUSES = {"completed", "failed"}
+# Statuses a scheduler result may set on its own. Everything else in STATUSES
+# is a human judgement about the science.
+_OUTCOME_STATUSES = {"completed", "failed", "interrupted"}
+
+# How one run's scheduler state maps onto the simulation, when that run is the
+# newest one. `timeout` becomes `interrupted` rather than `failed`: a long XGC
+# run is routinely sized to hit the wall clock and restart from its
+# checkpoint, so it means "not finished yet", not "broken".
+#
+# `cancelled` is absent on purpose. Cancelling one attempt says nothing about
+# whether the science was abandoned, and only a human knows which it was.
+_RUN_STATE_TO_STATUS = {
+    "completed": "completed",
+    "failed": "failed",
+    "timeout": "interrupted",
+}
+
+# Statuses that represent a human's conclusion about the science. A later
+# scheduler result must never overwrite one of these.
+_HUMAN_JUDGEMENT_STATUSES = {"analyzed", "archived", "abandoned"}
 
 # Legacy notebook outcomes, produced by case_promotion.classify_outcome().
 LEGACY_OUTCOMES = ("success", "failed", "inconclusive", "unknown")
@@ -426,11 +445,56 @@ def attach_run(
         record["input_sha256"] = run["input_sha256"]
     if run.get("case") and not record.get("case"):
         record["case"] = run["case"]
-    if status:
+    if status and record.get("status") not in _HUMAN_JUDGEMENT_STATUSES:
+        # Submitting a restart moves the simulation back into flight, but it
+        # must not undo a conclusion the human already recorded.
         record["status"] = validate_status(status)
 
     write_record(record, catalog_dir=catalog_dir)
     return record
+
+
+def _run_order_key(run: dict[str, Any]) -> tuple[str, str]:
+    """Sort runs oldest-first within a simulation.
+
+    A restart chain is ordered by submission time; ``run_id`` is the tiebreaker
+    because it is itself a timestamp.
+    """
+    return (str(run.get("submitted_at") or ""), str(run.get("run_id") or ""))
+
+
+def derive_status(record: dict[str, Any]) -> str:
+    """Work out a simulation's status from *all* of its runs.
+
+    A simulation is one scientific effort that may take many scheduler jobs:
+    hit the wall clock, restart from the checkpoint, repeat. So the status
+    cannot come from whichever run happened to be polled last. It comes from
+    the newest run that actually reported an outcome.
+
+    A failure early in a chain that was then restarted and finished is history,
+    not the current state -- which is why this reads the latest run rather than
+    the worst one.
+    """
+    current = str(record.get("status") or "reserved")
+    if current in _HUMAN_JUDGEMENT_STATUSES:
+        # The human has drawn a conclusion; a scheduler result cannot undo it.
+        return current
+
+    runs = [run for run in (record.get("runs") or []) if isinstance(run, dict)]
+    if not runs:
+        return current
+
+    ordered = sorted(runs, key=_run_order_key)
+    if any(run.get("state") == "running" for run in ordered):
+        return "running"
+
+    for run in reversed(ordered):
+        status = _RUN_STATE_TO_STATUS.get(str(run.get("state") or ""))
+        if status:
+            return status
+
+    # Runs exist but none has reported an outcome yet: still in flight.
+    return "running" if current == "running" else "submitted"
 
 
 def update_run_state(
@@ -442,15 +506,11 @@ def update_run_state(
     terminal: bool = False,
     catalog_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Record a job's observed state, advancing the simulation status.
+    """Record one job's observed state and re-derive the simulation's status.
 
-    Only a terminal scheduler state changes the simulation's own status, and
-    only when the simulation has not already moved past the run (a completed run
-    must not drag an ``archived`` simulation backwards).
-
-    A cancelled job updates the run entry but not the simulation: cancelling one
-    attempt says nothing about whether the science was abandoned, and only a
-    human knows which it was.
+    ``terminal`` is accepted for callers that already know whether the state
+    ends the job, but the status itself is derived from every run rather than
+    from this one, so a restart chain is read as a whole.
     """
     record = read_record(record_id, catalog_dir=catalog_dir)
     runs = list(record.get("runs") or [])
@@ -468,15 +528,7 @@ def update_run_state(
             f"run {run_id!r} is not linked to simulation {record_id!r}"
         )
     record["runs"] = runs
-
-    current = record.get("status")
-    if state == "running" and current in {"reserved", "staged", "submitted"}:
-        record["status"] = "running"
-    elif terminal and state in _OUTCOME_STATUSES:
-        # Later stages (analyzed/archived) are human judgements about the
-        # science; a scheduler result must not undo them.
-        if current not in {"analyzed", "archived", "abandoned"}:
-            record["status"] = state
+    record["status"] = derive_status(record)
     write_record(record, catalog_dir=catalog_dir)
     return record
 

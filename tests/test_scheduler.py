@@ -104,6 +104,39 @@ class PBSSchedulerTests(unittest.TestCase):
                     self.scheduler.validate_resources(invalid)
 
 
+class SlurmStateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scheduler = sched.SlurmScheduler()
+
+    def test_wall_clock_timeout_is_its_own_state(self) -> None:
+        # A long XGC run is routinely sized to hit the wall clock and restart
+        # from its checkpoint. Reporting that as FAILED would turn normal
+        # operation into an error, so TIMEOUT stays distinguishable.
+        for raw in ("TIMEOUT", "TO"):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    self.scheduler.parse_status(f"{raw}\n", 0), sched.TIMEOUT
+                )
+        self.assertNotEqual(sched.TIMEOUT, sched.FAILED)
+
+    def test_timeout_still_ends_the_job(self) -> None:
+        self.assertIn(sched.TIMEOUT, sched.TERMINAL_STATES)
+
+    def test_real_failures_remain_failures(self) -> None:
+        for raw in ("FAILED", "NODE_FAIL", "OUT_OF_MEMORY"):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    self.scheduler.parse_status(f"{raw}\n", 0), sched.FAILED
+                )
+
+    def test_accounting_reports_timeout_after_the_job_leaves_the_queue(self) -> None:
+        # squeue forgets finished jobs, so a timed-out run is normally
+        # discovered through sacct rather than the queue.
+        state, exit_code = self.scheduler.parse_accounting("TIMEOUT|0:1\n")
+        self.assertEqual(state, sched.TIMEOUT)
+        self.assertEqual(exit_code, "0:1")
+
+
 class SlurmSchedulerValidationTests(unittest.TestCase):
     """Placeholders must be blocked before a Slurm script is rendered.
 

@@ -605,16 +605,18 @@ def _record_observed_state(
     """Push an observed job state into the simulation's catalog record.
 
     This is what closes the loop that used to be closed by hand: checking on a
-    job is also what marks the simulation completed or failed. Best effort, for
-    the same reason as the submission link -- a status query must still answer
-    even if the catalog cannot be written.
+    job is also what updates the simulation. The catalog decides what the
+    state means for the simulation as a whole, since that depends on the other
+    runs in the restart chain. Best effort, for the same reason as the
+    submission link -- a status query must still answer even if the catalog
+    cannot be written.
     """
     found = _find_run_for_job(machine, job_id)
     if found is None:
         return None
     simulation_id, run_id = found
     try:
-        catalog.update_run_state(
+        record = catalog.update_run_state(
             simulation_id,
             run_id,
             state=out["state"],
@@ -623,7 +625,12 @@ def _record_observed_state(
         )
     except catalog.SimulationCatalogError as exc:
         return {"simulation_id": simulation_id, "updated": False, "error": str(exc)}
-    return {"simulation_id": simulation_id, "run_id": run_id, "updated": True}
+    return {
+        "simulation_id": simulation_id,
+        "run_id": run_id,
+        "updated": True,
+        "simulation_status": record.get("status"),
+    }
 
 
 def cancel(machine: str, job_id: str, *, confirm: bool = False) -> dict[str, Any]:
