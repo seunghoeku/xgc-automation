@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -78,14 +79,73 @@ class DirectKeyTransportTests(unittest.TestCase):
             result = ssh.run(target, ["hostname"], check=True)
 
         self.assertEqual(result.stdout, "ok\n")
+        # A direct-key host never consults the user's ControlMaster socket.
         control.assert_not_called()
+        argv = run.call_args.args[0]
+        self.assertIn("IdentitiesOnly=yes", argv)
+        self.assertIn("PreferredAuthentications=publickey", argv)
+        self.assertIn("BatchMode=yes", argv)
+        self.assertIn("ConnectTimeout=60", argv)
+        self.assertEqual(argv[-2:], ["perlmutter", "hostname"])
+
+    def test_direct_key_connections_reuse_a_tool_owned_socket(self) -> None:
+        # A direct-key handshake to NERSC costs seconds, and bulk work makes
+        # many calls in a row, so the connection is shared.
+        completed = subprocess.CompletedProcess(
+            args=["ssh"], returncode=0, stdout="ok\n", stderr=""
+        )
+        target = ssh.SSHTarget("perlmutter", "sshproxy")
+        certificate = {"present": True, "valid": True, "detail": "current"}
+
+        with (
+            patch.object(ssh, "certificate_status", return_value=certificate),
+            patch.object(subprocess, "run", return_value=completed) as run,
+        ):
+            ssh.run(target, ["hostname"])
+
+        argv = run.call_args.args[0]
+        self.assertIn("ControlMaster=auto", argv)
+        self.assertIn("ControlPersist=10m", argv)
+        socket = str(ssh.control_socket_path("perlmutter"))
+        self.assertIn(f"ControlPath={socket}", argv)
+
+    def test_the_shared_socket_is_not_the_users_own(self) -> None:
+        # Sharing the user's socket would couple automation to the lifetime of
+        # their tmux client or VS Code Remote session, which is what
+        # disabling multiplexing was originally protecting against.
+        socket = ssh.control_socket_path("perlmutter")
+        self.assertEqual(socket.parent, ssh.CONTROL_DIR)
+        self.assertNotIn("cm-", socket.name)
+
+    def test_socket_path_stays_within_the_unix_limit(self) -> None:
+        # macOS rejects unix socket paths past ~104 characters, and ssh fails
+        # obscurely when it happens.
+        for host in ("perlmutter", "a" * 200, "user@host.very.long.example.org"):
+            with self.subTest(host=host):
+                self.assertLess(len(str(ssh.control_socket_path(host))), 104)
+
+    def test_distinct_hosts_get_distinct_sockets(self) -> None:
+        self.assertNotEqual(
+            ssh.control_socket_path("perlmutter"), ssh.control_socket_path("frontier")
+        )
+
+    def test_multiplexing_can_be_turned_off(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["ssh"], returncode=0, stdout="ok\n", stderr=""
+        )
+        target = ssh.SSHTarget("perlmutter", "sshproxy")
+        certificate = {"present": True, "valid": True, "detail": "current"}
+
+        with (
+            patch.dict(os.environ, {"XGC_SSH_NO_MULTIPLEX": "1"}),
+            patch.object(ssh, "certificate_status", return_value=certificate),
+            patch.object(subprocess, "run", return_value=completed) as run,
+        ):
+            ssh.run(target, ["hostname"])
+
         argv = run.call_args.args[0]
         self.assertIn("ControlMaster=no", argv)
         self.assertIn("ControlPath=none", argv)
-        self.assertIn("IdentitiesOnly=yes", argv)
-        self.assertIn("PreferredAuthentications=publickey", argv)
-        self.assertIn("ConnectTimeout=60", argv)
-        self.assertEqual(argv[-2:], ["perlmutter", "hostname"])
 
     def test_sshproxy_rejects_expired_certificate_before_connecting(self) -> None:
         target = ssh.SSHTarget("perlmutter", "sshproxy")

@@ -16,8 +16,8 @@ perlmutter:
   auth:
     method: sshproxy            # run sshproxy once a day to issue a 24h key
     key_ttl_hours: 24
-    # Alias supplies IdentityFile + CertificateFile. The transport forces
-    # ControlMaster=no and ControlPath=none for independent key connections.
+    # Alias supplies IdentityFile + CertificateFile. The transport multiplexes
+    # over its own socket in ~/.ssh/xgc-cm/, never the user's ControlPath.
     ssh_config_host: <ssh_alias>
   scheduler:
     type: slurm

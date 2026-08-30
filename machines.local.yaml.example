@@ -9,8 +9,8 @@
 # the fields you are overriding.
 #
 # The ssh_config_host values must match Host aliases in your ~/.ssh/config.
-# MFA hosts use ControlMaster; Perlmutter uses the NERSC key/certificate
-# directly with multiplexing disabled. See docs/ssh-setup.md.
+# MFA hosts reuse your own ControlMaster socket; Perlmutter uses the NERSC
+# key/certificate over a socket the toolchain owns. See docs/ssh-setup.md.
 # Run `preflight` after editing to see what is still missing.
 
 perlmutter:

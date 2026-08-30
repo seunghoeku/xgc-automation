@@ -31,7 +31,9 @@ locally.
 3. **Humans handle authentication**: never enter MFA codes or passwords on the
    user's behalf. Reuse human-established ControlMaster sessions for MFA hosts.
    Perlmutter is the exception: use the current NERSC sshproxy key/certificate
-   directly, with SSH multiplexing disabled.
+   directly, over a multiplexing socket this toolchain owns under
+   `~/.ssh/xgc-cm/` — never the user's own `ControlPath`, and the user's
+   `~/.ssh/config` must not default those hosts to ControlMaster.
 4. **Protect the allocation**: present node-count and wall-time estimates before
    submitting a job.
 5. **Record provenance**: track which input produced which output.
@@ -106,8 +108,10 @@ unaware of the machine type.
   differences).
 - No hardcoded paths (`~`, `$PSCRATCH`). Distribute with `uv`/`pipx`.
 - MFA-host multiplexing: `ControlMaster auto` / `ControlPersist 8h` /
-  `ControlPath ~/.ssh/cm-%r@%h:%p`. Perlmutter must use `ControlMaster no` and
-  `ControlPath none`.
+  `ControlPath ~/.ssh/cm-%r@%h:%p`. The user's `~/.ssh/config` must set
+  `ControlMaster no` / `ControlPath none` for Perlmutter; the toolchain
+  multiplexes it separately over its own socket in `~/.ssh/xgc-cm/`
+  (`XGC_SSH_NO_MULTIPLEX=1` disables that).
 
 ## Build Automation
 - Automation is still out of scope. However, executables are not always available,

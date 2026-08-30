@@ -74,9 +74,21 @@ workflow, then check the independent key connection:
 ssh -o ControlMaster=no -o ControlPath=none -o BatchMode=yes perlmutter true
 ```
 
-Do not open a Perlmutter master. Keeping its commands independent prevents a
-long-lived tmux client, VS Code Remote, and automation tools from sharing one
-socket's channel and lifetime state.
+Keep `ControlMaster no` for Perlmutter in your own `~/.ssh/config`, and do not
+open a Perlmutter master yourself. That keeps your interactive sessions --
+tmux, VS Code Remote -- from sharing one socket's channel and lifetime state.
+
+The toolchain multiplexes these connections separately, over a socket it owns
+under `~/.ssh/xgc-cm/`, so it gets connection reuse without joining your
+session. A direct-key handshake to NERSC costs several seconds and bulk
+operations make many calls in a row, so this matters:
+
+```bash
+ssh -O exit -o ControlPath=~/.ssh/xgc-cm/s-<hash> perlmutter   # close it early
+XGC_SSH_NO_MULTIPLEX=1 xgc-sim refresh                          # or disable it
+```
+
+Idle sockets close on their own after 10 minutes.
 
 To start only a background master:
 

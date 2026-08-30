@@ -4,8 +4,17 @@ All remote execution and file transfer goes through here. Two invariants:
 
 1. We never perform interactive authentication. MFA-protected hosts reuse a
    ControlMaster session opened by the user. NERSC ``sshproxy`` hosts use the
-   user's existing short-lived key and certificate directly, with SSH
-   multiplexing explicitly disabled.
+   user's existing short-lived key and certificate directly.
+
+   Direct-key hosts multiplex over a socket this toolchain owns, under
+   ``~/.ssh/xgc-cm/``, never the user's own ``ControlPath``. A direct-key
+   handshake to NERSC costs several seconds, and bulk operations make dozens
+   of calls in a row, so reuse is the difference between seconds and minutes.
+   Keeping the socket separate means automation is not sharing a channel or a
+   lifetime with the user's tmux client or VS Code Remote session, which is
+   what disabling multiplexing altogether was originally protecting against.
+   The user's ``~/.ssh/config`` must therefore not default these hosts to
+   ControlMaster; the options here are explicit either way.
 2. Commands are passed as argument lists and quoted with shlex, never
    interpolated into a shell string. This keeps the "deterministic actions go
    through tools" rule honest (absolute rule 2).
@@ -16,6 +25,8 @@ than blocking on an interactive prompt.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import shlex
 import subprocess
@@ -26,6 +37,15 @@ from typing import Any, Sequence
 
 
 SSH_CONNECT_TIMEOUT_SECONDS = 60.0
+
+# Where the tool-owned multiplexing sockets live. Separate from the user's own
+# ControlMaster sockets on purpose (see control_socket_path).
+CONTROL_DIR = Path.home() / ".ssh" / "xgc-cm"
+
+# How long an idle shared connection is kept open. Long enough that a sequence
+# of commands reuses it, short enough that a stale certificate is not held past
+# its usefulness.
+CONTROL_PERSIST = "10m"
 
 
 class SSHError(RuntimeError):
@@ -128,8 +148,21 @@ def direct_key_channel_usable(
 
     This is intended for NERSC ``sshproxy`` certificates. It cannot prompt and
     cannot reuse or create a ControlMaster socket.
+
+    Multiplexing is forced off here even though normal commands use it: this
+    probe exists to prove the certificate still authenticates, and reusing an
+    already-open socket would succeed without testing that.
     """
-    argv = ["ssh", *_direct_key_options(), "-o", f"ConnectTimeout={int(timeout)}"]
+    argv = [
+        "ssh",
+        *_direct_key_options(),
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        f"ConnectTimeout={int(timeout)}",
+    ]
     argv.extend([ssh_host, "true"])
     try:
         proc = subprocess.run(
@@ -245,19 +278,71 @@ def _normalize_target(target: str | SSHTarget) -> SSHTarget:
 
 
 def _direct_key_options() -> list[str]:
-    """SSH options that forbid ControlMaster use and interactive fallback."""
+    """Key-only, non-interactive options for a direct sshproxy connection.
+
+    Multiplexing is decided separately by ``_sharing_options``: these options
+    only ensure the connection authenticates with the certificate and never
+    falls back to a prompt.
+    """
     return [
         "-o",
         "BatchMode=yes",
-        "-o",
-        "ControlMaster=no",
-        "-o",
-        "ControlPath=none",
         "-o",
         "IdentitiesOnly=yes",
         "-o",
         "PreferredAuthentications=publickey",
     ]
+
+
+def control_socket_path(host: str) -> Path:
+    """Path of the tool-owned multiplexing socket for a direct-key host.
+
+    Deliberately not the user's ``~/.ssh/cm-*`` path. Sharing a socket with a
+    long-lived tmux client or VS Code Remote session would couple this
+    toolchain's commands to that session's lifetime; a separate socket gets
+    connection reuse without that entanglement.
+
+    macOS caps unix socket paths near 104 characters, and ssh fails obscurely
+    past it, so the name is kept short and the host is hashed rather than
+    interpolated.
+    """
+    digest = hashlib.sha256(host.encode("utf-8")).hexdigest()[:12]
+    return CONTROL_DIR / f"s-{digest}"
+
+
+def _sharing_options(host: str) -> list[str]:
+    """Options that reuse, and if needed create, the tool-owned socket.
+
+    ``ControlMaster=auto`` means the first command pays for the handshake and
+    every later one reuses it. That matters because a direct-key handshake to
+    NERSC costs several seconds, and bulk work such as ``xgc-sim refresh``
+    makes dozens of calls in a row.
+    """
+    if not _sharing_enabled():
+        return ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
+    try:
+        CONTROL_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        # Without a place for the socket, fall back to independent connections
+        # rather than failing the command outright.
+        return ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
+    return [
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        f"ControlPath={control_socket_path(host)}",
+        "-o",
+        f"ControlPersist={CONTROL_PERSIST}",
+    ]
+
+
+def _sharing_enabled() -> bool:
+    """Whether to multiplex direct-key connections.
+
+    Set ``XGC_SSH_NO_MULTIPLEX=1`` to force independent connections, which is
+    the escape hatch if a site ever forbids sharing.
+    """
+    return os.environ.get("XGC_SSH_NO_MULTIPLEX", "").strip() not in {"1", "true", "yes"}
 
 
 def _connect_timeout_options() -> list[str]:
@@ -282,7 +367,11 @@ def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
                 f"({certificate.get('detail')}); refresh it with the user's "
                 "NERSC sshproxy workflow"
             )
-        return resolved.host, [*_direct_key_options(), *_connect_timeout_options()]
+        return resolved.host, [
+            *_direct_key_options(),
+            *_sharing_options(resolved.host),
+            *_connect_timeout_options(),
+        ]
 
     require_session(resolved.host)
     return resolved.host, ["-o", "BatchMode=yes", *_connect_timeout_options()]

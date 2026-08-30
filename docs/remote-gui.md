@@ -33,9 +33,9 @@ perlmutter:
 must import `flask`, `numpy`, `matplotlib`, and `adios2`. If `remote_port` is
 omitted, the launcher selects a high port for each session.
 
-Perlmutter uses the current NERSC sshproxy key/certificate with
-`ControlMaster=no` and `ControlPath=none`. MFA hosts retain their existing
-ControlMaster contract. See `docs/ssh-setup.md`.
+Perlmutter uses the current NERSC sshproxy key/certificate, multiplexed over
+the toolchain's own socket rather than the user's. MFA hosts retain their
+existing ControlMaster contract. See `docs/ssh-setup.md`.
 
 ## Resolve before launching
 
