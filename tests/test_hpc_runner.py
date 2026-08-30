@@ -400,6 +400,284 @@ class PerlmutterPlanTests(unittest.TestCase):
                 self.assertEqual(path, expected)
                 self.assertTrue(expected.is_file())
 
+    def test_input_snapshot_is_stored_next_to_the_record(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-input-copy",
+                xgc_exe="/pscratch/builds/xgca/bin/xgca",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "RUNS_DIR", Path(tmp)):
+                path = hr._write_provenance(
+                    plan, {"run_id": plan.run_id}, input_text="&sml_param\n/\n"
+                )
+                self.assertEqual(
+                    (path.parent / "input").read_text(encoding="utf-8"),
+                    "&sml_param\n/\n",
+                )
+
+
+class InputCaptureTests(unittest.TestCase):
+    """The submitted namelist must be hashed, since the remote copy gets edited."""
+
+    cfg = {"paths": {"run_root": "/scratch/runs"}}
+
+    def test_input_is_read_and_hashed(self) -> None:
+        result = CommandResult(0, "&sml_param\n  sml_dt = 1.0\n/\n", "", "cat")
+        with (
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="perlmutter"),
+            patch.object(hr.ssh, "run", return_value=result) as run,
+        ):
+            captured = hr._capture_input("perlmutter", "/pscratch/cases/tcv/")
+
+        run.assert_called_once_with("perlmutter", ["cat", "/pscratch/cases/tcv/input"])
+        self.assertEqual(captured["input_capture"], "ok")
+        self.assertEqual(captured["input_text"], result.stdout)
+        self.assertEqual(len(captured["input_sha256"]), 64)
+
+    def test_identical_inputs_hash_identically(self) -> None:
+        result = CommandResult(0, "&sml_param\n/\n", "", "cat")
+        with (
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="perlmutter"),
+            patch.object(hr.ssh, "run", return_value=result),
+        ):
+            first = hr._capture_input("perlmutter", "/a")
+            second = hr._capture_input("perlmutter", "/b")
+        self.assertEqual(first["input_sha256"], second["input_sha256"])
+
+    def test_unreadable_input_is_reported_not_raised(self) -> None:
+        # A capture failure must never turn an accepted submission into an
+        # apparent error; the job is already queued by this point.
+        result = CommandResult(1, "", "No such file", "cat")
+        with (
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="perlmutter"),
+            patch.object(hr.ssh, "run", return_value=result),
+        ):
+            captured = hr._capture_input("perlmutter", "/pscratch/cases/tcv")
+        self.assertIsNone(captured["input_sha256"])
+        self.assertIn("cannot read", captured["input_capture"])
+
+    def test_hello_world_submission_has_no_input_to_capture(self) -> None:
+        captured = hr._capture_input("perlmutter", None)
+        self.assertIsNone(captured["input_sha256"])
+        self.assertEqual(captured["input_capture"], "no case_dir")
+
+
+class CatalogLinkTests(unittest.TestCase):
+    """Submitting and checking a job must maintain the simulation's record."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.runs = self.root / "runs"
+        self.catalog_dir = self.root / "simulations"
+        self.catalog_patch = patch.object(
+            hr.catalog, "CATALOG_DIR", self.catalog_dir
+        )
+        self.catalog_patch.start()
+        self.runs_patch = patch.object(hr, "RUNS_DIR", self.runs)
+        self.runs_patch.start()
+        hr.catalog.create_record(
+            "n645pe", machines=["perlmutter"], short_name="tcv delta f"
+        )
+
+    def tearDown(self) -> None:
+        self.runs_patch.stop()
+        self.catalog_patch.stop()
+        self.tmp.cleanup()
+
+    def _record(self, **overrides: object) -> dict:
+        record = {
+            "run_id": "run-20260830T101010Z",
+            "machine": "perlmutter",
+            "job_id": "12345",
+            "submitted_at": "2026-08-30T10:10:10+00:00",
+            "remote_run_dir": "/pscratch/x/n645pe_tcv_delta_f",
+            "simulation_id": "n645pe",
+            "simulation": {"simulation_id": "n645pe"},
+            "input_sha256": "deadbeef",
+        }
+        record.update(overrides)
+        return record
+
+    def _write_provenance_record(self, record: dict) -> Path:
+        path = self.runs / "master" / record["run_id"] / "provenance.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record), encoding="utf-8")
+        return path
+
+    def test_submission_links_the_run_to_its_simulation(self) -> None:
+        record = self._record()
+        path = self._write_provenance_record(record)
+
+        link = hr._link_catalog(record, path)
+
+        self.assertEqual(link, {"simulation_id": "n645pe", "linked": True})
+        stored = hr.catalog.read_record("n645pe")
+        self.assertEqual(stored["status"], "submitted")
+        self.assertEqual(stored["runs"][0]["job_id"], "12345")
+        self.assertEqual(stored["input_sha256"], "deadbeef")
+        self.assertEqual(
+            stored["remote_dirs"]["perlmutter"], "/pscratch/x/n645pe_tcv_delta_f"
+        )
+
+    def test_unregistered_run_has_no_catalog_to_link(self) -> None:
+        record = self._record(simulation_id=None, simulation=None)
+        path = self._write_provenance_record(record)
+        self.assertIsNone(hr._link_catalog(record, path))
+
+    def test_catalog_failure_is_reported_rather_than_raised(self) -> None:
+        # The job is already queued; losing the link must not look like a
+        # failed submission.
+        record = self._record(simulation_id="n999zz", simulation={"simulation_id": "n999zz"})
+        path = self._write_provenance_record(record)
+
+        link = hr._link_catalog(record, path)
+
+        self.assertFalse(link["linked"])
+        self.assertIn("n999zz", link["error"])
+
+    def test_status_check_maps_a_job_back_to_its_simulation(self) -> None:
+        record = self._record()
+        path = self._write_provenance_record(record)
+        hr._link_catalog(record, path)
+
+        found = hr._find_run_for_job("perlmutter", "12345")
+
+        self.assertEqual(found, ("n645pe", "run-20260830T101010Z"))
+
+    def test_job_id_from_another_machine_is_not_matched(self) -> None:
+        record = self._record()
+        self._write_provenance_record(record)
+        self.assertIsNone(hr._find_run_for_job("polaris", "12345"))
+
+    def test_terminal_status_advances_the_simulation(self) -> None:
+        record = self._record()
+        path = self._write_provenance_record(record)
+        hr._link_catalog(record, path)
+
+        update = hr._record_observed_state(
+            "perlmutter",
+            "12345",
+            {"state": "completed", "exit_code": 0, "terminal": True},
+        )
+
+        self.assertTrue(update["updated"])
+        stored = hr.catalog.read_record("n645pe")
+        self.assertEqual(stored["status"], "completed")
+        self.assertEqual(stored["runs"][0]["exit_code"], 0)
+
+    def test_status_of_an_unknown_job_changes_nothing(self) -> None:
+        self.assertIsNone(
+            hr._record_observed_state(
+                "perlmutter", "99999", {"state": "completed", "terminal": True}
+            )
+        )
+
+
+class SubmitToStatusLifecycleTests(unittest.TestCase):
+    """Submit a registered simulation and follow it through to completion.
+
+    The individual pieces are covered above; this checks that they actually
+    compose, which is the whole promise of the catalog: a number, a job, a
+    directory, and an input hash stay attached without anyone recording them.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.cfg = {
+            "scheduler": {
+                "type": "slurm",
+                "submit": "sbatch",
+                "submit_tpl": "templates/slurm.sbatch.j2",
+            },
+            "paths": {"run_root": "/scratch/xgc-runs"},
+            "xgc": {"exe": "/opt/xgc/bin/xgc", "modules": []},
+            "defaults": {
+                "account": "proj",
+                "partition": "all",
+                "nodes": 1,
+                "walltime": "00:10:00",
+            },
+        }
+        self.simulation = {
+            "simulation_id": "n645st",
+            "simulation_number": 645,
+            "machines": ["stellar"],
+            "machine_codes": ["st"],
+            "short_name": "tcv",
+            "directory_name": "n645st_tcv",
+            "tags": [],
+        }
+        self.directory = {
+            "simulation_id": "n645st",
+            "machine": "stellar",
+            "directory_name": "n645st_tcv",
+            "remote_directory": "/scratch/xgc-runs/n645st_tcv",
+            "tags": [],
+        }
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _remote(host: str, argv: list[str], **kwargs: object) -> CommandResult:
+        if argv[0] == "sbatch":
+            return CommandResult(0, "Submitted batch job 777", "", "sbatch")
+        if argv[0] == "cat":
+            return CommandResult(0, "&sml_param\n  sml_mstep = 200\n/\n", "", "cat")
+        return CommandResult(0, "", "", " ".join(argv))
+
+    def test_submitting_then_checking_a_job_maintains_the_record(self) -> None:
+        accepted = hr.dryrun.DryrunReport(ok=True, returncode=0)
+        with (
+            patch.object(hr, "RUNS_DIR", self.root / "runs"),
+            patch.object(hr.catalog, "CATALOG_DIR", self.root / "simulations"),
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(
+                hr.sim_registry, "simulation_directory", return_value=self.directory
+            ),
+            patch.object(
+                hr.sim_registry, "get_simulation", return_value=self.simulation
+            ),
+            patch.object(hr.ssh, "host_for", return_value="stellar"),
+            patch.object(hr.ssh, "mkdir_p"),
+            patch.object(hr.ssh, "write_file"),
+            patch.object(hr.dryrun, "run_dryrun", return_value=accepted),
+        ):
+            hr.catalog.create_record("n645st", machines=["stellar"], short_name="tcv")
+
+            with patch.object(hr.ssh, "run", side_effect=self._remote):
+                result = hr.submit(
+                    "stellar",
+                    confirm=True,
+                    simulation_id="n645st",
+                    case_dir="/scratch/xgc-runs/n645st_tcv",
+                )
+
+            self.assertTrue(result["submitted"])
+            self.assertEqual(result["catalog"], {"simulation_id": "n645st", "linked": True})
+            record = hr.catalog.read_record("n645st")
+            self.assertEqual(record["status"], "submitted")
+            self.assertEqual(record["runs"][0]["job_id"], "777")
+            self.assertEqual(record["input_sha256"], result["input_sha256"])
+            snapshot = self.root / "runs" / "master" / result["run_id"] / "input"
+            self.assertIn("sml_mstep", snapshot.read_text(encoding="utf-8"))
+
+            finished = CommandResult(0, "COMPLETED 0:0", "", "squeue")
+            with patch.object(hr.ssh, "run", return_value=finished):
+                status = hr.status("stellar", "777")
+
+            self.assertEqual(status["state"], "completed")
+            self.assertTrue(status["catalog"]["updated"])
+            self.assertEqual(hr.catalog.read_record("n645st")["status"], "completed")
+
 
 if __name__ == "__main__":
     unittest.main()

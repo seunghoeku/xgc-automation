@@ -13,11 +13,15 @@ gates live here rather than in the MCP layer so they hold no matter who calls.
 
 Every submission writes a provenance record below runs/master/ or runs/test/,
 including the dryrun report, so a run's validation state is recoverable later
-(rule 5).
+(rule 5). When the job belongs to a registered simulation, the run is also
+linked into that simulation's catalog record, so the number, the job, and the
+directory stay connected without anyone writing them down (rule 5,
+docs/simulation-catalog.md).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 from dataclasses import dataclass, field
@@ -31,6 +35,7 @@ from tools import dryrun
 from tools import machines as m
 from tools import provenance as prov
 from tools import scheduler as sched
+from tools import simulation_catalog as catalog
 from tools import simulation_registry as sim_registry
 from tools import ssh
 
@@ -330,14 +335,89 @@ def prepare_submission(
     )
 
 
-def _write_provenance(plan: SubmissionPlan, record: dict[str, Any]) -> Path:
-    """Persist the run record under runs/master/ or runs/test/."""
+def _write_provenance(
+    plan: SubmissionPlan,
+    record: dict[str, Any],
+    *,
+    input_text: str | None = None,
+) -> Path:
+    """Persist the run record under runs/master/ or runs/test/.
+
+    The input namelist is copied in alongside it. It is a few kilobytes, and
+    without it a provenance record can say which job ran but not what it ran --
+    the remote case directory is routinely edited for the next attempt.
+    """
     run_dir = prov.record_dir(RUNS_DIR, plan.run_id, plan.provenance_class)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "submit.sh").write_text(plan.script, encoding="utf-8")
+    if input_text is not None:
+        (run_dir / "input").write_text(input_text, encoding="utf-8")
     meta_path = run_dir / "provenance.json"
     meta_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return meta_path
+
+
+def _capture_input(machine: str, case_dir: str | None) -> dict[str, Any]:
+    """Read the submitted input namelist and hash it.
+
+    Best effort: a failure here must never block a submission that already
+    passed its dryrun, so problems are recorded rather than raised.
+    """
+    if not case_dir:
+        return {"input_sha256": None, "input_text": None, "input_capture": "no case_dir"}
+    try:
+        cfg = m.get_machine(machine)
+        host = ssh.host_for(cfg)
+        result = ssh.run(host, ["cat", f"{case_dir.rstrip('/')}/input"])
+    except (KeyError, ssh.SSHError) as exc:
+        return {"input_sha256": None, "input_text": None, "input_capture": str(exc)}
+    if not result.ok:
+        return {
+            "input_sha256": None,
+            "input_text": None,
+            "input_capture": f"cannot read {case_dir}/input",
+        }
+    text = result.stdout
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return {"input_sha256": digest, "input_text": text, "input_capture": "ok"}
+
+
+def _display_path(path: Path) -> str:
+    """Project-relative when possible, absolute otherwise (redirected RUNS_DIR)."""
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _link_catalog(record: dict[str, Any], meta_path: Path) -> dict[str, Any] | None:
+    """Attach a submitted run to its simulation's catalog record.
+
+    Only registered simulations have one. A catalog problem must not turn an
+    accepted submission into an apparent failure, so it is reported in the
+    result instead of raised.
+    """
+    simulation_id = record.get("simulation_id")
+    if not simulation_id:
+        return None
+    try:
+        catalog.attach_run(
+            simulation_id,
+            {
+                "run_id": record["run_id"],
+                "machine": record["machine"],
+                "job_id": record["job_id"],
+                "submitted_at": record["submitted_at"],
+                "provenance": _display_path(meta_path),
+                "remote_run_dir": record["remote_run_dir"],
+                "input_sha256": record.get("input_sha256"),
+                "case": (record.get("simulation") or {}).get("case"),
+            },
+            status="submitted",
+        )
+        return {"simulation_id": simulation_id, "linked": True}
+    except catalog.SimulationCatalogError as exc:
+        return {"simulation_id": simulation_id, "linked": False, "error": str(exc)}
 
 
 def _xgc_provenance(plan: SubmissionPlan) -> dict[str, Any]:
@@ -419,6 +499,7 @@ def submit(
     )
     job_id = scheduler.parse_job_id(result.stdout)
 
+    captured = _capture_input(plan.machine, case_dir)
     record = {
         "run_id": plan.run_id,
         "machine": plan.machine,
@@ -437,9 +518,12 @@ def submit(
         "xgc": _xgc_provenance(plan),
         "scheduler_stdout": result.stdout.strip(),
         "case_dir": case_dir,
+        "input_sha256": captured["input_sha256"],
+        "input_capture": captured["input_capture"],
         "dryrun": dryrun_report,
     }
-    meta_path = _write_provenance(plan, record)
+    meta_path = _write_provenance(plan, record, input_text=captured["input_text"])
+    catalog_link = _link_catalog(record, meta_path)
 
     return {
         "submitted": True,
@@ -447,8 +531,10 @@ def submit(
         "run_id": plan.run_id,
         "machine": plan.machine,
         "remote_run_dir": plan.remote_run_dir,
-        "provenance": str(meta_path.relative_to(PROJECT_ROOT)),
+        "provenance": _display_path(meta_path),
         "resources": plan.resources,
+        "input_sha256": captured["input_sha256"],
+        "catalog": catalog_link,
         "dryrun": dryrun_report,
     }
 
@@ -485,7 +571,59 @@ def status(machine: str, job_id: str) -> dict[str, Any]:
             out["source"] = "sacct"
 
     out["terminal"] = out["state"] in sched.TERMINAL_STATES
+    catalog_update = _record_observed_state(machine, job_id, out)
+    if catalog_update is not None:
+        out["catalog"] = catalog_update
     return out
+
+
+def _find_run_for_job(machine: str, job_id: str) -> tuple[str, str] | None:
+    """Map a scheduler job back to (simulation_id, run_id) via provenance."""
+    if not RUNS_DIR.is_dir():
+        return None
+    for _class, path in prov.iter_records(RUNS_DIR):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("machine") != machine:
+            continue
+        if str(record.get("job_id")) != str(job_id):
+            continue
+        simulation_id = record.get("simulation_id")
+        run_id = record.get("run_id")
+        if simulation_id and run_id:
+            return str(simulation_id), str(run_id)
+    return None
+
+
+def _record_observed_state(
+    machine: str, job_id: str, out: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Push an observed job state into the simulation's catalog record.
+
+    This is what closes the loop that used to be closed by hand: checking on a
+    job is also what marks the simulation completed or failed. Best effort, for
+    the same reason as the submission link -- a status query must still answer
+    even if the catalog cannot be written.
+    """
+    found = _find_run_for_job(machine, job_id)
+    if found is None:
+        return None
+    simulation_id, run_id = found
+    try:
+        catalog.update_run_state(
+            simulation_id,
+            run_id,
+            state=out["state"],
+            exit_code=out.get("exit_code"),
+            terminal=bool(out.get("terminal")),
+        )
+    except catalog.SimulationCatalogError as exc:
+        return {"simulation_id": simulation_id, "updated": False, "error": str(exc)}
+    return {"simulation_id": simulation_id, "run_id": run_id, "updated": True}
 
 
 def cancel(machine: str, job_id: str, *, confirm: bool = False) -> dict[str, Any]:

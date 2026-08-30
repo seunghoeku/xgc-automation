@@ -36,8 +36,14 @@ class SimulationRegistryTests(unittest.TestCase):
         )
         self.path_patch = patch.object(sr, "REGISTRY_PATH", self.registry_path)
         self.path_patch.start()
+        # Reserving a number also opens the simulation's catalog record, so the
+        # catalog must be redirected too or the tests would write into kb/.
+        self.catalog_dir = Path(self.tmp.name) / "simulations"
+        self.catalog_patch = patch.object(sr.catalog, "CATALOG_DIR", self.catalog_dir)
+        self.catalog_patch.start()
 
     def tearDown(self) -> None:
+        self.catalog_patch.stop()
         self.path_patch.stop()
         self.tmp.cleanup()
 
@@ -151,6 +157,67 @@ class SimulationRegistryTests(unittest.TestCase):
     def test_same_machine_cannot_be_listed_twice(self) -> None:
         with self.assertRaisesRegex(sr.SimulationRegistryError, "more than once"):
             sr.plan_simulation_id(["aurora", "aurora"], "EM test")
+
+    def test_reservation_opens_the_catalog_record(self) -> None:
+        result = sr.reserve_simulation_id(
+            "aurora",
+            "EM KBM linear",
+            tags=["kbm"],
+            expected_number=645,
+            confirm=True,
+        )
+
+        self.assertEqual(result["catalog_status"], "reserved")
+        record = sr.catalog.read_record("n645au", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["directory_name"], "n645au_em_kbm_linear")
+        self.assertEqual(record["machines"], ["aurora"])
+        self.assertEqual(record["tags"], ["kbm"])
+        self.assertEqual(record["origin"], "automation")
+        self.assertEqual(record["runs"], [])
+
+    def test_unconfirmed_reservation_creates_no_catalog_record(self) -> None:
+        sr.reserve_simulation_id("aurora", "EM test")
+
+        self.assertIsNone(sr.catalog.find_record("n645au", catalog_dir=self.catalog_dir))
+
+    def test_confirmed_staging_records_the_directory_and_case(self) -> None:
+        sr.reserve_simulation_id(
+            "stellar", "TCV delta-f", expected_number=645, confirm=True
+        )
+        config = {"paths": {"run_root": "/scratch/xgc-runs"}}
+        with (
+            patch.object(sr.machine_config, "get_machine", return_value=config),
+            patch.object(
+                sr.input_builder, "stage_case", return_value={"staged": True}
+            ),
+        ):
+            sr.stage_simulation_case("ecbc", "n645st", confirm=True)
+
+        record = sr.catalog.read_record("n645st", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["status"], "staged")
+        self.assertEqual(record["case"], "ecbc")
+        self.assertEqual(
+            record["remote_dirs"]["stellar"], "/scratch/xgc-runs/n645st_tcv_delta_f"
+        )
+
+    def test_unconfirmed_staging_leaves_the_record_reserved(self) -> None:
+        sr.reserve_simulation_id(
+            "stellar", "TCV delta-f", expected_number=645, confirm=True
+        )
+        config = {"paths": {"run_root": "/scratch/xgc-runs"}}
+        with (
+            patch.object(sr.machine_config, "get_machine", return_value=config),
+            patch.object(
+                sr.input_builder,
+                "stage_case",
+                return_value={"staged": False, "reason": "confirmation required"},
+            ),
+        ):
+            sr.stage_simulation_case("ecbc", "n645st")
+
+        record = sr.catalog.read_record("n645st", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["status"], "reserved")
+        self.assertEqual(record["remote_dirs"], {})
 
 
 if __name__ == "__main__":

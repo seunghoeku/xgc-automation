@@ -27,6 +27,7 @@ import yaml
 
 from tools import input_builder
 from tools import machines as machine_config
+from tools import simulation_catalog as catalog
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
@@ -237,7 +238,32 @@ def reserve_simulation_id(
     registry.setdefault("reservations", []).append(record)
     registry["next_number"] = expected_number + 1
     _write_registry(registry)
-    return {"reserved": True, **record, "next_number": registry["next_number"]}
+
+    # Open the simulation's catalog record at the moment the number exists, so
+    # the number is never a bare integer waiting for someone to remember to
+    # write it down. Everything later -- runs, status, archive location -- is
+    # appended to this file.
+    catalog_record = catalog.create_record(
+        record["simulation_id"],
+        machines=record["machines"],
+        short_name=record["short_name"],
+        directory_name=record["directory_name"],
+        tags=record["tags"],
+        status="reserved",
+        origin="automation",
+    )
+    catalog_path = catalog.record_path(record["simulation_id"])
+    try:
+        catalog_display = str(catalog_path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        catalog_display = str(catalog_path)
+    return {
+        "reserved": True,
+        **record,
+        "next_number": registry["next_number"],
+        "catalog_record": catalog_display,
+        "catalog_status": catalog_record["status"],
+    }
 
 
 def get_simulation(simulation_id: str) -> dict[str, Any]:
@@ -307,4 +333,20 @@ def stage_simulation_case(
     result["simulation_id"] = simulation_id
     result["directory_name"] = directory["directory_name"]
     result["tags"] = directory["tags"]
+
+    # Staging is the first thing that puts bytes on the machine, so it is the
+    # point at which the catalog can honestly say where the simulation lives.
+    if confirm and result.get("staged"):
+        try:
+            record = catalog.read_record(simulation_id)
+        except catalog.SimulationCatalogError:
+            record = None
+        if record is not None:
+            remote_dirs = dict(record.get("remote_dirs") or {})
+            remote_dirs[directory["machine"]] = directory["remote_directory"]
+            updates: dict[str, Any] = {"remote_dirs": remote_dirs, "case": case}
+            if record.get("status") == "reserved":
+                updates["status"] = "staged"
+            catalog.update_record(simulation_id, updates)
+            result["catalog_status"] = updates.get("status", record.get("status"))
     return result
