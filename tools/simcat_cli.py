@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import legacy_import
+from tools import refresh as refresh_tool
 from tools import run_adoption
 from tools import simulation_catalog as catalog
 
@@ -171,6 +172,49 @@ def _print_adopt(payload: dict[str, Any]) -> None:
         print("\nnothing was written; rerun with --confirm to apply")
 
 
+def _print_refresh_plan(payload: dict[str, Any]) -> None:
+    counts = payload["counts"]
+    print(
+        f"would poll {counts['runs']} run(s) across "
+        f"{counts['simulations']} simulation(s)"
+    )
+    for target in payload["targets"]:
+        print(f"    {target['record_id']:<34} [{target['status']}]")
+        for run in target["runs"]:
+            print(
+                f"        {run['machine']} job {run['job_id']} "
+                f"({run['state'] or 'no state yet'})"
+            )
+    print("\nnothing was contacted or written")
+
+
+def _print_refresh(payload: dict[str, Any]) -> None:
+    counts = payload["counts"]
+    if not counts["polled"]:
+        print("nothing in flight; the catalog is already up to date")
+        return
+
+    print(f"polled {counts['polled']} run(s) across {counts['simulations']} simulation(s)")
+    for item in payload["updated"]:
+        arrow = (
+            f"{item['status_before']} -> {item['status_after']}"
+            if item["status_before"] != item["status_after"]
+            else item["status_after"]
+        )
+        exit_code = item.get("exit_code")
+        suffix = f" exit={exit_code}" if exit_code is not None else ""
+        print(
+            f"    {item['record_id']:<34} job {item['job_id']} "
+            f"{item['run_state']}{suffix}  [{arrow}]"
+        )
+    if not payload["updated"]:
+        print("    no state changed")
+    if payload["errors"]:
+        print(f"\ncould not reach {len(payload['errors'])} run(s):")
+        for item in payload["errors"]:
+            print(f"    {item['record_id']} job {item.get('job_id')}: {item['error']}")
+
+
 def _print_sync(payload: dict[str, Any]) -> None:
     counts = payload["counts"]
     print(f"catalog rows:   {payload['rows']}")
@@ -290,6 +334,27 @@ def _cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_refresh(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        payload = refresh_tool.plan_refresh(
+            catalog_dir=_catalog_dir(args),
+            machine=args.machine,
+            record_id=args.record_id,
+        )
+        _print_json(payload) if args.json else _print_refresh_plan(payload)
+        return 0
+
+    payload = refresh_tool.refresh(
+        catalog_dir=_catalog_dir(args),
+        machine=args.machine,
+        record_id=args.record_id,
+    )
+    _print_json(payload) if args.json else _print_refresh(payload)
+    # A machine that could not be reached is worth a non-zero exit, so a cron
+    # entry or a script notices instead of assuming the catalog is current.
+    return 1 if payload["errors"] else 0
+
+
 def _cmd_sync_sheet(args: argparse.Namespace) -> int:
     # Imported lazily so the rest of the CLI works without the optional
     # Google dependencies installed.
@@ -336,49 +401,78 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int)
 
 
+def _global_options() -> argparse.ArgumentParser:
+    """Options accepted both before and after the subcommand.
+
+    Writing `xgc-sim list --json` is the obvious thing to try, so accepting it
+    only as `xgc-sim --json list` is a trap. Sharing one parent parser means
+    either position works.
+
+    The defaults are SUPPRESS so that an option given before the subcommand
+    survives: without it the subparser would write its own default over the
+    value the main parser already stored.
+    """
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="machine-readable output",
+    )
+    shared.add_argument(
+        "--catalog-dir",
+        default=argparse.SUPPRESS,
+        help="override kb/simulations (testing)",
+    )
+    return shared
+
+
 def _parser() -> argparse.ArgumentParser:
+    shared = _global_options()
     parser = argparse.ArgumentParser(
         prog="xgc-sim",
         description="Search and maintain the XGC simulation catalog.",
+        parents=[shared],
     )
-    parser.add_argument("--json", action="store_true", help="machine-readable output")
-    parser.add_argument("--catalog-dir", help="override kb/simulations (testing)")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = commands.add_parser("list", help="list simulations")
+    def add(name: str, **kwargs: Any) -> argparse.ArgumentParser:
+        return commands.add_parser(name, parents=[shared], **kwargs)
+
+    list_parser = add("list", help="list simulations")
     list_parser.add_argument("query", nargs="?", default="")
     _add_filters(list_parser)
     list_parser.set_defaults(func=_cmd_list)
 
-    search_parser = commands.add_parser("search", help="free-text search over every field")
+    search_parser = add("search", help="free-text search over every field")
     search_parser.add_argument("query")
     _add_filters(search_parser)
     search_parser.set_defaults(func=_cmd_list)
 
-    show_parser = commands.add_parser("show", help="show one simulation in full")
+    show_parser = add("show", help="show one simulation in full")
     show_parser.add_argument("record_id")
     show_parser.set_defaults(func=_cmd_show)
 
-    note_parser = commands.add_parser("note", help="set the human note")
+    note_parser = add("note", help="set the human note")
     note_parser.add_argument("record_id")
     note_parser.add_argument("note")
     note_parser.set_defaults(func=_cmd_note)
 
-    status_parser = commands.add_parser("status", help="set the simulation status")
+    status_parser = add("status", help="set the simulation status")
     status_parser.add_argument("record_id")
     status_parser.add_argument("status", choices=list(catalog.STATUSES))
     status_parser.set_defaults(func=_cmd_status)
 
-    archive_parser = commands.add_parser("archive", help="record where output was archived")
+    archive_parser = add("archive", help="record where output was archived")
     archive_parser.add_argument("record_id")
     archive_parser.add_argument("--system", default="hpss")
     archive_parser.add_argument("--path", required=True)
     archive_parser.set_defaults(func=_cmd_archive)
 
-    stats_parser = commands.add_parser("stats", help="catalog counts by status/machine/origin")
+    stats_parser = add("stats", help="catalog counts by status/machine/origin")
     stats_parser.set_defaults(func=_cmd_stats)
 
-    import_parser = commands.add_parser(
+    import_parser = add(
         "import-notebook",
         help="import the historical simulation notebook into the catalog",
     )
@@ -389,7 +483,7 @@ def _parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--confirm", action="store_true")
     import_parser.set_defaults(func=_cmd_import)
 
-    adopt_parser = commands.add_parser(
+    adopt_parser = add(
         "adopt-runs",
         help="add pre-catalog runs under runs/ to the catalog, grouped by directory",
     )
@@ -405,7 +499,20 @@ def _parser() -> argparse.ArgumentParser:
     adopt_parser.add_argument("--confirm", action="store_true")
     adopt_parser.set_defaults(func=_cmd_adopt)
 
-    sheet_parser = commands.add_parser(
+    refresh_parser = add(
+        "refresh",
+        help="ask the schedulers about every in-flight run and record the answers",
+    )
+    refresh_parser.add_argument("--machine", help="poll only this machine")
+    refresh_parser.add_argument("--record-id", help="poll only this simulation")
+    refresh_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list what would be polled without contacting anything",
+    )
+    refresh_parser.set_defaults(func=_cmd_refresh)
+
+    sheet_parser = add(
         "sync-sheet", help="mirror the catalog to Google Sheets (notes pull back)"
     )
     sheet_parser.add_argument("--credentials")
@@ -425,6 +532,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    # The shared options use SUPPRESS so either position wins, which means an
+    # unused option leaves no attribute behind at all.
+    for name, default in (("json", False), ("catalog_dir", None)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
     try:
         return int(args.func(args))
     except (

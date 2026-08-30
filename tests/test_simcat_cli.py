@@ -59,6 +59,26 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([row["record_id"] for row in payload], ["n645pe", "n646po"])
 
+    def test_json_works_before_or_after_the_subcommand(self) -> None:
+        # `xgc-sim list --json` is the obvious thing to type; accepting it only
+        # in front of the subcommand is a trap.
+        for argv in (
+            ["--json", "--catalog-dir", str(self.dir), "list"],
+            ["list", "--json", "--catalog-dir", str(self.dir)],
+            ["--json", "list", "--catalog-dir", str(self.dir)],
+        ):
+            with self.subTest(argv=argv):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    self.assertEqual(simcat_cli.main(argv), 0)
+                payload = json.loads(buffer.getvalue())
+                self.assertEqual(len(payload), 2)
+
+    def test_table_output_remains_the_default(self) -> None:
+        code, out = self.run_cli("list")
+        self.assertEqual(code, 0)
+        self.assertIn("2 simulation(s)", out)
+
     def test_search_matches_free_text(self) -> None:
         _, payload = self.run_cli_json("search", "asdex")
         self.assertEqual([row["record_id"] for row in payload], ["n645pe"])
