@@ -93,6 +93,11 @@ unaware of the machine type.
   provenance), `adopted` (real pre-catalog runs, outcome never recorded), or
   `notebook` (historical evidence only). Only `automation` records own a
   reserved sequence number; adoption never mints one retroactively.
+- One simulation spans many scheduler jobs, because long runs are sized to hit
+  the wall clock and restart from a checkpoint. A simulation's status is
+  therefore derived from its whole restart chain, and a timed-out job leaves it
+  `interrupted` ("restart to continue"), never `failed`. `xgc-sim refresh`
+  polls every in-flight run in one command.
 
 ## Portability (macOS first, Linux compatible)
 - SSH work goes through `tools/ssh.py`: argv-list subprocess calls against the

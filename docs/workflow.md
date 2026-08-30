@@ -32,6 +32,12 @@ The path from an input file to a running job, and the checks in between.
   job_output        tail of stdout/stderr
 ```
 
+Long runs are normally sized to hit the wall clock and restart from a
+checkpoint, so one simulation spans several jobs. A timed-out run leaves the
+simulation `interrupted` rather than `failed`, and its status is derived from
+the whole restart chain. `xgc-sim refresh` polls everything still in flight in
+one command.
+
 `simulation_id` identifies the scientific simulation and appears at the start
 of its directory name. The timestamp `run_id` remains separate because one
 simulation may have multiple submit/restart attempts. See

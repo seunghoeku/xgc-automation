@@ -99,18 +99,35 @@ Only `automation` records carry a reserved sequence number. The other two have
 
 ```text
 reserved -> staged -> submitted -> running -> completed -> analyzed -> archived
+                                       ^   \-> interrupted             abandoned
+                                       |         |
+                                       +-- restart
                                            \-> failed
-                                                                  abandoned
 ```
 
 Most transitions are automatic. `analyzed`, `abandoned`, and any correction are
 human calls, made with `xgc-sim status`.
 
-Two rules keep automation from overwriting judgement:
+**A simulation's status is derived from all of its runs, not from whichever one
+was polled last.** One scientific effort routinely spans several scheduler
+jobs: run out of wall clock, restart from the checkpoint, repeat. The status
+comes from the newest run that reported an outcome, so a failure early in a
+chain that was later restarted and finished is history rather than the current
+state.
 
-* A finished job never drags an `analyzed` or `archived` simulation backwards.
+`interrupted` means the last job hit the wall clock. That is not a failure:
+XGC runs are routinely sized to be stopped by the scheduler and resumed from a
+checkpoint, so `interrupted` reads as "restart to continue". Only a genuine
+error -- nonzero exit, node failure, out of memory -- is `failed`.
+
+Three rules keep automation from overwriting judgement:
+
+* A finished job never drags an `analyzed`, `archived`, or `abandoned`
+  simulation backwards, and neither does submitting a restart.
 * A cancelled job updates the run but not the simulation. Cancelling one
   attempt says nothing about whether the science was abandoned.
+* A job the scheduler has forgotten leaves the run untouched. Recording
+  `unknown` would replace real information with an absence.
 
 ## What updates it, and when
 
@@ -119,7 +136,8 @@ Two rules keep automation from overwriting judgement:
 | Number reserved | `reserve_simulation_id` | creates it, `reserved` |
 | Baseline staged | `stage_simulation_case` | records the directory and case, `staged` |
 | Job submitted | `submit_job` | appends the run, stores the input hash, `submitted` |
-| Job checked | `job_status` | records the job state; `running`/`completed`/`failed` |
+| Job checked | `job_status` | records that job's state and re-derives the status |
+| Catching up | `xgc-sim refresh` | polls every in-flight run at once |
 | Output archived | `xgc-sim archive` | records the location, `archived` |
 | Anytime | `xgc-sim note` | the human note |
 
@@ -130,6 +148,36 @@ ran, since the remote case directory is routinely edited for the next attempt.
 Both the submission link and the status update are best-effort: a catalog
 problem is reported in the result, never raised. A queued job must not look
 like a failed submission because a YAML file could not be written.
+
+## Keeping the catalog current
+
+`job_status` only updates the job you asked about, so a simulation submitted
+and then left alone stays `submitted` indefinitely. `refresh` inverts that: it
+finds every simulation still in flight, asks each machine about the runs
+involved, and writes the answers back.
+
+```bash
+xgc-sim refresh               # the whole catalog
+xgc-sim refresh --dry-run     # what would be polled; contacts nothing
+xgc-sim refresh --machine perlmutter
+xgc-sim refresh --record-id n645pe
+```
+
+It takes no confirmation, because it only writes down what the scheduler
+already decided; there is nothing for a human to approve. It polls and never
+submits, cancels, or touches remote files, so it is safe in a shell alias or a
+cron entry.
+
+Runs that already reported a terminal state are not polled again, which keeps
+the cost proportional to work in flight rather than to catalog size. An
+unreachable machine is reported per-run and does not stop the rest, and the
+command exits non-zero so a script notices rather than assuming it is current.
+
+A practical habit:
+
+```bash
+xgc-sim refresh && xgc-sim list --status running
+```
 
 ## Finding past work
 
