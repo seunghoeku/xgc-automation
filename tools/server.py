@@ -12,6 +12,7 @@ Tools implemented so far:
   - search_simulations : search the catalog of past and current simulations
   - show_simulation : one simulation's full record, runs, and provenance
   - simulation_stats : catalog counts by status/machine/origin
+  - refresh_simulations : poll schedulers for every in-flight run
   - set_simulation_note : write the human-owned note, gated on confirmation
   - inspect_input_archive : rank recent read-only input backups for migration
   - rank_promotion_candidates : join the archive with the simulation notebook
@@ -56,6 +57,7 @@ from tools import input_builder as ib
 from tools import input_archive
 from tools import machines as m
 from tools import physics_advisor as pa
+from tools import refresh as refresh_tool
 from tools import remote_gui as rg
 from tools import simulation_catalog as sc
 from tools import simulation_registry as sr
@@ -431,6 +433,29 @@ def show_simulation(record_id: str) -> dict[str, Any]:
 def simulation_stats() -> dict[str, Any]:
     """Counts of catalog simulations by status, machine, and origin."""
     return sc.stats()
+
+
+@mcp.tool()
+def refresh_simulations(
+    machine: str | None = None,
+    record_id: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Ask the schedulers about every in-flight run and record the answers.
+
+    Use this before reporting on the state of ongoing work, since a simulation
+    that was submitted and not polled since still reads as ``submitted``.
+
+    This only writes down what the scheduler already decided, so it needs no
+    confirmation. It polls and never submits, cancels, or touches remote files.
+    Pass dry_run=True to see what would be polled without contacting anything.
+
+    A run that hit the wall clock reports ``timeout`` and leaves the simulation
+    ``interrupted``, meaning "restart to continue" rather than "broken".
+    """
+    if dry_run:
+        return refresh_tool.plan_refresh(machine=machine, record_id=record_id)
+    return refresh_tool.refresh(machine=machine, record_id=record_id)
 
 
 @mcp.tool()
