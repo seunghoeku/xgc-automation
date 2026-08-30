@@ -72,6 +72,10 @@ unaware of the machine type.
 7. `provenance` — input→output lineage (commit, hash, timestamp)
 8. `remote_gui` — resolve a remote simulation, start XGC-Devel's existing
    Monitor on the login node, tunnel it to localhost, and manage its lifecycle
+9. `simulation_catalog` — one durable record per simulation
+   (`kb/simulations/<id>.yaml`) linking its number, runs, status, archive
+   location, and human note; searchable via the `xgc-sim` CLI without an LLM,
+   optionally mirrored to Google Sheets (`docs/simulation-catalog.md`)
 
 ## Data Principles
 - XGC output is ADIOS2 (`.bp`) and can reach several TB. **Never download it all.**
@@ -81,6 +85,14 @@ unaware of the machine type.
   `simulation_id` from `kb/simulation_registry.yaml`. The number is never
   reused across machines. Scheduler submission attempts retain separate
   timestamp-based `run_id` values.
+- Each simulation also owns one catalog record, `kb/simulations/<id>.yaml`,
+  which links that number to its runs, status, input hash, archive location,
+  and the human's note. It is maintained automatically by reservation,
+  staging, submission, and status checks, and searched with `xgc-sim`.
+  A record's `origin` bounds what it may claim: `automation` (verified
+  provenance), `adopted` (real pre-catalog runs, outcome never recorded), or
+  `notebook` (historical evidence only). Only `automation` records own a
+  reserved sequence number; adoption never mints one retroactively.
 
 ## Portability (macOS first, Linux compatible)
 - SSH work goes through `tools/ssh.py`: argv-list subprocess calls against the
@@ -131,7 +143,24 @@ unaware of the machine type.
       1-node qsub/qstat/output round trip passed with exit 0 (job 7301673).
       Live qdel was not exercised; the XGC executable is compiled but not
       runtime-tested.
-- [ ] 9. Strengthen provenance / (later) team-sharing UI
+- [x] 9. Strengthen provenance — the simulation catalog
+      (`tools/simulation_catalog.py`) gives every simulation one durable
+      record under `kb/simulations/`, created at reservation and updated
+      automatically by staging, submission, and status checks, so a number is
+      always linked to its runs, provenance files, input hash, and archive
+      location. Submission now also stores the submitted namelist and its
+      SHA-256 in the run record. `tools/legacy_import.py` imports the
+      historical notebook (738 of 742 rows) as `origin: notebook` evidence
+      records, `tools/run_adoption.py` folds the 35 pre-catalog provenance
+      runs under `runs/` into 25 `origin: adopted` simulations grouped by
+      working directory (no retroactive numbering, no invented outcomes), and
+      `tools/simcat_cli.py` (`xgc-sim`) searches all of it with no LLM
+      involved. `tools/sheet_sync.py` mirrors the catalog to Google
+      Sheets, pushing machine-known fields and pulling back only the
+      human-owned `note` column (optional extra: `uv sync --extra sheets`).
+      See `docs/simulation-catalog.md`. Open: a live Google Sheets round trip
+      still needs a real service account, and HPSS archiving is recorded but
+      not driven. Team-sharing UI remains later work.
 - [x] 10. Case promotion pipeline (`tools/case_promotion.py`) — joins
       `input_backup/` with the researcher's simulation notebook
       (`Other_data/simulation_note_XGC1.xlsx`), classifies outcomes from the

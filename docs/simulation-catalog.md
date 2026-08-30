@@ -1,0 +1,292 @@
+# The simulation catalog
+
+One durable record per scientific simulation, holding what it was, what ran,
+how it ended, and where the output went.
+
+## Why it exists
+
+The manual system worked like this: pick the next number, make a directory
+named after it, type the provenance into a spreadsheet, and archive the output
+to HPSS under the same number. Every step was sound. The problem was that the
+number, the spreadsheet row, the run directory, and the scheduler job were
+connected only inside the researcher's head, and only for as long as it was
+remembered.
+
+The catalog keeps the number and automates the bookkeeping. Reserving a number
+opens a record; submitting a job links itself to it; checking on that job marks
+it completed or failed. The parts a machine can determine, a machine
+determines. What is left for a human is judgement: the note, and approving
+anything that writes.
+
+Nothing here needs an LLM. The `xgc-sim` command is the whole system with a
+keyboard; the MCP tools call the same functions.
+
+## Where it lives
+
+```text
+kb/simulations/<record_id>.yaml     one file per simulation
+```
+
+One file per simulation, rather than one index, so that git history shows what
+changed about a given simulation instead of a single perpetually-conflicting
+file. Set `XGC_SIMULATION_CATALOG` to point elsewhere.
+
+The record ID is the key. For simulations this toolchain runs it is the
+`simulation_id` from `kb/simulation_registry.yaml` (`n645pe`, see
+`docs/simulation-ids.md`). For imported historical runs it is the notebook's
+shot name (`ti204`, `j86`). For adopted pre-catalog runs it is the working
+directory name (`tcv_xgca_reduce_adia_k1`).
+
+> The key is the ID string, never the bare number. Historical numbers are not
+> unique: `ti204` and `su204` are different simulations, and roughly a hundred
+> numbers repeat across the pre-2023 prefixes. Only the modern
+> `n<NUMBER><MACHINE>` scheme guarantees a global number.
+
+## What a record holds
+
+```yaml
+schema_version: 1
+record_id: n645pe
+simulation_id: n645pe        # null for historical shots
+number: 645
+short_name: tcv_delta_f_linear
+machines: [perlmutter]
+status: completed
+origin: automation           # notebook (imported) or adopted (pre-catalog runs)
+case: ecbc                   # the kb baseline it started from
+directory_name: n645pe_tcv_delta_f_linear
+tags: [tcv, delta-f]
+remote_dirs:
+  perlmutter: /pscratch/sd/s/sku/xgc-runs/n645pe_tcv_delta_f_linear
+input_sha256: 6f1c...        # of the namelist actually submitted
+runs:
+  - run_id: run-20260830T101010Z
+    machine: perlmutter
+    job_id: "12345"
+    submitted_at: 2026-08-30T10:10:10+00:00
+    provenance: runs/master/run-20260830T101010Z/provenance.json
+    remote_run_dir: /pscratch/.../n645pe_tcv_delta_f_linear
+    state: completed
+    exit_code: 0
+archive:
+  system: hpss
+  path: /home/s/sku/n645pe.tar
+  archived_at: 2026-09-02T18:00:00+00:00
+note: growth rate 1.2e5 /s, matches the GENE benchmark
+created_at: ...
+updated_at: ...
+```
+
+`runs` is the link that used to be missing. A simulation has one number and one
+directory but many submission attempts, each with its own timestamp `run_id`
+and its own provenance record; the catalog holds them together.
+
+### Origins
+
+`origin` says how much a record can be trusted to claim, and the three kinds
+are deliberately not equal:
+
+| `origin` | Source | Has verified provenance? |
+|---|---|---|
+| `automation` | reserved and run through these tools | yes: runs, input hash, dryrun |
+| `adopted` | provenance under `runs/` predating the catalog | runs and job IDs, but no recorded outcome |
+| `notebook` | the researcher's xlsx | no: evidence only |
+
+Only `automation` records carry a reserved sequence number. The other two have
+`number: null` unless their original name happened to contain one.
+
+### Status
+
+```text
+reserved -> staged -> submitted -> running -> completed -> analyzed -> archived
+                                           \-> failed
+                                                                  abandoned
+```
+
+Most transitions are automatic. `analyzed`, `abandoned`, and any correction are
+human calls, made with `xgc-sim status`.
+
+Two rules keep automation from overwriting judgement:
+
+* A finished job never drags an `analyzed` or `archived` simulation backwards.
+* A cancelled job updates the run but not the simulation. Cancelling one
+  attempt says nothing about whether the science was abandoned.
+
+## What updates it, and when
+
+| Moment | Tool | Effect on the record |
+|---|---|---|
+| Number reserved | `reserve_simulation_id` | creates it, `reserved` |
+| Baseline staged | `stage_simulation_case` | records the directory and case, `staged` |
+| Job submitted | `submit_job` | appends the run, stores the input hash, `submitted` |
+| Job checked | `job_status` | records the job state; `running`/`completed`/`failed` |
+| Output archived | `xgc-sim archive` | records the location, `archived` |
+| Anytime | `xgc-sim note` | the human note |
+
+Submission also copies the exact input namelist into the provenance record and
+stores its SHA-256. Without it a record can say which job ran but not what it
+ran, since the remote case directory is routinely edited for the next attempt.
+
+Both the submission link and the status update are best-effort: a catalog
+problem is reported in the result, never raised. A queued job must not look
+like a failed submission because a YAML file could not be written.
+
+## Finding past work
+
+```bash
+xgc-sim search "asdex i-mode"          # any text field, including the note
+xgc-sim list --machine perlmutter --status failed --after 2025-01-01
+xgc-sim list --tag electromagnetic --origin notebook
+xgc-sim list --origin adopted          # pre-catalog runs, newest work first
+xgc-sim show n645pe                    # full record, runs, provenance paths
+xgc-sim stats                          # counts by status, machine, origin
+```
+
+Add `--json` to any command for scripting. The MCP equivalents are
+`search_simulations`, `show_simulation`, and `simulation_stats`.
+
+All query terms must match, but separators do not have to. The three sources
+write names differently -- `ASDEX_I_mode_EM`, `asdex-imode`, `ASDEX I mode` --
+so query and record are both reduced to words before matching. Any of
+`asdex i-mode`, `ASDEX I mode`, or `asdex_i_mode` finds the same simulations.
+
+Search covers imported history and adopted runs too, which is the point: "what
+did we already try for ASDEX I-mode?" is one command, not an afternoon in a
+spreadsheet.
+
+## Adopting runs that predate the catalog
+
+Runs submitted before the catalog existed have provenance under `runs/` but no
+catalog record, so they are invisible to search. That is the work most worth
+finding: it is recent, and the directories are usually still on disk.
+
+```bash
+xgc-sim adopt-runs            # plan only; writes nothing
+xgc-sim adopt-runs --confirm
+```
+
+Runs are grouped into simulations **by working directory**, because a restart
+reuses the directory and takes a new `run_id`. Grouping any other way would
+split a campaign across records or merge unrelated work. A trailing `run/`
+subdirectory is ignored, so `.../k1` and `.../k1/run` are one simulation.
+
+The key is the directory name. Bare variant labels are qualified with their
+campaign directory, since `k1` alone identifies nothing:
+
+```text
+/pscratch/.../codex_work/tcv_xgca_reduce_adia_k1   ->  tcv_xgca_reduce_adia_k1
+/grand/.../dev_reduce_adia/k1                      ->  dev_reduce_adia_k1
+```
+
+What adoption will not do:
+
+* **Assign a sequence number.** Numbering retroactively is irreversible, and
+  the registry sequence is for simulations a human chose to number. Adopted
+  records have `number: null` and `adoption.numbered: false`. If a run deserves
+  a number, reserve one deliberately.
+* **Invent an outcome.** Provenance records a submission, not a result. These
+  runs predate the status write-back, so unless a state was recorded they are
+  left at `submitted`. Correct them with `xgc-sim status`.
+* **Overwrite a registered simulation.** A key already owned by an
+  `automation` record is skipped and reported.
+
+Scheduler smoke tests are excluded unless you pass `--include-smoke-tests`.
+Rerunning is safe; `--overwrite` picks up runs added since.
+
+## Importing the historical notebook
+
+`Other_data/simulation_note_XGC1.xlsx` is the researcher's own document, one
+sheet per year, one row per shot. Importing it makes that corpus searchable
+alongside current work.
+
+```bash
+xgc-sim import-notebook            # plan only; writes nothing
+xgc-sim import-notebook --confirm
+```
+
+The notebook is never written to. Imported records carry `origin: notebook` and
+keep the researcher's wording verbatim under `legacy`, including the phrases
+that produced the outcome classification. The import claims nothing it cannot
+support:
+
+* No input hash, commit, or run is invented. A notebook row is evidence, not
+  provenance.
+* A machine is recorded only when the shot name says so, with `machine_basis`
+  naming the inference. The ambiguous pre-2013 prefixes (`pf`, `j`, `f`, `hp`,
+  `ew`, ...) get no machine at all: no machine is better than the wrong one.
+* `data: hpss` marks the record archived but leaves `archive.path` null. The
+  notebook says it went to tape, not where.
+* A notebook row never overwrites an `origin: automation` record.
+
+The import is idempotent; rerun with `--overwrite` to refresh.
+
+Of 742 rows, 738 import. The four skips are reported with reasons: one
+annotation row and three duplicate shot cells.
+
+## Google Sheets
+
+The spreadsheet stays, as a view.
+
+```text
+catalog (kb/simulations/*.yaml)  --push-->  Sheet    everything machine-known
+catalog                          <--pull--  Sheet    the note column only
+```
+
+Every field the automation can determine is pushed and overwrites the sheet. A
+status typed into the browser is not evidence of anything; the catalog's status
+came from a scheduler. The one exception is `note`, which belongs to the human
+and is pulled back before each push, so commenting in the browser works exactly
+as it always did.
+
+The sheet is a replica. Losing it costs nothing, and a revoked credential or a
+dead network can never block a simulation.
+
+### Setup
+
+Install the optional dependencies:
+
+```bash
+uv sync --extra sheets
+```
+
+Then, once:
+
+1. Create a Google Cloud service account and download its JSON key.
+2. Share the spreadsheet with the service account's email address as **Editor**.
+3. Point the toolchain at both, under `common` in `machines.local.yaml`
+   (gitignored):
+
+```yaml
+common:
+  sheet_sync:
+    credentials: ~/.config/xgc/sheet-service-account.json
+    spreadsheet_id: 1AbC...
+    worksheet: simulations
+```
+
+`XGC_SHEET_CREDENTIALS`, `XGC_SHEET_ID`, and `XGC_SHEET_WORKSHEET` override
+these. Keep the key file outside the repository.
+
+### Use
+
+```bash
+xgc-sim sync-sheet --check      # report configuration; connects to nothing
+xgc-sim sync-sheet              # show the diff; writes nothing
+xgc-sim sync-sheet --confirm    # pull notes, then push
+xgc-sim sync-sheet --confirm --no-pull
+```
+
+Rows present in the sheet but absent from the catalog are reported rather than
+deleted, in case a human added something the catalog has not heard about.
+
+## Archiving
+
+The catalog records where output went; it does not move it. Run `htar`/`hsi`
+yourself, then:
+
+```bash
+xgc-sim archive n645pe --system hpss --path /home/s/sku/n645pe.tar
+```
+
+The value is that the number-to-tape mapping stops living in someone's memory.
+Driving the transfer is deliberately out of scope for now.

@@ -85,9 +85,9 @@ Two directories are the original researcher's personal science record and
 are not part of the toolchain:
 
 - `Other_data/simulation_note_XGC1.xlsx` -- 18 years of per-run intent and
-  outcome notes. Only used by the *case promotion* tools
-  (`rank_promotion_candidates`, `plan_case_promotion`); without it they
-  explain themselves and stop.
+  outcome notes. Used by the *case promotion* tools
+  (`rank_promotion_candidates`, `plan_case_promotion`) and by
+  `xgc-sim import-notebook`; without it they explain themselves and stop.
 - `input_backup/` -- ~700 historical XGC inputs. Same: promotion evidence
   only.
 
@@ -95,7 +95,13 @@ Everything else works without them: `kb/cases/` baselines, the physics
 advisor, input building, dryrun validation, submission, and analysis. If
 you have your own run history, the promotion pipeline works on any files
 following the `n<number><machine-code>_<description>` naming plus a
-notebook with `shot #` / `note` columns.
+notebook with `shot #` / `note` columns. The same applies to
+`xgc-sim import-notebook`; point it at your own file with `--notebook` or
+`XGC_SIMULATION_NOTEBOOK`.
+
+The simulation catalog (`kb/simulations/`) starts empty and fills itself as
+you reserve numbers and submit jobs, so it needs none of the above. See
+`docs/simulation-catalog.md`, including the optional Google Sheets mirror.
 
 ## 5. Using the validated baselines (kb/cases/)
 
@@ -150,3 +156,6 @@ limitation) -- use a 1-node debug-queue job (`docs/build-polaris.md`).
   a case before production use.
 - `runs/` and `kb/cases/drafts/` contain the original project's provenance
   history; they are safe to keep and useful as examples.
+- The Google Sheets mirror needs a service account key that is personal to
+  you. Keep it outside the repository and reference it from
+  `common.sheet_sync` in `machines.local.yaml`; never commit it.

@@ -37,6 +37,13 @@ of its directory name. The timestamp `run_id` remains separate because one
 simulation may have multiple submit/restart attempts. See
 `docs/simulation-ids.md`.
 
+Each step above also maintains the simulation's catalog record at
+`kb/simulations/<simulation_id>.yaml`: reservation opens it, staging records
+the directory, submission appends the run and the input hash, and `job_status`
+marks it completed or failed. That record is what makes past work findable
+later, with `xgc-sim search` or `search_simulations`. See
+`docs/simulation-catalog.md`.
+
 `physics_advisor` is deliberately conservative. It selects only from validated
 cases in `kb/cases/`, applies explicit deterministic rules, and returns
 unsupported when the knowledge base does not cover the requested physics. A
@@ -133,6 +140,15 @@ An intentional scientific run without a `simulation_id`, such as a historical
 case that cannot yet be registered, must explicitly request
 `provenance_class="master"`. Existing records directly below `runs/<run_id>/`
 remain readable as legacy provenance; new records are never written there.
+
+Runs that predate the catalog can be folded into it with `xgc-sim adopt-runs`,
+which groups them by working directory so restarts stay together. See
+`docs/simulation-catalog.md`.
+
+Each record also holds a copy of the input namelist actually submitted, plus
+its SHA-256 in `input_sha256`. The remote case directory is routinely edited
+for the next attempt, so without the copy a record could say which job ran but
+not what it ran.
 
 ### Recommended future gate: executable availability
 

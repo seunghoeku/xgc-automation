@@ -9,6 +9,10 @@ Tools implemented so far:
   - plan_simulation_id : preview the next global simulation ID and directory
   - reserve_simulation_id : reserve that ID after human confirmation
   - stage_simulation_case : stage a baseline under the canonical directory
+  - search_simulations : search the catalog of past and current simulations
+  - show_simulation : one simulation's full record, runs, and provenance
+  - simulation_stats : catalog counts by status/machine/origin
+  - set_simulation_note : write the human-owned note, gated on confirmation
   - inspect_input_archive : rank recent read-only input backups for migration
   - rank_promotion_candidates : join the archive with the simulation notebook
   - plan_case_promotion : draft a kb case from an archived input, writing nothing
@@ -53,6 +57,7 @@ from tools import input_archive
 from tools import machines as m
 from tools import physics_advisor as pa
 from tools import remote_gui as rg
+from tools import simulation_catalog as sc
 from tools import simulation_registry as sr
 from tools import ssh as ssh_transport
 
@@ -366,6 +371,85 @@ def stage_simulation_case(
         machine=machine,
         confirm=confirm,
     )
+
+
+@mcp.tool()
+def search_simulations(
+    query: str = "",
+    machine: str | None = None,
+    status: str | None = None,
+    tag: str | None = None,
+    origin: str | None = None,
+    case: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Search the simulation catalog: every past and current simulation.
+
+    ``query`` matches any text field, including the human note and the original
+    notebook description. Check ``origin`` before relying on a match, because
+    it bounds what the record can claim:
+
+    - ``automation``: run through this toolchain; has linked runs, an input
+      hash, and a dryrun report.
+    - ``adopted``: real runs recorded before the catalog existed; job IDs and
+      provenance are trustworthy, but the outcome was never captured, so the
+      status may say ``submitted`` for work that finished long ago.
+    - ``notebook``: the researcher's historical spreadsheet. Evidence of intent
+      and outcome in their own words, with no machine-verified provenance.
+
+    Use this before proposing a new simulation, to find what was already tried.
+    The same search is available offline as ``xgc-sim search``.
+    """
+    matches = sc.search(
+        query,
+        machine=machine,
+        status=status,
+        tag=tag,
+        origin=origin,
+        case=case,
+        after=after,
+        before=before,
+        limit=limit,
+        catalog_dir=None,
+    )
+    return {"query": query, "count": len(matches), "matches": matches}
+
+
+@mcp.tool()
+def show_simulation(record_id: str) -> dict[str, Any]:
+    """Return one simulation's full catalog record.
+
+    Includes its status, linked scheduler runs with their provenance paths, the
+    input hash, the archive location, and any historical notebook evidence.
+    """
+    return sc.show(record_id)
+
+
+@mcp.tool()
+def simulation_stats() -> dict[str, Any]:
+    """Counts of catalog simulations by status, machine, and origin."""
+    return sc.stats()
+
+
+@mcp.tool()
+def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dict[str, Any]:
+    """Write the human-owned note on a simulation. Requires confirmation.
+
+    The note is the one catalog field a person owns; it also round-trips
+    through Google Sheets. Only set confirm=True after the user has approved
+    the exact wording, since this overwrites whatever was there.
+    """
+    if not confirm:
+        return {
+            "written": False,
+            "reason": "confirmation required; show the note text and resubmit with confirm=True",
+            "record_id": record_id,
+            "note": note,
+        }
+    record = sc.set_note(record_id, note)
+    return {"written": True, **sc.summarize(record)}
 
 
 @mcp.tool()

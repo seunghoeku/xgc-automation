@@ -75,6 +75,10 @@ When confirming a reservation, callers must pass the exact `expected_number`
 shown in the plan. If another reservation has advanced the sequence, the stale
 plan is rejected rather than silently assigning a different ID.
 
+Reserving a number also opens the simulation's catalog record at
+`kb/simulations/<simulation_id>.yaml`, which then accumulates its runs, status,
+archive location, and human note. See `docs/simulation-catalog.md`.
+
 The mutable source of truth is `kb/simulation_registry.yaml`. Provenance stores
 both identifiers:
 
