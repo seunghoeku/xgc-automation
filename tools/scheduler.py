@@ -9,7 +9,7 @@ normalized JobState vocabulary and never branches on scheduler type
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Sequence
 
 # Normalized job states. Scheduler-specific codes map onto these.
 PENDING = "pending"
@@ -59,6 +59,13 @@ class Scheduler:
 
     type_name: str = ""
 
+    # Whether this scheduler can answer about many jobs in one command. Every
+    # remote call costs seconds of login-shell startup, so bulk polling is the
+    # difference between seconds and minutes when checking a whole catalog.
+    # Adapters that cannot do it leave this False and callers fall back to
+    # one query per job.
+    supports_bulk_status: bool = False
+
     def submit_argv(self, script_path: str) -> list[str]:
         raise NotImplementedError
 
@@ -84,6 +91,7 @@ class Scheduler:
 
 class SlurmScheduler(Scheduler):
     type_name = "slurm"
+    supports_bulk_status = True
 
     def submit_argv(self, script_path: str) -> list[str]:
         return ["sbatch", script_path]
@@ -133,9 +141,78 @@ class SlurmScheduler(Scheduler):
                 "pass them in the submission request."
             )
 
+    def bulk_status_argv(self, job_ids: Sequence[str]) -> list[str]:
+        """Ask squeue about many jobs at once, tagging each answer with its id.
+
+        Every remote call costs seconds of login-shell startup regardless of
+        what it runs, so polling N jobs must not mean N round trips.
+        """
+        return [
+            "squeue",
+            "-j",
+            ",".join(job_ids),
+            "-h",
+            "-o",
+            "%i|%T",
+        ]
+
+    def parse_bulk_status(self, stdout: str) -> dict[str, str]:
+        """Map job id -> normalized state from bulk squeue output.
+
+        Jobs missing from the output have left the queue; the caller resolves
+        those through accounting.
+        """
+        states: dict[str, str] = {}
+        for line in stdout.strip().splitlines():
+            if "|" not in line:
+                continue
+            raw_id, _, raw_state = line.partition("|")
+            job_id = raw_id.strip()
+            if not job_id:
+                continue
+            states[job_id] = _SLURM_STATES.get(
+                raw_state.strip().split()[0].upper() if raw_state.strip() else "",
+                UNKNOWN,
+            )
+        return states
+
     def accounting_argv(self, job_id: str) -> list[str]:
         """Query sacct for a finished job's state and exit code."""
         return ["sacct", "-j", job_id, "-n", "-P", "-o", "State,ExitCode"]
+
+    def bulk_accounting_argv(self, job_ids: Sequence[str]) -> list[str]:
+        """Ask sacct about many finished jobs at once."""
+        return [
+            "sacct",
+            "-j",
+            ",".join(job_ids),
+            "-n",
+            "-P",
+            "-o",
+            "JobID,State,ExitCode",
+        ]
+
+    def parse_bulk_accounting(self, stdout: str) -> dict[str, tuple[str, str | None]]:
+        """Map job id -> (state, exit code) from bulk sacct output.
+
+        sacct also lists ``.batch`` and ``.extern`` steps; those are skipped so
+        the job's own row is what gets recorded.
+        """
+        results: dict[str, tuple[str, str | None]] = {}
+        for line in stdout.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) < 2:
+                continue
+            job_id = parts[0].strip()
+            if not job_id or "." in job_id:
+                continue
+            raw_state = parts[1].strip()
+            if not raw_state:
+                continue
+            state = _SLURM_STATES.get(raw_state.split()[0].upper(), UNKNOWN)
+            exit_code = parts[2].strip() if len(parts) > 2 else None
+            results.setdefault(job_id, (state, exit_code or None))
+        return results
 
     def parse_accounting(self, stdout: str) -> tuple[str, str | None]:
         """Parse sacct output into (normalized state, exit code).

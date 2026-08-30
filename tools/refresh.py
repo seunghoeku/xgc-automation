@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import hpc_runner
+from tools import machines as machine_config
 from tools import scheduler as sched
 from tools import simulation_catalog as catalog
 from tools import ssh
@@ -56,6 +57,72 @@ def _pending_runs(record: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         pending.append(run)
     return pending
+
+
+def _bulk_states(
+    machine: str, job_ids: list[str]
+) -> dict[str, dict[str, Any]] | None:
+    """Ask one machine about many jobs in as few remote calls as possible.
+
+    Returns job id -> the same shape ``hpc_runner.status`` produces, or None
+    when this scheduler cannot answer in bulk and the caller should fall back
+    to one query per job.
+
+    Why this exists: a remote call costs seconds of login-shell startup no
+    matter how trivial the command, so the cost of polling is dominated by the
+    number of round trips, not by the number of jobs. Two calls per machine
+    replaces two per job.
+    """
+    cfg = machine_config.get_machine(machine)
+    scheduler = sched.get_scheduler(cfg)
+    if not scheduler.supports_bulk_status:
+        return None
+
+    host = ssh.host_for(cfg)
+    results: dict[str, dict[str, Any]] = {}
+
+    queued = ssh.run(host, scheduler.bulk_status_argv(job_ids))
+    live = scheduler.parse_bulk_status(queued.stdout) if queued.ok else {}
+    for job_id, state in live.items():
+        results[job_id] = {
+            "machine": machine,
+            "job_id": job_id,
+            "state": state,
+            "terminal": state in sched.TERMINAL_STATES,
+            "source": scheduler.type_name,
+        }
+
+    # Anything the queue no longer lists has finished; accounting knows how.
+    missing = [job_id for job_id in job_ids if job_id not in results]
+    if missing:
+        acct = ssh.run(host, scheduler.bulk_accounting_argv(missing))
+        if acct.ok:
+            for job_id, (state, exit_code) in scheduler.parse_bulk_accounting(
+                acct.stdout
+            ).items():
+                results[job_id] = {
+                    "machine": machine,
+                    "job_id": job_id,
+                    "state": state,
+                    "exit_code": exit_code,
+                    "terminal": state in sched.TERMINAL_STATES,
+                    "source": "sacct",
+                }
+
+    # Jobs neither the queue nor accounting knows are reported as unknown, so
+    # the caller leaves them alone rather than overwriting a real state.
+    for job_id in job_ids:
+        results.setdefault(
+            job_id,
+            {
+                "machine": machine,
+                "job_id": job_id,
+                "state": sched.UNKNOWN,
+                "terminal": False,
+                "source": scheduler.type_name,
+            },
+        )
+    return results
 
 
 def plan_refresh(
@@ -139,24 +206,65 @@ def refresh(
     unchanged: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
 
+    # Collect every machine's answers first, in as few remote calls as the
+    # scheduler allows, then apply them. An explicit status_fn (tests, or a
+    # caller wanting per-job semantics) disables bulk querying.
+    bulk: dict[str, dict[str, dict[str, Any]]] = {}
+    bulk_errors: dict[str, str] = {}
+    if status_fn is None:
+        by_machine: dict[str, list[str]] = {}
+        for target in plan["targets"]:
+            for run in target["runs"]:
+                by_machine.setdefault(str(run["machine"]), []).append(str(run["job_id"]))
+        for machine_name, job_ids in by_machine.items():
+            unique = sorted(set(job_ids))
+            try:
+                answers = _bulk_states(machine_name, unique)
+            except (ssh.SSHError, sched.SchedulerError, KeyError) as exc:
+                # Record it once per machine; the per-run loop reports it for
+                # each affected run without re-attempting the connection.
+                bulk_errors[machine_name] = str(exc)
+                continue
+            if answers is not None:
+                bulk[machine_name] = answers
+
     for target in plan["targets"]:
         simulation_id = target["record_id"]
         before = target["status"]
 
         for run in target["runs"]:
-            try:
-                result = query(run["machine"], str(run["job_id"]))
-            except (ssh.SSHError, sched.SchedulerError, KeyError) as exc:
+            run_machine = str(run["machine"])
+            job_id = str(run["job_id"])
+
+            if run_machine in bulk_errors:
                 errors.append(
                     {
                         "record_id": simulation_id,
                         "run_id": run["run_id"],
-                        "machine": run["machine"],
-                        "job_id": run["job_id"],
-                        "error": str(exc),
+                        "machine": run_machine,
+                        "job_id": job_id,
+                        "error": bulk_errors[run_machine],
                     }
                 )
                 continue
+
+            cached = bulk.get(run_machine, {}).get(job_id)
+            if cached is not None:
+                result = cached
+            else:
+                try:
+                    result = query(run_machine, job_id)
+                except (ssh.SSHError, sched.SchedulerError, KeyError) as exc:
+                    errors.append(
+                        {
+                            "record_id": simulation_id,
+                            "run_id": run["run_id"],
+                            "machine": run_machine,
+                            "job_id": job_id,
+                            "error": str(exc),
+                        }
+                    )
+                    continue
 
             state = str(result.get("state") or sched.UNKNOWN)
             if state == sched.UNKNOWN:

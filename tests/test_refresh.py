@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from tools import refresh as refresh_tool
 from tools import scheduler as sched
@@ -255,6 +256,139 @@ class RefreshTests(unittest.TestCase):
         run = sc.read_record("n645pe", catalog_dir=self.dir)["runs"][0]
         self.assertEqual(run["exit_code"], 2)
         self.assertEqual(run["state"], "failed")
+
+
+class BulkQueryTests(unittest.TestCase):
+    """Polling must scale with machines, not with jobs.
+
+    Every remote call costs seconds of login-shell startup regardless of what
+    it runs, so asking about 30 jobs one at a time is what made refresh slow.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.commands: list[list[str]] = []
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _catalog(self, count: int, machine: str = "perlmutter") -> None:
+        for index in range(count):
+            record_id = f"n{600 + index}pe"
+            sc.create_record(
+                record_id, catalog_dir=self.dir, machines=[machine], short_name="tcv"
+            )
+            sc.attach_run(
+                record_id,
+                {
+                    "run_id": f"run-{index}",
+                    "machine": machine,
+                    "job_id": str(100 + index),
+                    "submitted_at": f"2026-08-0{index + 1}T00:00:00Z",
+                },
+                catalog_dir=self.dir,
+            )
+
+    def _fake_ssh(self, queue_out: str = "", acct_out: str = ""):
+        def run(host: str, argv: Any, **kwargs: Any) -> Any:
+            self.commands.append(list(argv))
+            out = queue_out if argv[0] == "squeue" else acct_out
+            return ssh.CommandResult(0, out, "", " ".join(argv))
+
+        return run
+
+    def _refresh_with(self, queue_out: str = "", acct_out: str = "") -> dict[str, Any]:
+        cfg = {"scheduler": {"type": "slurm"}}
+        with (
+            patch.object(refresh_tool.machine_config, "get_machine", return_value=cfg),
+            patch.object(refresh_tool.ssh, "host_for", return_value="perlmutter"),
+            patch.object(refresh_tool.ssh, "run", side_effect=self._fake_ssh(queue_out, acct_out)),
+        ):
+            return refresh_tool.refresh(catalog_dir=self.dir)
+
+    def test_many_jobs_take_a_constant_number_of_calls(self) -> None:
+        self._catalog(12)
+        self._refresh_with(acct_out="\n".join(f"{100 + i}|COMPLETED|0:0" for i in range(12)))
+
+        # One squeue plus one sacct, no matter how many jobs.
+        self.assertEqual([cmd[0] for cmd in self.commands], ["squeue", "sacct"])
+
+    def test_all_twelve_jobs_are_asked_about_in_one_command(self) -> None:
+        self._catalog(12)
+        self._refresh_with(acct_out="\n".join(f"{100 + i}|COMPLETED|0:0" for i in range(12)))
+
+        squeue = next(cmd for cmd in self.commands if cmd[0] == "squeue")
+        self.assertEqual(len(squeue[squeue.index("-j") + 1].split(",")), 12)
+
+    def test_bulk_results_reach_the_catalog(self) -> None:
+        self._catalog(3)
+        self._refresh_with(
+            queue_out="101|RUNNING",
+            acct_out="100|COMPLETED|0:0\n102|TIMEOUT|0:1",
+        )
+
+        self.assertEqual(sc.read_record("n600pe", catalog_dir=self.dir)["status"], "completed")
+        self.assertEqual(sc.read_record("n601pe", catalog_dir=self.dir)["status"], "running")
+        # A wall-clock stop is "restart to continue", not a failure.
+        self.assertEqual(sc.read_record("n602pe", catalog_dir=self.dir)["status"], "interrupted")
+
+    def test_accounting_is_only_asked_about_jobs_the_queue_forgot(self) -> None:
+        self._catalog(3)
+        self._refresh_with(
+            queue_out="100|RUNNING\n101|RUNNING",
+            acct_out="102|COMPLETED|0:0",
+        )
+
+        sacct = next(cmd for cmd in self.commands if cmd[0] == "sacct")
+        self.assertEqual(sacct[sacct.index("-j") + 1], "102")
+
+    def test_no_accounting_call_when_the_queue_answered_everything(self) -> None:
+        self._catalog(2)
+        self._refresh_with(queue_out="100|RUNNING\n101|RUNNING")
+        self.assertEqual([cmd[0] for cmd in self.commands], ["squeue"])
+
+    def test_a_job_neither_source_knows_is_left_alone(self) -> None:
+        self._catalog(1)
+        result = self._refresh_with()
+        self.assertEqual(result["counts"]["updated"], 0)
+        self.assertEqual(sc.read_record("n600pe", catalog_dir=self.dir)["status"], "submitted")
+
+    def test_unreachable_machine_is_reported_once_per_run(self) -> None:
+        self._catalog(2)
+        cfg = {"scheduler": {"type": "slurm"}}
+        with (
+            patch.object(refresh_tool.machine_config, "get_machine", return_value=cfg),
+            patch.object(refresh_tool.ssh, "host_for", return_value="perlmutter"),
+            patch.object(
+                refresh_tool.ssh, "run", side_effect=ssh.SSHError("certificate expired")
+            ),
+        ):
+            result = refresh_tool.refresh(catalog_dir=self.dir)
+
+        self.assertEqual(result["counts"]["errors"], 2)
+        self.assertEqual(result["counts"]["updated"], 0)
+
+    def test_a_scheduler_without_bulk_support_still_works(self) -> None:
+        # PBS cannot answer in bulk; refresh must fall back to per-job queries
+        # rather than skipping those runs.
+        self._catalog(2, machine="polaris")
+        cfg = {"scheduler": {"type": "pbs"}}
+        calls: list[str] = []
+
+        def per_job(machine: str, job_id: str) -> dict[str, Any]:
+            calls.append(job_id)
+            return {"state": "completed", "exit_code": 0, "terminal": True}
+
+        with (
+            patch.object(refresh_tool.machine_config, "get_machine", return_value=cfg),
+            patch.object(refresh_tool.ssh, "host_for", return_value="polaris"),
+            patch.object(refresh_tool.hpc_runner, "status", side_effect=per_job),
+        ):
+            refresh_tool.refresh(catalog_dir=self.dir)
+
+        self.assertEqual(sorted(calls), ["100", "101"])
+        self.assertEqual(sc.read_record("n600pe", catalog_dir=self.dir)["status"], "completed")
 
 
 class DeriveStatusTests(unittest.TestCase):
