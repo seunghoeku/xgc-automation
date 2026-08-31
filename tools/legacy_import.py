@@ -17,8 +17,8 @@ The notebook itself is never written to. It stays the human's own document.
 Two facts about the historical numbering shaped the code:
 
 * Numbers are not globally unique before the ``n<NUMBER><MACHINE>`` scheme --
-  ``ti204`` and ``su204`` are different simulations. The catalog key is
-  therefore the shot string, not the number.
+  ``ti204`` and ``su204`` are different simulations. A cleaned shot becomes the
+  simulation tag, while the original shot/directory label becomes the sub-tag.
 * Some shot cells are annotations rather than shots ("Numbering scheme has
   changed...", "n585fr (dup number)"). Those are reported as skipped with the
   reason, not silently dropped.
@@ -210,22 +210,34 @@ def _status_for(outcome: str, archive: dict[str, Any]) -> str:
     return "completed"
 
 
-def build_record(note: cp.SimulationNote) -> dict[str, Any] | None:
+def build_record(
+    note: cp.SimulationNote,
+    *,
+    record_id: str | None = None,
+    sub_tag: str | None = None,
+) -> dict[str, Any] | None:
     """Turn one notebook row into a catalog record. Writes nothing.
 
     Returns None for rows that are not simulations; use ``plan_import`` when the
     reason for skipping matters.
     """
-    record_id, _reason = _clean_shot(note.shot)
-    if record_id is None:
+    simulation_tag, _reason = _clean_shot(note.shot)
+    if simulation_tag is None:
         return None
+
+    resolved_sub_tag = sub_tag or catalog.directory_sub_tag(
+        note.shot.strip(), simulation_tag
+    )
+    resolved_record_id = record_id or simulation_tag
 
     classification = cp.classify_outcome(note.combined_text())
     outcome = classification["outcome"]
     archive = _archive_for(note)
-    machines, machine_basis = _machines_for(record_id, note)
+    machines, machine_basis = _machines_for(simulation_tag, note)
     record = catalog.new_record(
-        record_id,
+        resolved_record_id,
+        simulation_tag=simulation_tag,
+        sub_tag=resolved_sub_tag,
         machines=machines,
         short_name=note.description or note.shot,
         directory_name=note.shot.strip(),
@@ -284,25 +296,53 @@ def plan_import(
     create: list[dict[str, Any]] = []
     update: list[dict[str, Any]] = []
     skip: list[dict[str, Any]] = []
-    seen: dict[str, str] = {}
+    seen: dict[tuple[str, str], str] = {}
+    reserved_ids: set[str] = set()
+    existing_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    for existing_record in catalog.iter_records(catalog_dir=catalog_dir):
+        identity = catalog.record_identity(existing_record)
+        if identity in existing_by_identity:
+            first = existing_by_identity[identity].get("record_id")
+            second = existing_record.get("record_id")
+            raise LegacyImportError(
+                f"catalog already contains duplicate simulation_tag + sub_tag "
+                f"items: {first}, {second}"
+            )
+        existing_by_identity[identity] = existing_record
 
     for note in source_notes:
-        record_id, reason = _clean_shot(note.shot)
-        if record_id is None:
+        simulation_tag, reason = _clean_shot(note.shot)
+        if simulation_tag is None:
             skip.append({"shot": note.shot, "sheet": note.sheet, "reason": reason})
             continue
-        if record_id in seen:
+        sub_tag = catalog.directory_sub_tag(note.shot.strip(), simulation_tag)
+        identity = catalog.identity_key(simulation_tag, sub_tag)
+        if identity in seen:
             skip.append(
                 {
                     "shot": note.shot,
                     "sheet": note.sheet,
-                    "record_id": record_id,
-                    "reason": f"duplicate of {seen[record_id]!r} already imported",
+                    "simulation_tag": simulation_tag,
+                    "sub_tag": sub_tag,
+                    "reason": (
+                        f"duplicate simulation_tag + sub_tag of "
+                        f"{seen[identity]!r} already imported"
+                    ),
                 }
             )
             continue
 
-        existing = catalog.find_record(record_id, catalog_dir=catalog_dir)
+        existing = existing_by_identity.get(identity)
+        record_id = (
+            str(existing["record_id"])
+            if existing is not None
+            else catalog.identity_record_id(
+                simulation_tag,
+                sub_tag,
+                catalog_dir=catalog_dir,
+                reserved_ids=reserved_ids,
+            )
+        )
         if existing is not None:
             if existing.get("origin") != "notebook":
                 skip.append(
@@ -329,12 +369,15 @@ def plan_import(
                 )
                 continue
 
-        record = build_record(note)
+        record = build_record(note, record_id=record_id, sub_tag=sub_tag)
         if record is None:  # pragma: no cover - _clean_shot already filtered
             continue
-        seen[record_id] = note.shot
+        seen[identity] = note.shot
+        reserved_ids.add(record_id)
         entry = {
             "record_id": record_id,
+            "simulation_tag": simulation_tag,
+            "sub_tag": sub_tag,
             "shot": note.shot,
             "sheet": note.sheet,
             "status": record["status"],

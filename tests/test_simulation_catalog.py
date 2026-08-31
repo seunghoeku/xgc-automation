@@ -30,6 +30,12 @@ class RecordIdTests(unittest.TestCase):
         self.assertEqual(sc.record_number("n645pe"), 645)
         self.assertEqual(sc.record_number("ti204"), 204)
 
+    def test_sub_tag_identity_preserves_directory_spelling(self) -> None:
+        self.assertNotEqual(
+            sc.identity_key("n645pe", "NT-1"),
+            sc.identity_key("n645pe", "nt_1"),
+        )
+
 
 class CatalogTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -60,6 +66,38 @@ class CatalogTests(unittest.TestCase):
         self._create()
         with self.assertRaises(sc.SimulationCatalogError):
             self._create()
+
+    def test_sub_tag_defaults_to_the_directory_basename(self) -> None:
+        record = self._create(
+            directory_name="/pscratch/sd/s/sku/n645pe_TCV_NT/NT1_psi_1.0"
+        )
+        self.assertEqual(record["simulation_tag"], "n645pe")
+        self.assertEqual(record["sub_tag"], "NT1_psi_1.0")
+
+    def test_same_simulation_tag_with_different_sub_tags_are_separate(self) -> None:
+        first = self._create(
+            simulation_tag="n645pe", sub_tag="baseline", directory_name="baseline"
+        )
+        second = self._create(
+            "n645pe__reduced",
+            simulation_tag="n645pe",
+            sub_tag="reduced",
+            directory_name="reduced",
+        )
+        self.assertEqual(first["simulation_tag"], second["simulation_tag"])
+        self.assertNotEqual(first["sub_tag"], second["sub_tag"])
+        found = sc.find_record_by_identity(
+            "n645pe", "reduced", catalog_dir=self.dir
+        )
+        assert found is not None
+        self.assertEqual(found["record_id"], "n645pe__reduced")
+
+    def test_same_simulation_and_sub_tag_cannot_be_created_twice(self) -> None:
+        self._create(simulation_tag="n645pe", sub_tag="same")
+        with self.assertRaises(sc.SimulationCatalogError):
+            self._create(
+                "n645pe__duplicate", simulation_tag="n645pe", sub_tag="same"
+            )
 
     def test_legacy_id_has_no_simulation_id(self) -> None:
         record = self._create("ti204", machines=[])
@@ -292,6 +330,14 @@ class SearchTests(unittest.TestCase):
         rows = sc.search(tag="electromagnetic", catalog_dir=self.dir)
         self.assertEqual([row["record_id"] for row in rows], ["n645pe"])
 
+    def test_identity_filters_require_both_tags_when_both_are_given(self) -> None:
+        rows = sc.search(
+            simulation_tag="n645pe",
+            sub_tag="n645pe",
+            catalog_dir=self.dir,
+        )
+        self.assertEqual([row["record_id"] for row in rows], ["n645pe"])
+
     def test_date_range_filter_uses_started_on(self) -> None:
         rows = sc.search(before="2020-01-01", catalog_dir=self.dir)
         self.assertEqual([row["record_id"] for row in rows], ["ti204"])
@@ -320,6 +366,36 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(summary["runs"], 2)
         self.assertEqual(summary["latest_run_id"], "run-b")
         self.assertEqual(summary["latest_job_id"], "2")
+
+    def test_summary_exposes_parsed_input_for_sheet_sync(self) -> None:
+        sc.attach_run(
+            "n645pe",
+            {
+                "run_id": "run-input",
+                "input": {
+                    "parse_status": "ok",
+                    "parameters": {
+                        "sml_node_file": "mesh.node",
+                        "sml_electron_on": True,
+                        "eq_filename": "equilibrium.eqd",
+                        "ptl_marker_type": ["ReducedDeltaF", "ReducedDeltaF"],
+                    },
+                    "derived": {
+                        "field_model": "electromagnetic",
+                        "marker_model": "reduced-delta-f",
+                        "species": ["e", "i"],
+                    },
+                },
+            },
+            catalog_dir=self.dir,
+        )
+
+        summary = sc.summarize(sc.read_record("n645pe", catalog_dir=self.dir))
+        self.assertEqual(summary["field_model"], "electromagnetic")
+        self.assertEqual(summary["marker_model"], "reduced-delta-f")
+        self.assertEqual(summary["species"], ["e", "i"])
+        self.assertEqual(summary["sml_node_file"], "mesh.node")
+        self.assertEqual(summary["eq_filename"], "equilibrium.eqd")
 
 
 if __name__ == "__main__":

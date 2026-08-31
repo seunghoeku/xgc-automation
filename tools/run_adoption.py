@@ -201,6 +201,7 @@ def _run_entry(record: dict[str, Any]) -> dict[str, Any]:
         "remote_run_dir": record.get("remote_run_dir"),
         "state": record.get("state"),
         "exit_code": record.get("exit_code"),
+        "input": record.get("input"),
         "dryrun_ok": dryrun.get("ok") if isinstance(dryrun, dict) else None,
     }
 
@@ -259,6 +260,7 @@ def derive_groups(
                 ),
                 "xgc_commit": _first_nested(records, "xgc", "commit"),
                 "input_sha256": _first(records, "input_sha256"),
+                "input": _first(records, "input"),
                 "submitted_at": _first(records, "submitted_at"),
             }
         )
@@ -283,11 +285,17 @@ def _status_for(group: dict[str, Any]) -> str:
 
 def build_record(group: dict[str, Any]) -> dict[str, Any]:
     """Turn one group of runs into a catalog record. Writes nothing."""
+    directory_name = Path(group["directory"]).name
+    simulation_tag = catalog.infer_simulation_tag(
+        group["directory"], fallback=group["record_id"]
+    )
     record = catalog.new_record(
         group["record_id"],
+        simulation_tag=simulation_tag,
+        sub_tag=directory_name,
         machines=[group["machine"]] if group["machine"] else [],
-        short_name=Path(group["directory"]).name,
-        directory_name=Path(group["directory"]).name,
+        short_name=directory_name,
+        directory_name=directory_name,
         tags=["adopted"],
         status=_status_for(group),
         origin="adopted",
@@ -297,8 +305,13 @@ def build_record(group: dict[str, Any]) -> dict[str, Any]:
     if group["machine"]:
         record["remote_dirs"] = {group["machine"]: group["directory"]}
     record["input_sha256"] = group["input_sha256"]
+    if isinstance(group.get("input"), dict):
+        record["input"] = group["input"]
     record["started_on"] = str(group["submitted_at"] or "")[:10]
     record["xgc_commit"] = group["xgc_commit"]
+    # A tag inferred from a historical directory is not a registry reservation.
+    record["simulation_id"] = None
+    record["number"] = None
     # Adopted records carry no reserved number. Say so explicitly rather than
     # leaving a null that looks like missing data.
     record["adoption"] = {
@@ -328,9 +341,31 @@ def plan_adoption(
     )
     create: list[dict[str, Any]] = []
     update: list[dict[str, Any]] = []
+    existing_records = list(catalog.iter_records(catalog_dir=catalog_dir))
+    existing_by_id = {
+        str(record.get("record_id")): record for record in existing_records
+    }
+    existing_by_identity = {
+        catalog.record_identity(record): record for record in existing_records
+    }
 
     for group in derive_groups(orphans):
-        existing = catalog.find_record(group["record_id"], catalog_dir=catalog_dir)
+        record = build_record(group)
+        identity = catalog.record_identity(record)
+        existing = existing_by_identity.get(identity)
+        key_owner = existing_by_id.get(group["record_id"])
+        if existing is None and key_owner is not None:
+            skipped.append(
+                {
+                    "record_id": group["record_id"],
+                    "reason": (
+                        f"record key already represents simulation_tag + sub_tag "
+                        f"{catalog.record_identity(key_owner)!r}"
+                    ),
+                    "run_ids": group["run_ids"],
+                }
+            )
+            continue
         if existing is not None:
             if existing.get("origin") != "adopted":
                 skipped.append(
@@ -353,14 +388,17 @@ def plan_adoption(
                     }
                 )
                 continue
+            record["record_id"] = existing["record_id"]
 
         entry = {
-            "record_id": group["record_id"],
+            "record_id": record["record_id"],
+            "simulation_tag": record["simulation_tag"],
+            "sub_tag": record["sub_tag"],
             "machine": group["machine"],
             "directory": group["directory"],
             "runs": len(group["runs"]),
             "run_ids": group["run_ids"],
-            "record": build_record(group),
+            "record": record,
         }
         (update if existing is not None else create).append(entry)
 

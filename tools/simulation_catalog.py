@@ -20,17 +20,17 @@ to Google Sheets. None of that requires an LLM.
 
 Design constraints worth stating, because they shaped the schema:
 
-* Legacy numbers are not unique. The notebook's pre-2023 prefixes (``ti``,
-  ``su``, ``pf``, ``j``, ``f``, ...) reuse numbers across families, so the file
-  key is the record ID string (``n645pe``, ``ti204``), never the bare integer.
-* Records are plain YAML, one file per simulation, so git history shows what
-  changed about a simulation rather than one perpetually-conflicting index.
+* Legacy numbers and modern tags may be reused. The logical identity is
+  ``simulation_tag + sub_tag``; the record ID is only the unique storage key.
+* Records are plain YAML, one file per catalog item, so git history shows what
+  changed about an item rather than one perpetually-conflicting index.
 * Writes are atomic and field-scoped. Automated updates must never clobber the
   human's ``note``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tempfile
@@ -48,7 +48,7 @@ CATALOG_DIR = Path(
     os.environ.get("XGC_SIMULATION_CATALOG", PROJECT_ROOT / "kb" / "simulations")
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Lifecycle of a simulation, in the order work normally progresses. `failed`
 # and `abandoned` are terminal off-ramps rather than a stage of progress.
@@ -102,6 +102,7 @@ ORIGINS = ("automation", "adopted", "notebook")
 # escape the catalog directory: no dots, slashes, or separators of any kind.
 _RECORD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _MODERN_ID_RE = re.compile(r"^n([0-9]{3,})([a-z]{2}(?:_[a-z]{2})*)$")
+_KNOWN_MACHINE_CODE_RE = r"(?:pe|po|au|do|fr|su|st|fl)"
 
 # Fields the human owns. Automated writers must leave them alone unless the
 # human explicitly asked for the change.
@@ -124,6 +125,114 @@ def _ascii_words(value: str) -> list[str]:
 def slugify(value: str) -> str:
     """ASCII, lowercase, underscore-joined. Used for the file name suffix."""
     return "_".join(_ascii_words(value))
+
+
+def directory_sub_tag(directory_name: str | None, fallback: str) -> str:
+    """Return the default sub-tag: the final component of the directory name."""
+    value = str(directory_name or "").strip().rstrip("/")
+    return Path(value).name if value else str(fallback).strip()
+
+
+def infer_simulation_tag(value: str, *, fallback: str | None = None) -> str:
+    """Infer a shot-like tag such as ``n645pe`` from a directory or record key.
+
+    The tag is deliberately separate from ``record_id``. Several catalog items
+    may share it, provided their sub-tags differ.
+    """
+    path = Path(str(value or "").strip().rstrip("/"))
+    name = path.name.lower()
+    match = None
+    # A manual run often lives one level below its shot directory, e.g.
+    # n644pe_TCV_NT_PT_ES/NT1_psi_1.0. Prefer the nearest modern shot component.
+    for component in reversed(path.parts):
+        match = re.match(
+            rf"^(n[0-9]+{_KNOWN_MACHINE_CODE_RE}"
+            rf"(?:_{_KNOWN_MACHINE_CODE_RE})*)",
+            component.lower(),
+        )
+        if match:
+            break
+    if match is None:
+        match = re.match(r"^([a-z]+[0-9]+(?:[a-z]{2})?)", name)
+    candidate = match.group(1) if match else str(fallback or name)
+    tag = slugify(candidate)
+    if not tag:
+        raise SimulationCatalogError("simulation tag must not be empty")
+    return tag
+
+
+def identity_key(simulation_tag: str, sub_tag: str) -> tuple[str, str]:
+    """Canonical comparison key for the user-visible two-part identity."""
+    simulation = slugify(simulation_tag)
+    # Directory names are case-sensitive and punctuation can be meaningful.
+    # Normalize the grouping tag, but compare the sub-tag itself after trimming.
+    sub = str(sub_tag).strip()
+    if not simulation:
+        raise SimulationCatalogError("simulation tag must not be empty")
+    if not sub:
+        raise SimulationCatalogError("sub tag must not be empty")
+    return simulation, sub
+
+
+def record_identity(record: dict[str, Any]) -> tuple[str, str]:
+    """Return an identity for new records and pre-v2 records alike."""
+    record_id = str(record.get("record_id") or "")
+    legacy = record.get("legacy") or {}
+    legacy_shot = legacy.get("shot") if isinstance(legacy, dict) else None
+    simulation_tag = record.get("simulation_tag") or record.get("simulation_id")
+    if not simulation_tag and legacy_shot:
+        simulation_tag = infer_simulation_tag(str(legacy_shot), fallback=record_id)
+    if not simulation_tag:
+        simulation_tag = infer_simulation_tag(
+            record.get("directory_name") or record_id, fallback=record_id
+        )
+    sub_tag = record.get("sub_tag") or directory_sub_tag(
+        record.get("directory_name"), record_id
+    )
+    return identity_key(str(simulation_tag), str(sub_tag))
+
+
+def identity_record_id(
+    simulation_tag: str,
+    sub_tag: str,
+    *,
+    catalog_dir: Path | None = None,
+    reserved_ids: Iterable[str] | None = None,
+) -> str:
+    """Choose a safe storage key for a two-part identity.
+
+    The first item for a simulation tag keeps the short historical key
+    (``n645pe``). Additional sub-tags use ``n645pe__<sub-tag>``. The storage
+    key is an implementation detail; equality is always the two-part identity.
+    """
+    simulation, sub = identity_key(simulation_tag, sub_tag)
+    occupied = {validate_record_id(value) for value in (reserved_ids or [])}
+    base = validate_record_id(simulation)
+    if base not in occupied and not record_path(base, catalog_dir=catalog_dir).exists():
+        return base
+    sub_slug = slugify(sub)
+    candidate = validate_record_id(f"{simulation}__{sub_slug}")
+    if candidate not in occupied:
+        existing = find_record(candidate, catalog_dir=catalog_dir)
+        if existing is None or record_identity(existing) == (simulation, sub):
+            return candidate
+
+    # Two distinct case-sensitive directory names can slugify to the same file
+    # key (for example A-B and A_B). Keep both items by adding a stable suffix.
+    digest = hashlib.sha256(sub.encode("utf-8")).hexdigest()[:8]
+    qualified = validate_record_id(f"{candidate}_{digest}")
+    if qualified in occupied:
+        raise SimulationCatalogError(
+            f"record id collision for simulation_tag={simulation_tag!r}, "
+            f"sub_tag={sub_tag!r}: {qualified!r} is already reserved"
+        )
+    existing = find_record(qualified, catalog_dir=catalog_dir)
+    if existing is None or record_identity(existing) == (simulation, sub):
+        return qualified
+    raise SimulationCatalogError(
+        f"record id collision for simulation_tag={simulation_tag!r}, "
+        f"sub_tag={sub_tag!r}: {qualified!r} already represents another item"
+    )
 
 
 def validate_record_id(record_id: str) -> str:
@@ -207,6 +316,8 @@ def validate_origin(origin: str) -> str:
 def new_record(
     record_id: str,
     *,
+    simulation_tag: str | None = None,
+    sub_tag: str | None = None,
     machines: Iterable[str] | None = None,
     short_name: str = "",
     directory_name: str | None = None,
@@ -224,17 +335,32 @@ def new_record(
     ``ORIGINS``.
     """
     record_id = validate_record_id(record_id)
+    resolved_directory = str(directory_name or record_id)
+    if simulation_tag:
+        resolved_simulation_tag = slugify(simulation_tag)
+    elif is_modern_id(record_id):
+        resolved_simulation_tag = record_id
+    else:
+        resolved_simulation_tag = infer_simulation_tag(record_id, fallback=record_id)
+    resolved_sub_tag = str(
+        sub_tag or directory_sub_tag(resolved_directory, record_id)
+    ).strip()
+    identity_key(resolved_simulation_tag, resolved_sub_tag)
     record: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "record_id": record_id,
-        "simulation_id": record_id if is_modern_id(record_id) else None,
-        "number": record_number(record_id),
+        "simulation_id": (
+            resolved_simulation_tag if is_modern_id(resolved_simulation_tag) else None
+        ),
+        "simulation_tag": resolved_simulation_tag,
+        "sub_tag": resolved_sub_tag,
+        "number": record_number(resolved_simulation_tag),
         "short_name": slugify(short_name),
         "machines": _normalize_list(machines),
         "status": validate_status(status),
         "origin": validate_origin(origin),
         "case": case,
-        "directory_name": directory_name or record_id,
+        "directory_name": resolved_directory,
         "tags": _normalize_tags(tags),
         "remote_dirs": {},
         "input_sha256": None,
@@ -280,6 +406,28 @@ def find_record(record_id: str, *, catalog_dir: Path | None = None) -> dict[str,
     return read_record(record_id, catalog_dir=catalog_dir)
 
 
+def find_record_by_identity(
+    simulation_tag: str,
+    sub_tag: str,
+    *,
+    catalog_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    """Find the one item whose simulation and sub tags both match."""
+    wanted = identity_key(simulation_tag, sub_tag)
+    matches = [
+        record
+        for record in iter_records(catalog_dir=catalog_dir)
+        if record_identity(record) == wanted
+    ]
+    if len(matches) > 1:
+        ids = ", ".join(str(record.get("record_id")) for record in matches)
+        raise SimulationCatalogError(
+            f"duplicate catalog identity simulation_tag={simulation_tag!r}, "
+            f"sub_tag={sub_tag!r}: {ids}"
+        )
+    return matches[0] if matches else None
+
+
 def write_record(
     record: dict[str, Any],
     *,
@@ -293,6 +441,7 @@ def write_record(
     """
     record_id = validate_record_id(record.get("record_id", ""))
     validate_status(record.get("status", "reserved"))
+    record_identity(record)
     path = record_path(record_id, catalog_dir=catalog_dir)
     if path.exists() and not overwrite:
         raise SimulationCatalogError(f"catalog record already exists: {path}")
@@ -315,8 +464,17 @@ def create_record(
     catalog_dir: Path | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Create a record, refusing to overwrite an existing simulation."""
+    """Create a record, refusing a duplicate two-part identity."""
     record = new_record(record_id, **kwargs)
+    simulation_tag, sub_tag = record_identity(record)
+    existing = find_record_by_identity(
+        simulation_tag, sub_tag, catalog_dir=catalog_dir
+    )
+    if existing is not None:
+        raise SimulationCatalogError(
+            f"catalog item already exists for simulation_tag={simulation_tag!r}, "
+            f"sub_tag={sub_tag!r}: {existing.get('record_id')}"
+        )
     write_record(record, catalog_dir=catalog_dir, overwrite=False)
     return record
 
@@ -422,6 +580,7 @@ def attach_run(
         "remote_run_dir": run.get("remote_run_dir"),
         "state": run.get("state"),
         "exit_code": run.get("exit_code"),
+        "input": run.get("input"),
     }
 
     runs = list(record.get("runs") or [])
@@ -443,6 +602,8 @@ def attach_run(
         record["remote_dirs"] = remote_dirs
     if run.get("input_sha256"):
         record["input_sha256"] = run["input_sha256"]
+    if isinstance(run.get("input"), dict):
+        record["input"] = run["input"]
     if run.get("case") and not record.get("case"):
         record["case"] = run["case"]
     if status and record.get("status") not in _HUMAN_JUDGEMENT_STATUSES:
@@ -555,8 +716,15 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
     runs = [run for run in (record.get("runs") or []) if isinstance(run, dict)]
     latest = runs[-1] if runs else {}
     machines = record.get("machines") or []
+    simulation_tag, normalized_sub_tag = record_identity(record)
+    input_provenance = record.get("input") or {}
+    input_parameters = input_provenance.get("parameters") or {}
+    input_derived = input_provenance.get("derived") or {}
     return {
         "record_id": record.get("record_id"),
+        "simulation_tag": record.get("simulation_tag") or simulation_tag,
+        "sub_tag": record.get("sub_tag")
+        or directory_sub_tag(record.get("directory_name"), normalized_sub_tag),
         "number": record.get("number"),
         "short_name": record.get("short_name"),
         "machines": machines,
@@ -565,6 +733,13 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
         "origin": record.get("origin"),
         "case": record.get("case"),
         "tags": record.get("tags") or [],
+        "field_model": input_derived.get("field_model") or "unknown",
+        "marker_model": input_derived.get("marker_model") or "unknown",
+        "species": input_derived.get("species"),
+        "sml_node_file": input_parameters.get("sml_node_file"),
+        "sml_electron_on": input_parameters.get("sml_electron_on"),
+        "eq_filename": input_parameters.get("eq_filename"),
+        "ptl_marker_type": input_parameters.get("ptl_marker_type"),
         "runs": len(runs),
         "latest_run_id": latest.get("run_id"),
         "latest_job_id": latest.get("job_id"),
@@ -582,6 +757,8 @@ def _haystack(record: dict[str, Any]) -> str:
     parts: list[Any] = [
         record.get("record_id"),
         record.get("simulation_id"),
+        record.get("simulation_tag"),
+        record.get("sub_tag"),
         record.get("number"),
         record.get("short_name"),
         record.get("status"),
@@ -597,6 +774,14 @@ def _haystack(record: dict[str, Any]) -> str:
     parts.extend(record.get("machines") or [])
     parts.extend(record.get("tags") or [])
     parts.extend((record.get("remote_dirs") or {}).values())
+    input_provenance = record.get("input") or {}
+    if isinstance(input_provenance, dict):
+        parameters = input_provenance.get("parameters") or {}
+        derived = input_provenance.get("derived") or {}
+        if isinstance(parameters, dict):
+            parts.extend(parameters.values())
+        if isinstance(derived, dict):
+            parts.extend(derived.values())
     for run in record.get("runs") or []:
         if isinstance(run, dict):
             parts.extend([run.get("run_id"), run.get("job_id"), run.get("remote_run_dir")])
@@ -633,6 +818,8 @@ def search(
     machine: str | None = None,
     status: str | None = None,
     tag: str | None = None,
+    simulation_tag: str | None = None,
+    sub_tag: str | None = None,
     origin: str | None = None,
     case: str | None = None,
     after: str | None = None,
@@ -650,6 +837,11 @@ def search(
     terms = _query_terms(query)
     results: list[dict[str, Any]] = []
     for record in iter_records(catalog_dir=catalog_dir):
+        record_simulation_tag, record_sub_tag = record_identity(record)
+        if simulation_tag and slugify(simulation_tag) != record_simulation_tag:
+            continue
+        if sub_tag and str(sub_tag).strip() != record_sub_tag:
+            continue
         if machine and machine not in (record.get("machines") or []):
             continue
         if status and record.get("status") != status:

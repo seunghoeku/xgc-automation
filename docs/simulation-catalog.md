@@ -24,14 +24,25 @@ keyboard; the MCP tools call the same functions.
 ## Where it lives
 
 ```text
-kb/simulations/<record_id>.yaml     one file per simulation
+kb/simulations/<record_id>.yaml     one file per catalog item
 ```
 
-One file per simulation, rather than one index, so that git history shows what
-changed about a given simulation instead of a single perpetually-conflicting
+One file per catalog item, rather than one index, so that git history shows what
+changed about a given item instead of a single perpetually-conflicting
 file. Set `XGC_SIMULATION_CATALOG` to point elsewhere.
 
-The record ID is the key. For simulations this toolchain runs it is the
+The user-visible identity is the pair `simulation_tag + sub_tag`. Both values
+must match for two rows to be the same item. `simulation_tag` is the familiar
+shot/campaign label such as `n645pe`; `sub_tag` distinguishes directories or
+variants that reuse that label. When the caller does not supply a `sub_tag`, it
+defaults to the final component of `directory_name`.
+
+`record_id` remains the unique storage key and CLI handle. For the first item it
+normally stays short (`n645pe`). If another item has the same simulation tag but
+a different sub-tag, its storage key is qualified, for example
+`n645pe__nt1_psi_1_0`. Existing record IDs therefore remain valid.
+
+For simulations this toolchain runs, the base record ID is the
 `simulation_id` from `kb/simulation_registry.yaml` (`n645pe`, see
 `docs/simulation-ids.md`). For imported historical runs it is the notebook's
 shot name (`ti204`, `j86`). For adopted pre-catalog runs it is the working
@@ -45,9 +56,11 @@ directory name (`tcv_xgca_reduce_adia_k1`).
 ## What a record holds
 
 ```yaml
-schema_version: 1
+schema_version: 2
 record_id: n645pe
 simulation_id: n645pe        # null for historical shots
+simulation_tag: n645pe       # grouping label; may be shared by several items
+sub_tag: n645pe_tcv_delta_f_linear  # defaults to the directory basename
 number: 645
 short_name: tcv_delta_f_linear
 machines: [perlmutter]
@@ -59,6 +72,18 @@ tags: [tcv, delta-f]
 remote_dirs:
   perlmutter: /pscratch/sd/s/sku/xgc-runs/n645pe_tcv_delta_f_linear
 input_sha256: 6f1c...        # of the namelist actually submitted
+input:
+  parse_status: ok
+  parameters:
+    sml_node_file: tcv.node
+    sml_electron_on: true
+    eq_filename: tcv.eqd
+    ptl_marker_type: [ReducedDeltaF, ReducedDeltaF]
+  derived:
+    field_model: electromagnetic  # explicit switch or current xgc --dryrun
+    field_model_source: sml_electromagnetic
+    marker_model: reduced-delta-f
+    species: [e, i]
 runs:
   - run_id: run-20260830T101010Z
     machine: perlmutter
@@ -142,8 +167,14 @@ Three rules keep automation from overwriting judgement:
 | Anytime | `xgc-sim note` | the human note |
 
 Submission also copies the exact input namelist into the provenance record and
-stores its SHA-256. Without it a record can say which job ran but not what it
-ran, since the remote case directory is routinely edited for the next attempt.
+stores its SHA-256. XGC's namelist parser also extracts `sml_node_file`,
+`sml_electron_on`, `eq_filename`, and `ptl_marker_type`. Provenance derives the
+effective field model, marker model (`reduced-delta-f`, `total-f`, or `full-f`),
+and species (`e, i` or ion-only) only when supported by explicit input or the
+current run's dryrun. Older or ambiguous inputs remain `unknown`; the tool does
+not retrofit modern defaults onto historical executables. Without the exact
+snapshot a record can say which job ran but not what it ran, since the remote
+case directory is routinely edited for the next attempt.
 
 Both the submission link and the status update are best-effort: a catalog
 problem is reported in the result, never raised. A queued job must not look
@@ -185,6 +216,7 @@ xgc-sim refresh && xgc-sim list --status running
 xgc-sim search "asdex i-mode"          # any text field, including the note
 xgc-sim list --machine perlmutter --status failed --after 2025-01-01
 xgc-sim list --tag electromagnetic --origin notebook
+xgc-sim list --simulation-tag n645pe --sub-tag n645pe_tcv_delta_f_linear
 xgc-sim list --origin adopted          # pre-catalog runs, newest work first
 xgc-sim show n645pe                    # full record, runs, provenance paths
 xgc-sim stats                          # counts by status, machine, origin
@@ -268,12 +300,17 @@ support:
 
 The import is idempotent; rerun with `--overwrite` to refresh.
 
-Of 742 rows, 738 import. The four skips are reported with reasons: one
-annotation row and three duplicate shot cells.
+Of 742 rows, 741 import. The one skip is an annotation row. Three rows that used
+to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
+`f136-f139`) now survive under distinct sub-tags.
 
 ## Google Sheets
 
 The spreadsheet stays, as a view.
+
+The parsed input fields and their derived field/marker/species summaries are
+machine-owned columns in this view. As with status and job IDs, sheet edits to
+those columns are overwritten by catalog provenance; only `note` is pulled back.
 
 ```text
 catalog (kb/simulations/*.yaml)  --push-->  Sheet    everything machine-known

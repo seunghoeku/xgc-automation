@@ -189,6 +189,131 @@ def read_namelist(machine: str, remote_path: str) -> dict[str, dict[str, str]]:
         raise NamelistError(f"could not parse namelist JSON: {exc}\n{raw[:400]}")
 
 
+IMPORTANT_PROVENANCE_PARAMETERS = (
+    "sml_node_file",
+    "sml_electron_on",
+    "eq_filename",
+    "ptl_marker_type",
+)
+
+
+def _parsed_parameter(
+    parsed: dict[str, dict[str, Any]], name: str
+) -> Any | None:
+    """Find a parameter case-insensitively in XGC's parsed namelists."""
+    wanted = name.lower()
+    for parameters in parsed.values():
+        if not isinstance(parameters, dict):
+            continue
+        for parameter, value in parameters.items():
+            if str(parameter).lower() == wanted:
+                return value
+    return None
+
+
+def _parsed_bool(value: Any) -> bool | None:
+    """Interpret a parsed Fortran logical without guessing invalid values."""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {".true.", ".t.", "t", "true"}:
+        return True
+    if text in {".false.", ".f.", "f", "false"}:
+        return False
+    return None
+
+
+def _parsed_strings(value: Any) -> list[str]:
+    """Turn a scalar or per-species string value into unquoted tokens."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [
+            str(item).strip().strip("'\"")
+            for item in value
+            if str(item).strip()
+        ]
+    try:
+        return [token for token in shlex.split(str(value).replace(",", " ")) if token]
+    except ValueError:
+        # Keep malformed legacy syntax visible but do not infer physics from it.
+        return [str(value).strip().strip("'\"")]
+
+
+def _parsed_filename(value: Any) -> str | None:
+    values = _parsed_strings(value)
+    return values[0] if len(values) == 1 else None
+
+
+def _marker_model(marker_types: list[str]) -> str:
+    """Classify only explicitly declared marker types; absence is unknown."""
+    if not marker_types:
+        return "unknown"
+    models: set[str] = set()
+    for marker_type in marker_types:
+        normalized = "".join(char for char in marker_type.lower() if char.isalnum())
+        if normalized in {"reduceddeltaf", "reduceddf", "deltaf"}:
+            models.add("reduced-delta-f")
+        elif normalized == "totalf":
+            models.add("total-f")
+        elif normalized == "fullf":
+            models.add("full-f")
+        else:
+            return "unknown"
+    return next(iter(models)) if len(models) == 1 else "mixed"
+
+
+def provenance_input_summary(
+    parsed: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Select important input values and derive only explicitly supported facts.
+
+    Older inputs often omit the switches that distinguish EM from ES or the
+    marker model. Those cases stay ``unknown`` rather than inheriting a modern
+    default that may not match the executable which originally ran them.
+    """
+    electron_raw = _parsed_parameter(parsed, "sml_electron_on")
+    electron_on = _parsed_bool(electron_raw)
+    marker_types = _parsed_strings(_parsed_parameter(parsed, "ptl_marker_type"))
+
+    field_declarations: list[tuple[str, bool]] = []
+    for name in ("sml_electromagnetic", "sml_em"):
+        raw = _parsed_parameter(parsed, name)
+        value = _parsed_bool(raw)
+        if raw is not None and value is not None:
+            field_declarations.append((name, value))
+    field_values = {value for _name, value in field_declarations}
+    if len(field_values) == 1:
+        is_em = next(iter(field_values))
+        field_model = "electromagnetic" if is_em else "electrostatic"
+        field_model_source = ", ".join(name for name, _value in field_declarations)
+    else:
+        field_model = "unknown"
+        field_model_source = None
+
+    return {
+        "parse_status": "ok",
+        "parameters": {
+            "sml_node_file": _parsed_filename(
+                _parsed_parameter(parsed, "sml_node_file")
+            ),
+            "sml_electron_on": electron_on,
+            "eq_filename": _parsed_filename(_parsed_parameter(parsed, "eq_filename")),
+            "ptl_marker_type": marker_types or None,
+        },
+        "derived": {
+            "field_model": field_model,
+            "field_model_source": field_model_source,
+            "marker_model": _marker_model(marker_types),
+            "species": (
+                ["e", "i"]
+                if electron_on is True
+                else (["i"] if electron_on is False else None)
+            ),
+        },
+    }
+
+
 def find_parameter(
     metadata: dict[str, Any], name: str, *, namelist: str | None = None
 ) -> ParamInfo | None:

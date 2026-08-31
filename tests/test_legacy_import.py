@@ -209,6 +209,25 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(plan["counts"]["skip"], 1)
         self.assertIn("duplicate", plan["skip"][0]["reason"])
 
+    def test_same_clean_shot_with_different_sub_tags_is_not_merged(self) -> None:
+        notes = [
+            note("th337 (saved as th336)", description="first item"),
+            note("th337_2", description="second item"),
+        ]
+        plan = legacy_import.plan_import(notes=notes, catalog_dir=self.dir)
+        self.assertEqual(plan["counts"], {"create": 2, "update": 0, "skip": 0})
+        self.assertEqual(
+            {entry["simulation_tag"] for entry in plan["create"]}, {"th337"}
+        )
+        self.assertEqual(
+            {entry["sub_tag"] for entry in plan["create"]},
+            {"th337 (saved as th336)", "th337_2"},
+        )
+        self.assertEqual(
+            {entry["record_id"] for entry in plan["create"]},
+            {"th337", "th337__th337_2"},
+        )
+
     def test_legacy_numbers_that_collide_stay_separate_records(self) -> None:
         # ti204 and su204 share a number but are different simulations; the
         # catalog is keyed by the shot string so both survive.

@@ -170,6 +170,39 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(pushed["n646po"], "running")
         self.assertEqual(sc.read_record("n646po", catalog_dir=self.dir)["status"], "running")
 
+    def test_parsed_input_fields_are_pushed_as_machine_owned_columns(self) -> None:
+        sc.attach_run(
+            "n645pe",
+            {
+                "run_id": "run-input",
+                "input": {
+                    "parse_status": "ok",
+                    "parameters": {
+                        "sml_node_file": "mesh.node",
+                        "sml_electron_on": False,
+                        "eq_filename": "equilibrium.eqd",
+                        "ptl_marker_type": ["TotalF"],
+                    },
+                    "derived": {
+                        "field_model": "electrostatic",
+                        "marker_model": "total-f",
+                        "species": ["i"],
+                    },
+                },
+            },
+            catalog_dir=self.dir,
+        )
+        worksheet = FakeWorksheet()
+        sheet_sync.sync(worksheet=worksheet, catalog_dir=self.dir, confirm=True)
+        header = worksheet.values[0]
+        row = next(item for item in worksheet.values[1:] if item[0] == "n645pe")
+
+        self.assertEqual(row[header.index("field_model")], "electrostatic")
+        self.assertEqual(row[header.index("marker_model")], "total-f")
+        self.assertEqual(row[header.index("species")], "i")
+        self.assertEqual(row[header.index("sml_node_file")], "mesh.node")
+        self.assertEqual(row[header.index("eq_filename")], "equilibrium.eqd")
+
     def test_no_pull_ignores_sheet_notes(self) -> None:
         worksheet = sheet_from([{"record_id": "n645pe", "note": "typed in browser"}])
         result = sheet_sync.sync(

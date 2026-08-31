@@ -35,6 +35,8 @@ from tools import simulation_catalog as catalog
 # the part a human actually reads.
 _TABLE_COLUMNS = (
     ("record_id", 34),
+    ("simulation_tag", 12),
+    ("sub_tag", 28),
     ("machine", 11),
     ("status", 10),
     ("origin", 10),
@@ -74,6 +76,8 @@ def _print_show(payload: dict[str, Any]) -> None:
     summary = payload["summary"]
     print(f"{record.get('record_id')}  [{record.get('status')}]  origin={record.get('origin')}")
     for label, key in (
+        ("simulation tag", "simulation_tag"),
+        ("sub tag", "sub_tag"),
         ("number", "number"),
         ("short name", "short_name"),
         ("machines", "machines"),
@@ -243,6 +247,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
         machine=args.machine,
         status=args.status,
         tag=args.tag,
+        simulation_tag=args.simulation_tag,
+        sub_tag=args.sub_tag,
         origin=args.origin,
         case=args.case,
         after=args.after,
@@ -394,6 +400,8 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--machine")
     parser.add_argument("--status", choices=list(catalog.STATUSES))
     parser.add_argument("--tag")
+    parser.add_argument("--simulation-tag")
+    parser.add_argument("--sub-tag")
     parser.add_argument("--origin", choices=list(catalog.ORIGINS))
     parser.add_argument("--case")
     parser.add_argument("--after", help="ISO date lower bound, e.g. 2025-01-01")

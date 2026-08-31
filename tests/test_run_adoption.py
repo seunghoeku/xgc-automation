@@ -66,6 +66,20 @@ class AdoptionTests(unittest.TestCase):
         self.write_run("run-b", case_dir="/pscratch/work/tcv_off")
         self.assertEqual(self.plan()["counts"]["create"], 2)
 
+    def test_parent_shot_becomes_simulation_tag_and_leaf_becomes_sub_tag(self) -> None:
+        self.write_run(
+            "run-a",
+            case_dir=(
+                "/pscratch/sd/s/sku/n644pe_TCV_NT_PT_ES/"
+                "NT1_psi_1.0_new_bin"
+            ),
+        )
+        entry = self.plan()["create"][0]
+        self.assertEqual(entry["simulation_tag"], "n644pe")
+        self.assertEqual(entry["sub_tag"], "NT1_psi_1.0_new_bin")
+        self.assertIsNone(entry["record"]["simulation_id"])
+        self.assertIsNone(entry["record"]["number"])
+
     def test_working_subdirectory_does_not_split_a_simulation(self) -> None:
         # ".../k1" and ".../k1/run" are the same work.
         self.write_run("run-a", case_dir="/grand/proj/dev_reduce_adia/k1")

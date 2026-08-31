@@ -467,6 +467,45 @@ class InputCaptureTests(unittest.TestCase):
         self.assertIsNone(captured["input_sha256"])
         self.assertEqual(captured["input_capture"], "no case_dir")
 
+    def test_input_provenance_uses_xgc_namelist_parser(self) -> None:
+        parsed = {
+            "sml_param": {
+                "sml_node_file": "'mesh.node'",
+                "sml_electron_on": ".true.",
+            },
+            "eq_param": {"eq_filename": "'equilibrium.eqd'"},
+            "ptl_param": {"ptl_marker_type": "'ReducedDeltaF' 'ReducedDeltaF'"},
+        }
+        with patch.object(hr.nlm, "read_namelist", return_value=parsed) as read:
+            result = hr._input_provenance("perlmutter", "/pscratch/cases/tcv/")
+
+        read.assert_called_once_with("perlmutter", "/pscratch/cases/tcv/input")
+        self.assertEqual(result["parameters"]["sml_node_file"], "mesh.node")
+        self.assertEqual(result["derived"]["species"], ["e", "i"])
+        self.assertEqual(result["derived"]["field_model"], "unknown")
+
+    def test_namelist_parser_failure_is_recorded_as_unknown(self) -> None:
+        with patch.object(
+            hr.nlm, "read_namelist", side_effect=hr.nlm.NamelistError("old schema")
+        ):
+            result = hr._input_provenance("perlmutter", "/pscratch/cases/old")
+
+        self.assertEqual(result["parse_status"], "unavailable")
+        self.assertEqual(result["derived"]["field_model"], "unknown")
+        self.assertEqual(result["derived"]["marker_model"], "unknown")
+        self.assertIn("old schema", result["parse_error"])
+
+    def test_current_dryrun_supplies_effective_field_model(self) -> None:
+        parsed = {"sml_param": {"sml_electron_on": ".true."}}
+        dryrun = {"parallelism": {"field_model": "electrostatic"}}
+        with patch.object(hr.nlm, "read_namelist", return_value=parsed):
+            result = hr._input_provenance(
+                "perlmutter", "/pscratch/cases/current", dryrun_report=dryrun
+            )
+
+        self.assertEqual(result["derived"]["field_model"], "electrostatic")
+        self.assertEqual(result["derived"]["field_model_source"], "xgc --dryrun")
+
 
 class CatalogLinkTests(unittest.TestCase):
     """Submitting and checking a job must maintain the simulation's record."""
@@ -650,6 +689,18 @@ class SubmitToStatusLifecycleTests(unittest.TestCase):
             patch.object(hr.ssh, "mkdir_p"),
             patch.object(hr.ssh, "write_file"),
             patch.object(hr.dryrun, "run_dryrun", return_value=accepted),
+            patch.object(
+                hr.nlm,
+                "read_namelist",
+                return_value={
+                    "sml_param": {
+                        "sml_node_file": "'stellar.node'",
+                        "sml_electron_on": ".false.",
+                    },
+                    "eq_param": {"eq_filename": "'stellar.eqd'"},
+                    "ptl_param": {"ptl_marker_type": "'TotalF'"},
+                },
+            ),
         ):
             hr.catalog.create_record("n645st", machines=["stellar"], short_name="tcv")
 
@@ -669,6 +720,14 @@ class SubmitToStatusLifecycleTests(unittest.TestCase):
             self.assertEqual(record["input_sha256"], result["input_sha256"])
             snapshot = self.root / "runs" / "master" / result["run_id"] / "input"
             self.assertIn("sml_mstep", snapshot.read_text(encoding="utf-8"))
+            provenance = json.loads(
+                (snapshot.parent / "provenance.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                provenance["input"]["parameters"]["sml_node_file"], "stellar.node"
+            )
+            self.assertEqual(provenance["input"]["derived"]["species"], ["i"])
+            self.assertEqual(provenance["input"]["derived"]["marker_model"], "total-f")
 
             finished = CommandResult(0, "COMPLETED 0:0", "", "squeue")
             with patch.object(hr.ssh, "run", return_value=finished):

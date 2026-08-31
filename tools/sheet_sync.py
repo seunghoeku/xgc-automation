@@ -50,6 +50,8 @@ from tools import simulation_catalog as catalog
 # only column the human owns, so it sits at the end where it is easy to edit.
 COLUMNS = (
     "record_id",
+    "simulation_tag",
+    "sub_tag",
     "number",
     "short_name",
     "machine",
@@ -57,6 +59,13 @@ COLUMNS = (
     "origin",
     "case",
     "tags",
+    "field_model",
+    "marker_model",
+    "species",
+    "sml_node_file",
+    "sml_electron_on",
+    "eq_filename",
+    "ptl_marker_type",
     "runs",
     "latest_job_id",
     "latest_state",

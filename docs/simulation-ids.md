@@ -4,6 +4,12 @@
 It is separate from `run_id`, which identifies one scheduler submission or
 restart attempt.
 
+The catalog also exposes `simulation_tag` and `sub_tag`. For automation-owned
+records, `simulation_tag` defaults to `simulation_id`; imported or manually
+adopted work may reuse that tag. Catalog items are equal only when both tags
+match, and `sub_tag` defaults to the directory basename. This grouping rule does
+not change global `simulation_id` allocation.
+
 ## Format
 
 ```text

@@ -87,6 +87,12 @@ class CLITests(unittest.TestCase):
         _, payload = self.run_cli_json("list", "--machine", "polaris", "--status", "running")
         self.assertEqual([row["record_id"] for row in payload], ["n646po"])
 
+    def test_identity_filters_are_available(self) -> None:
+        _, payload = self.run_cli_json(
+            "list", "--simulation-tag", "n645pe", "--sub-tag", "n645pe"
+        )
+        self.assertEqual([row["record_id"] for row in payload], ["n645pe"])
+
     def test_show_renders_one_simulation(self) -> None:
         code, out = self.run_cli("show", "n645pe")
         self.assertEqual(code, 0)

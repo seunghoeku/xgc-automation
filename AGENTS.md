@@ -153,13 +153,19 @@ unaware of the machine type.
       Live qdel was not exercised; the XGC executable is compiled but not
       runtime-tested.
 - [x] 9. Strengthen provenance — the simulation catalog
-      (`tools/simulation_catalog.py`) gives every simulation one durable
+      (`tools/simulation_catalog.py`) gives every catalog item one durable
       record under `kb/simulations/`, created at reservation and updated
       automatically by staging, submission, and status checks, so a number is
       always linked to its runs, provenance files, input hash, and archive
       location. Submission now also stores the submitted namelist and its
-      SHA-256 in the run record. `tools/legacy_import.py` imports the
-      historical notebook (738 of 742 rows) as `origin: notebook` evidence
+      SHA-256 in the run record, parses `sml_node_file`, `sml_electron_on`,
+      `eq_filename`, and `ptl_marker_type` with XGC's namelist parser, and keeps
+      effective field model, marker model, and species summaries unknown when
+      historical evidence is insufficient. Catalog identity is the pair
+      `simulation_tag + sub_tag`; the latter defaults to the directory basename,
+      so reused tags such as `n645pe` remain distinct when their directories
+      differ. `tools/legacy_import.py` imports the historical notebook (741 of
+      742 rows) as `origin: notebook` evidence
       records, `tools/run_adoption.py` folds the 35 pre-catalog provenance
       runs under `runs/` into 25 `origin: adopted` simulations grouped by
       working directory (no retroactive numbering, no invented outcomes), and

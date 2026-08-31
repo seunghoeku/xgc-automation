@@ -33,6 +33,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools import dryrun
 from tools import machines as m
+from tools import namelist as nlm
 from tools import provenance as prov
 from tools import scheduler as sched
 from tools import simulation_catalog as catalog
@@ -382,6 +383,61 @@ def _capture_input(machine: str, case_dir: str | None) -> dict[str, Any]:
     return {"input_sha256": digest, "input_text": text, "input_capture": "ok"}
 
 
+def _unknown_input_provenance(
+    parse_status: str, error: str | None = None
+) -> dict[str, Any]:
+    """A stable shape for old, absent, or unparseable inputs."""
+    payload: dict[str, Any] = {
+        "parse_status": parse_status,
+        "parameters": {
+            name: None for name in nlm.IMPORTANT_PROVENANCE_PARAMETERS
+        },
+        "derived": {
+            "field_model": "unknown",
+            "field_model_source": None,
+            "marker_model": "unknown",
+            "species": None,
+        },
+    }
+    if error:
+        payload["parse_error"] = str(error)[-500:]
+    return payload
+
+
+def _input_provenance(
+    machine: str,
+    case_dir: str | None,
+    *,
+    dryrun_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Parse the submitted input with XGC's own namelist parser, best effort."""
+    if not case_dir:
+        return _unknown_input_provenance("not_applicable")
+    remote_path = f"{case_dir.rstrip('/')}/input"
+    try:
+        parsed = nlm.read_namelist(machine, remote_path)
+        summary = nlm.provenance_input_summary(parsed)
+        # A current XGC dryrun reports the effective field model after defaults
+        # are applied. This is stronger evidence than guessing from an absent
+        # switch, while old records without that evidence remain unknown.
+        derived = summary["derived"]
+        if derived["field_model"] == "unknown" and isinstance(dryrun_report, dict):
+            parallelism = dryrun_report.get("parallelism") or {}
+            effective = (
+                parallelism.get("field_model")
+                if isinstance(parallelism, dict)
+                else None
+            )
+            if effective in {"electrostatic", "electromagnetic"}:
+                derived["field_model"] = effective
+                derived["field_model_source"] = "xgc --dryrun"
+        return summary
+    except (KeyError, nlm.NamelistError, TypeError, ValueError) as exc:
+        # Submission has already been accepted. Record uncertainty rather than
+        # turning a provenance enrichment failure into an apparent job failure.
+        return _unknown_input_provenance("unavailable", str(exc))
+
+
 def _display_path(path: Path) -> str:
     """Project-relative when possible, absolute otherwise (redirected RUNS_DIR)."""
     try:
@@ -411,6 +467,7 @@ def _link_catalog(record: dict[str, Any], meta_path: Path) -> dict[str, Any] | N
                 "provenance": _display_path(meta_path),
                 "remote_run_dir": record["remote_run_dir"],
                 "input_sha256": record.get("input_sha256"),
+                "input": record.get("input"),
                 "case": (record.get("simulation") or {}).get("case"),
             },
             status="submitted",
@@ -500,6 +557,9 @@ def submit(
     job_id = scheduler.parse_job_id(result.stdout)
 
     captured = _capture_input(plan.machine, case_dir)
+    input_provenance = _input_provenance(
+        plan.machine, case_dir, dryrun_report=dryrun_report
+    )
     record = {
         "run_id": plan.run_id,
         "machine": plan.machine,
@@ -520,6 +580,7 @@ def submit(
         "case_dir": case_dir,
         "input_sha256": captured["input_sha256"],
         "input_capture": captured["input_capture"],
+        "input": input_provenance,
         "dryrun": dryrun_report,
     }
     meta_path = _write_provenance(plan, record, input_text=captured["input_text"])
@@ -534,6 +595,7 @@ def submit(
         "provenance": _display_path(meta_path),
         "resources": plan.resources,
         "input_sha256": captured["input_sha256"],
+        "input": input_provenance,
         "catalog": catalog_link,
         "dryrun": dryrun_report,
     }
