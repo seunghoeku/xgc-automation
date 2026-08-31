@@ -6,8 +6,10 @@ analysis.
 (macOS/Linux), while jobs are submitted, monitored, and analyzed on
 Perlmutter/Polaris over SSH.
 
-> See `AGENTS.md` for the detailed design and rules. opencode loads that file
-> automatically at startup.
+> `AGENTS.md` holds the governing rules and architecture, and is loaded
+> automatically into agent context at startup. Detail lives in `docs/` —
+> `docs/roadmap.md` for status, `docs/tool-layers.md` for the module map,
+> `docs/workflow.md` for a submission end to end.
 
 **New user?** Start with `docs/setup-new-user.md`: create your
 `machines.local.yaml` from the example, set up SSH authentication aliases,

@@ -90,6 +90,11 @@ XGC_SSH_NO_MULTIPLEX=1 xgc-sim refresh                          # or disable it
 
 Idle sockets close on their own after 10 minutes.
 
+Every tool-side connection uses a 60 s connect timeout,
+`SSH_CONNECT_TIMEOUT_SECONDS` in `tools/ssh.py`. It is deliberately
+longer than a generic default: sshproxy handshakes and busy login nodes
+routinely take tens of seconds. Do not shorten it.
+
 To start only a background master:
 
 ```bash

@@ -1,9 +1,10 @@
 """MCP tool layer for XGC automation.
 
 opencode launches this package's MCP server via `uv run python -m tools.server`.
-The tools from the AGENTS.md roadmap (preflight / physics_advisor /
-input_builder / validator / hpc_runner / data_analyzer / provenance) are
-implemented here incrementally.
+The tools (preflight / physics_advisor / input_builder / validator /
+hpc_runner / data_analyzer / provenance / remote_gui /
+simulation_catalog) are implemented here incrementally; see
+`docs/tool-layers.md` for the map and `docs/roadmap.md` for status.
 """
 
 __all__ = ["__version__"]
