@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Local timer for tools/queue_watch.py (macOS). Copy to
+  ~/Library/LaunchAgents/gov.pppl.xgc.queue-watch.plist, replace the
+  placeholders with your own paths, then:
+
+      launchctl bootstrap gui/$UID ~/Library/LaunchAgents/gov.pppl.xgc.queue-watch.plist
+      launchctl kickstart -p gui/$UID/gov.pppl.xgc.queue-watch   # run once now
+      launchctl bootout   gui/$UID/gov.pppl.xgc.queue-watch      # stop watching
+
+  StartInterval is seconds. launchd runs a missed interval once the machine
+  wakes, so a sleeping laptop delays a poll rather than skipping it.
+
+  Linux equivalent: a crontab line calling the same command.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>gov.pppl.xgc.queue-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>&lt;repository_path&gt;/.venv/bin/python</string>
+    <string>-m</string>
+    <string>tools.queue_watch</string>
+    <string>--machine</string>
+    <string>perlmutter</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>&lt;repository_path&gt;</string>
+  <key>StartInterval</key>
+  <integer>7200</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>&lt;home&gt;/Library/Logs/xgc-queue-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>&lt;home&gt;/Library/Logs/xgc-queue-watch.log</string>
+</dict>
+</plist>

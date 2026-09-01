@@ -6,8 +6,8 @@ improvised shell commands; this file is the list of what exists, so that rule
 is actionable.
 
 All MCP tools are exposed from `tools/server.py`. Two CLIs are installed as
-entry points: `xgc-sim` (`tools/simcat_cli.py`) and `xgc-remote-gui`
-(`tools/remote_gui.py`).
+entry points: `xgc-sim` (`tools/simcat_cli.py`), `xgc-remote-gui`
+(`tools/remote_gui.py`), and `xgc-queue-watch` (`tools/queue_watch.py`).
 
 ## Layers
 
@@ -22,6 +22,7 @@ entry points: `xgc-sim` (`tools/simcat_cli.py`) and `xgc-remote-gui`
 | `provenance` | `tools/provenance.py` | input→output lineage under `runs/` (commit, hash, timestamp). |
 | `remote_gui` | `tools/remote_gui.py` | Resolves a remote simulation, starts XGC-Devel's existing Monitor on the login node, tunnels it to localhost, and manages its lifecycle. |
 | `simulation_catalog` | `tools/simulation_catalog.py`, `tools/simcat_cli.py`, `tools/refresh.py` | One durable record per simulation (`kb/simulations/<id>.yaml`) linking number, runs, status, archive location, and human note. Searchable without an LLM via `xgc-sim`. |
+| `queue_watch` | `tools/queue_watch.py` | Asks a machine what the user currently has queued, diffs against the last snapshot, and reports only changes. Read-only, built for a local timer rather than a chat session. See `docs/queue-watch.md`. |
 
 ## Supporting modules
 

@@ -81,6 +81,25 @@ class Scheduler:
     def cancel_argv(self, job_id: str) -> list[str]:
         raise NotImplementedError
 
+    def user_queue_argv(self, user: str) -> list[str]:
+        """List every queued job owned by ``user``, job ids not known upfront.
+
+        ``status_argv`` answers about ids the catalog already holds. This walks
+        the other way, which is what a watcher needs: jobs submitted by hand,
+        outside the automation, have no catalog record to look them up from.
+        """
+        raise NotImplementedError(
+            f"the {self.type_name or 'configured'} adapter cannot list a "
+            "user's queue yet"
+        )
+
+    def parse_user_queue(self, stdout: str) -> list[dict[str, Any]]:
+        """Parse ``user_queue_argv`` output into normalized job dicts."""
+        raise NotImplementedError(
+            f"the {self.type_name or 'configured'} adapter cannot list a "
+            "user's queue yet"
+        )
+
     def parse_exit_code(self, stdout: str) -> str | None:
         """Return a scheduler exit code embedded in status output, if any."""
         return None
@@ -175,6 +194,30 @@ class SlurmScheduler(Scheduler):
                 UNKNOWN,
             )
         return states
+
+    # Fields a watcher needs to describe a job without a second round trip:
+    # id, name, state, elapsed, limit, nodes, queue reason, working directory.
+    _USER_QUEUE_FORMAT = "%i|%j|%T|%M|%l|%D|%R|%Z"
+
+    def user_queue_argv(self, user: str) -> list[str]:
+        return ["squeue", "-u", user, "-h", "-o", self._USER_QUEUE_FORMAT]
+
+    def parse_user_queue(self, stdout: str) -> list[dict[str, Any]]:
+        fields = ("job_id", "name", "state", "elapsed", "time_limit",
+                  "nodes", "reason", "work_dir")
+        jobs: list[dict[str, Any]] = []
+        for line in stdout.strip().splitlines():
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) < len(fields) or not parts[0]:
+                continue
+            job = dict(zip(fields, parts))
+            raw_state = job["state"]
+            job["raw_state"] = raw_state
+            job["state"] = _SLURM_STATES.get(
+                raw_state.split()[0].upper() if raw_state else "", UNKNOWN
+            )
+            jobs.append(job)
+        return jobs
 
     def accounting_argv(self, job_id: str) -> list[str]:
         """Query sacct for a finished job's state and exit code."""

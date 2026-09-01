@@ -112,5 +112,6 @@ executable. A `hpc_runner.build(machine)` hook is possible later.
 | Building XGC per machine | `docs/build-stellar.md`, `docs/build-polaris.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
+| Unattended queue polling from a local timer | `docs/queue-watch.md` |
 | Traps already paid for (per case) | `kb/cases/<name>.yaml` notes, `docs/input-archive.md` |
 | Past session history and rationale | `git log` |

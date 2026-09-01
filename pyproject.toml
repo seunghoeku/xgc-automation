@@ -21,6 +21,7 @@ sheets = [
 [project.scripts]
 xgc-remote-gui = "tools.remote_gui:main"
 xgc-sim = "tools.simcat_cli:main"
+xgc-queue-watch = "tools.queue_watch:main"
 
 [build-system]
 requires = ["hatchling"]
