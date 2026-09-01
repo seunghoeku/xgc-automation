@@ -32,6 +32,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools import dryrun
+from tools import build_banner
 from tools import machines as m
 from tools import namelist as nlm
 from tools import provenance as prov
@@ -661,6 +662,111 @@ def _find_run_for_job(machine: str, job_id: str) -> tuple[str, str] | None:
     return None
 
 
+def maybe_capture_build(
+    machine: str, simulation_id: str, run_id: str, state: str
+) -> dict[str, Any] | None:
+    """Capture the XGC build banner from stdout, once per run.
+
+    Called from status checks (and refresh) because that is the first moment
+    the stdout file exists. Skips runs whose catalog entry already carries a
+    ``build`` result. A definitive "no banner" is only recorded once the job
+    is terminal -- while it runs, absence may just mean XGC has not started
+    printing yet. Best effort throughout: build capture must never break a
+    status query.
+    """
+    if state not in ("running",) and state not in sched.TERMINAL_STATES:
+        return None
+    try:
+        record = catalog.read_record(simulation_id)
+    except catalog.SimulationCatalogError:
+        return None
+    run_entry = next(
+        (
+            run
+            for run in record.get("runs") or []
+            if isinstance(run, dict) and run.get("run_id") == run_id
+        ),
+        None,
+    )
+    if run_entry is None or run_entry.get("build") is not None:
+        return None
+    remote_run_dir = run_entry.get("remote_run_dir")
+    if not remote_run_dir:
+        return None
+
+    try:
+        result = build_banner.capture(
+            machine, str(remote_run_dir), run_entry.get("job_id")
+        )
+    except ssh.SSHError as exc:
+        return {"captured": False, "reason": str(exc)}
+
+    terminal = state in sched.TERMINAL_STATES
+    if result.get("found"):
+        summary = build_banner.catalog_summary(result)
+    elif result.get("definitive") and terminal:
+        # Stdout is complete and holds no banner (e.g. not an XGC job).
+        # Record that so refresh stops re-reading the file forever.
+        summary = {"captured": False, "reason": result.get("reason")}
+    else:
+        return {"captured": False, "reason": result.get("reason"), "retry": True}
+
+    try:
+        catalog.set_run_build(simulation_id, run_id, summary)
+    except catalog.SimulationCatalogError as exc:
+        return {"captured": False, "reason": str(exc)}
+
+    if result.get("found"):
+        _store_build_provenance(run_id, result)
+    return {"captured": bool(result.get("found")), "build": summary}
+
+
+def _store_build_provenance(run_id: str, result: dict[str, Any]) -> None:
+    """Write the full banner into the run's provenance.json, when one exists.
+
+    Adopted and externally submitted runs may have no local record; the
+    catalog entry is then the only copy, which is fine. When the plan recorded
+    an expected commit, a mismatch is flagged rather than silently kept: it
+    means the binary was rebuilt between plan and execution.
+    """
+    try:
+        found = prov.find_record(RUNS_DIR, run_id)
+    except prov.ProvenanceError:
+        return
+    if not found:
+        return
+    _, provenance_path = found
+    try:
+        record = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(record, dict):
+        return
+    xgc = record.get("xgc")
+    if not isinstance(xgc, dict):
+        xgc = {}
+    banner = result["banner"]
+    xgc["build"] = banner
+    xgc["build_source"] = {
+        "file": result.get("source_file"),
+        "captured_at": result.get("captured_at"),
+    }
+    planned = xgc.get("commit")
+    observed = (banner.get("git") or {}).get("commit")
+    if planned and observed and planned != observed:
+        xgc["build_commit_mismatch"] = {
+            "planned": planned,
+            "observed": observed,
+        }
+    record["xgc"] = xgc
+    try:
+        provenance_path.write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        return
+
+
 def _record_observed_state(
     machine: str, job_id: str, out: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -687,12 +793,16 @@ def _record_observed_state(
         )
     except catalog.SimulationCatalogError as exc:
         return {"simulation_id": simulation_id, "updated": False, "error": str(exc)}
-    return {
+    result = {
         "simulation_id": simulation_id,
         "run_id": run_id,
         "updated": True,
         "simulation_status": record.get("status"),
     }
+    build = maybe_capture_build(machine, simulation_id, run_id, out["state"])
+    if build is not None:
+        result["build_capture"] = build
+    return result
 
 
 def cancel(machine: str, job_id: str, *, confirm: bool = False) -> dict[str, Any]:

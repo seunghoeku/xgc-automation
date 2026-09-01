@@ -93,6 +93,16 @@ runs:
     remote_run_dir: /pscratch/.../n645pe_tcv_delta_f_linear
     state: completed
     exit_code: 0
+    build:                     # from the XGC startup banner in this run's stdout
+      commit: b84b1bdd0fa24d2012c650df7635c98d09da92c5
+      commit_subject: Merge remote-tracking branch '...'
+      build_date: Sun Aug 30 12:42:31 PM PDT 2026
+      build_type: RelWithDebInfo
+      cxx_compiler: GNU 14.3.0
+      built_by: sku
+      working_tree: clean      # or dirty / no-git
+      origin_url: git@github.com:seunghoeku/XGC-Devel.git
+      source_file: slurm-57784606.out
 archive:
   system: hpss
   path: /home/s/sku/n645pe.tar
@@ -224,6 +234,13 @@ xgc-sim stats                          # counts by status, machine, origin
 
 Add `--json` to any command for scripting. The MCP equivalents are
 `search_simulations`, `show_simulation`, and `simulation_stats`.
+
+A run's `build` block is captured automatically from the XGC startup banner
+in its stdout on the first status check or refresh after the job starts
+(`docs/workflow.md`, "Build banner capture"), so `xgc-sim search <commit>`
+answers "which simulations ran this exact build". The full banner, including
+XGC_FLAGS and a dirty build's changed-file list, is in the run's
+`provenance.json` under `xgc.build`.
 
 All query terms must match, but separators do not have to. The three sources
 write names differently -- `ASDEX_I_mode_EM`, `asdex-imode`, `ASDEX I mode` --

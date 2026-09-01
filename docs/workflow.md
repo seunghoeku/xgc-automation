@@ -156,6 +156,28 @@ its SHA-256 in `input_sha256`. The remote case directory is routinely edited
 for the next attempt, so without the copy a record could say which job ran but
 not what it ran.
 
+### Build banner capture
+
+Every XGC binary prints a banner at startup -- build date, host, compiler,
+build type, and a `GIT INFO` block naming the exact commit and whether the
+build tree was dirty. That banner is the ground truth about the binary that
+actually ran, as opposed to the one the plan referenced, so the first status
+check (or `xgc-sim refresh`) after a job starts reads a bounded slice of its
+stdout, parses the banner (`tools/build_banner.py`), and stores it:
+
+- the full banner in the run's `provenance.json` under `xgc.build`, with
+  `xgc.build_commit_mismatch` flagged when the observed commit differs from
+  the one the plan recorded (the binary was rebuilt in between);
+- a compact summary (commit, subject, build date/type, compiler, dirty state,
+  origin URL) in the catalog's run entry under `build`, which makes
+  `xgc-sim search <commit>` answer "what ran this build".
+
+Capture happens once per run. Restart attempts share a case directory, so the
+stdout file is selected by job id (`slurm-<jobid>.out`, `<name>.o<jobid>`); a
+job whose completed stdout has no banner (a non-XGC job) is marked so refresh
+stops re-reading it. A dirty build's banner also names the changed files and
+the `git_diff_XGC_core.txt` preview XGC writes into the run directory.
+
 ### Recommended future gate: executable availability
 
 Before a scientific job is submitted, the runner should verify the exact remote

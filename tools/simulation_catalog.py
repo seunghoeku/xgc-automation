@@ -694,6 +694,37 @@ def update_run_state(
     return record
 
 
+def set_run_build(
+    record_id: str,
+    run_id: str,
+    build: dict[str, Any],
+    *,
+    catalog_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Record the XGC build banner captured from one run's stdout.
+
+    The banner (parsed by ``tools.build_banner``) is what the binary said
+    about itself at execution time -- commit, build date, dirty state -- and
+    therefore outranks what the submission plan assumed. Setting it does not
+    touch the run's scheduler state or the simulation's status.
+    """
+    record = read_record(record_id, catalog_dir=catalog_dir)
+    runs = list(record.get("runs") or [])
+    for index, existing in enumerate(runs):
+        if isinstance(existing, dict) and existing.get("run_id") == run_id:
+            updated = dict(existing)
+            updated["build"] = build
+            runs[index] = updated
+            break
+    else:
+        raise SimulationCatalogError(
+            f"run {run_id!r} is not linked to simulation {record_id!r}"
+        )
+    record["runs"] = runs
+    write_record(record, catalog_dir=catalog_dir)
+    return record
+
+
 def iter_records(*, catalog_dir: Path | None = None) -> Iterator[dict[str, Any]]:
     """Yield every catalog record, sorted by number then id."""
     directory = catalog_dir or CATALOG_DIR
@@ -785,6 +816,11 @@ def _haystack(record: dict[str, Any]) -> str:
     for run in record.get("runs") or []:
         if isinstance(run, dict):
             parts.extend([run.get("run_id"), run.get("job_id"), run.get("remote_run_dir")])
+            build = run.get("build")
+            if isinstance(build, dict):
+                parts.extend(
+                    [build.get("commit"), build.get("commit_subject"), build.get("build_type")]
+                )
     legacy = record.get("legacy") or {}
     if isinstance(legacy, dict):
         parts.extend([legacy.get("shot"), legacy.get("sheet"), legacy.get("data")])

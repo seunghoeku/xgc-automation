@@ -11,8 +11,9 @@ in flight, asks each machine about the runs involved, and writes the answers
 back. One command, no arguments, safe to repeat -- the kind of thing that can
 live in a shell alias or a cron entry.
 
-It is read-only against the machines: it polls the scheduler and never submits,
-cancels, or touches remote files.
+It is read-only against the machines: it polls the scheduler, reads a bounded
+slice of a run's stdout once to capture the XGC build banner, and never
+submits, cancels, or modifies remote files.
 """
 
 from __future__ import annotations
@@ -279,10 +280,19 @@ def refresh(
                     }
                 )
                 continue
+            build_capture = hpc_runner.maybe_capture_build(
+                run_machine, simulation_id, run["run_id"], state
+            )
+
             if state == run.get("state"):
-                unchanged.append(
-                    {"record_id": simulation_id, "run_id": run["run_id"], "state": state}
-                )
+                entry = {
+                    "record_id": simulation_id,
+                    "run_id": run["run_id"],
+                    "state": state,
+                }
+                if build_capture is not None:
+                    entry["build_capture"] = build_capture
+                unchanged.append(entry)
                 continue
 
             try:
@@ -304,18 +314,19 @@ def refresh(
                 )
                 continue
 
-            updated.append(
-                {
-                    "record_id": simulation_id,
-                    "run_id": run["run_id"],
-                    "job_id": run["job_id"],
-                    "machine": run["machine"],
-                    "run_state": state,
-                    "exit_code": result.get("exit_code"),
-                    "status_before": before,
-                    "status_after": record.get("status"),
-                }
-            )
+            entry = {
+                "record_id": simulation_id,
+                "run_id": run["run_id"],
+                "job_id": run["job_id"],
+                "machine": run["machine"],
+                "run_state": state,
+                "exit_code": result.get("exit_code"),
+                "status_before": before,
+                "status_after": record.get("status"),
+            }
+            if build_capture is not None:
+                entry["build_capture"] = build_capture
+            updated.append(entry)
             before = record.get("status")
 
     return {
