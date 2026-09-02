@@ -30,6 +30,7 @@ builds) lives in gitignored overlays.
 | `kb/` | Knowledge base for physics_advisor |
 | `input_backup/` | Read-only historical input archive; never treated as validated |
 | `runs/` | Run records and pulled summary products |
+| `f_init/` | Optional non-Maxwellian `f_init` procedure (`xgc-finit`, skill `f-init`); not loaded in the everyday flow |
 
 ## Implemented workflow
 

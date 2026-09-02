@@ -22,10 +22,13 @@ sheets = [
 xgc-remote-gui = "tools.remote_gui:main"
 xgc-sim = "tools.simcat_cli:main"
 xgc-queue-watch = "tools.queue_watch:main"
+# Optional non-Maxwellian f_init procedure (f_init/README.md); not part of the
+# everyday flow, so it has its own package and entry point.
+xgc-finit = "f_init.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["tools"]
+packages = ["tools", "f_init"]

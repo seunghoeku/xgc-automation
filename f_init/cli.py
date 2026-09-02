@@ -1,0 +1,267 @@
+"""``xgc-finit``: drive the non-Maxwellian f_init procedure for one case.
+
+    xgc-finit CASE status
+    xgc-finit CASE make-finit [--sigma-theta S] [--v-width W] [--step N] [--overwrite]
+    xgc-finit CASE stage-dt0 --finit FILE [--dir NAME] [--confirm] [--overwrite]
+    xgc-finit CASE dryrun DIR
+    xgc-finit CASE submit DIR [--confirm] [--skip-dryrun]
+    xgc-finit CASE jobs
+    xgc-finit CASE adjust DIR [--factor F] [--check-only] [--ref-step N] [--cmp-step N] [--overwrite]
+    xgc-finit CASE check DIR
+    xgc-finit CASE log
+
+``CASE`` is a name under ``f_init/cases/`` or a path to a case YAML. Anything
+that writes a directory or consumes allocation is a plan until ``--confirm``
+is given; see ``f_init/README.md`` for the procedure itself.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import Any
+
+from . import config as cfg
+from . import procedure as proc
+
+
+def _print(data: Any, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(data, indent=2, default=str))
+
+
+def cmd_status(case: cfg.Case, args: argparse.Namespace) -> int:
+    inv = proc.inventory(case)
+    if args.json:
+        _print(inv, True)
+        return 0
+    print(f"{case.name}: {case.root} on {case.machine}")
+    header = f"{'directory':<28} {'input':<5} {'f0 last':>7} {'2d steps':<22} {'jobs':<9} f_init files"
+    print(header)
+    print("-" * len(header))
+    for d in inv["dirs"]:
+        steps = d["twod_steps"]
+        if len(steps) > 3:
+            steps_text = f"{steps[0]}..{steps[-1]} ({len(steps)})"
+        else:
+            steps_text = " ".join(str(s) for s in steps)
+        jobs = f"{d['finished_jobs']}/{d['job_outputs']} done"
+        print(f"{d['name']:<28} {'yes' if d['has_input'] else 'no':<5} "
+              f"{d['last_f0_step'] if d['last_f0_step'] is not None else '-':>7} "
+              f"{steps_text:<22} {jobs:<9} {' '.join(d['f_init_files'])}")
+    maxwell = inv["maxwell"]
+    if maxwell is None:
+        print(f"\nWARNING: stage A directory {case.maxwell_dir!r} not found")
+    elif maxwell["last_f0_step"] is None:
+        print(f"\nstage A ({case.maxwell_dir}) has no xgc.f0 snapshot yet")
+    else:
+        print(f"\nstage A ({case.maxwell_dir}) last f0 step {maxwell['last_f0_step']}; "
+              f"f_init files: {maxwell['f_init_files'] or 'none'}")
+    return 0
+
+
+def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.make_finit(
+        case, sigma_theta=args.sigma_theta, v_width=args.v_width, step=args.step,
+        overwrite=args.overwrite, out_dir=args.out_dir,
+    )
+    if args.json:
+        _print(payload, True)
+        return 0
+    print(f"f0 step {payload['f0_step']}: {payload['nnodes']} nodes, "
+          f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}")
+    print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells")
+    for out in payload["outputs"]:
+        stats = payload["f_g_stats"].get(out["kind"], {})
+        print(f"  wrote {out['path']}  (|f_g| max {stats.get('abs_max', 0):.3e}, rms {stats.get('rms', 0):.3e})")
+    return 0
+
+
+def _print_resources(res: dict[str, Any]) -> None:
+    print(f"  nodes={res['nodes']} walltime={res['walltime']} qos={res['qos']} "
+          f"account={res['account']} -> up to {res['node_hours']} node-hours")
+
+
+def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace) -> int:
+    plan = proc.plan_dt0(case, args.finit, dir_name=args.dir)
+    if args.json and not args.confirm:
+        _print(plan, True)
+        return 0
+    print(f"dt=0 directory: {plan['target_dir']}" + ("  (EXISTS)" if plan["exists"] else ""))
+    print(f"copy from {case.maxwell_dir}/: {', '.join(plan['copy_files'])}")
+    print("input changes:")
+    for note in plan["input_notes"]:
+        print(f"  {note}")
+    print(plan["input_diff"])
+    print(f"{plan['script_name']} changes:")
+    for note in plan["script_notes"]:
+        print(f"  {note}")
+    _print_resources(plan["resources"])
+    if not args.confirm:
+        print("\nPlan only. Re-run with --confirm to write the directory.")
+        return 0
+    result = proc.stage_dt0(case, plan, overwrite=args.overwrite)
+    print(f"\nwrote {result['target_dir']}: {', '.join(result['written'])}")
+    print(f"next: xgc-finit {case.name} submit {plan['dir_name']} --confirm")
+    return 0
+
+
+def cmd_dryrun(case: cfg.Case, args: argparse.Namespace) -> int:
+    result = proc.dryrun(case, args.dir)
+    if args.json:
+        _print(result, True)
+    else:
+        print(f"{result['dir']}: {result['exe']} --dryrun")
+        print(result["summary"])
+    return 1 if result["blocking"] else 0
+
+
+def cmd_submit(case: cfg.Case, args: argparse.Namespace) -> int:
+    if not args.confirm:
+        plan = proc.submit_plan(case, args.dir)
+        if args.json:
+            _print(plan, True)
+            return 0
+        print(f"would run: sbatch {plan['script']}")
+        _print_resources(plan["resources"])
+        print("\nPlan only. Re-run with --confirm to submit (a dryrun gate runs first).")
+        return 0
+    result = proc.submit(case, args.dir, skip_dryrun=args.skip_dryrun)
+    if args.json:
+        _print(result, True)
+        return 0
+    if result["dryrun"]:
+        print("dryrun: " + result["dryrun"]["summary"].splitlines()[0])
+    print(f"submitted job {result['job_id']} for {result['dir']}")
+    _print_resources(result["resources"])
+    return 0
+
+
+def cmd_jobs(case: cfg.Case, args: argparse.Namespace) -> int:
+    rows = proc.job_states(case)
+    if args.json:
+        _print(rows, True)
+        return 0
+    if not rows:
+        print("no jobs submitted through xgc-finit for this case")
+        return 0
+    for row in rows:
+        exit_text = f" exit {row['exit_code']}" if row.get("exit_code") else ""
+        print(f"{row['job_id']:>10}  {row['dir']:<28} {row['state']}{exit_text}  (submitted {row['submitted']})")
+    return 0
+
+
+def cmd_adjust(case: cfg.Case, args: argparse.Namespace, *, check_only: bool = False) -> int:
+    payload = proc.adjust(
+        case, args.dir, factor=getattr(args, "factor", None),
+        check_only=check_only or getattr(args, "check_only", False),
+        ref_step=args.ref_step, cmp_step=args.cmp_step,
+        overwrite=getattr(args, "overwrite", False),
+    )
+    if args.json:
+        _print(payload, True)
+        return 0
+    m = payload["metrics"]
+    print(f"{args.dir}: f_init {payload['finit']}")
+    print(f"  reference {case.maxwell_dir}/xgc.2d.{payload['ref_step']:05d}.bp vs dt0 xgc.2d.{payload['cmp_step']:05d}.bp")
+    raw, fsa = m["raw_dn_over_n"], m["fsa_dn_over_n"]
+    print(f"  (n_ref - n_dt0)/n  node-wise: rms {raw['rms']:.3e}, max {raw['abs_max']:.3e}")
+    print(f"  (n_ref - n_dt0)/n  flux-avg : rms {fsa['rms']:.3e}, max {fsa['abs_max']:.3e}, mean {fsa['mean']:.3e}")
+    if payload.get("output"):
+        rng = m.get("scale_range", [None, None])
+        print(f"  wrote {payload['output']}  (scale factor {rng[0]:.4f} .. {rng[1]:.4f}, factor {payload['factor']})")
+        print(f"next: xgc-finit {case.name} stage-dt0 --finit {payload['output'].rsplit('/', 1)[-1]}")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
+    if payload.get("png_error"):
+        print(f"  plot skipped: {payload['png_error']}")
+    return 0
+
+
+def cmd_log(case: cfg.Case, args: argparse.Namespace) -> int:
+    entries = cfg.read_log(case)
+    if args.json:
+        _print(entries, True)
+        return 0
+    if not entries:
+        print(f"no log yet ({case.log_path})")
+        return 0
+    for e in entries:
+        detail = {k: v for k, v in e.items() if k not in {"time", "stage", "metrics", "input_notes", "script_notes", "f_g_stats"}}
+        print(f"{e['time']}  {e['stage']:<11} {json.dumps(detail, default=str)}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="xgc-finit", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("case", help="case name under f_init/cases/ or a YAML path")
+    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("status", help="what exists in the case root")
+
+    p = sub.add_parser("make-finit", help="f0 snapshot -> f_init files (login node)")
+    p.add_argument("--sigma-theta", type=float, default=None, help="poloidal width [rad]")
+    p.add_argument("--v-width", type=float, default=None, help="velocity-space width [cells]")
+    p.add_argument("--step", type=int, default=None, help="f0 step; default last")
+    p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
+    p.add_argument("--overwrite", action="store_true")
+
+    p = sub.add_parser("stage-dt0", help="plan/write a dt=0 directory for one f_init file")
+    p.add_argument("--finit", required=True, help="f_init file name in the stage A directory")
+    p.add_argument("--dir", default=None, help="directory name; default dt0_<tag>")
+    p.add_argument("--confirm", action="store_true")
+    p.add_argument("--overwrite", action="store_true")
+
+    p = sub.add_parser("dryrun", help="xgca --dryrun in a staged directory")
+    p.add_argument("dir")
+
+    p = sub.add_parser("submit", help="sbatch the directory's job script")
+    p.add_argument("dir")
+    p.add_argument("--confirm", action="store_true")
+    p.add_argument("--skip-dryrun", action="store_true")
+
+    sub.add_parser("jobs", help="state of jobs submitted for this case")
+
+    p = sub.add_parser("adjust", help="compare densities and write an adjusted f_init")
+    p.add_argument("dir", help="dt=0 directory to compare against stage A")
+    p.add_argument("--factor", type=float, default=None)
+    p.add_argument("--check-only", action="store_true")
+    p.add_argument("--ref-step", type=int, default=None)
+    p.add_argument("--cmp-step", type=int, default=None)
+    p.add_argument("--overwrite", action="store_true")
+
+    p = sub.add_parser("check", help="density mismatch metrics only (no file written)")
+    p.add_argument("dir")
+    p.add_argument("--ref-step", type=int, default=None)
+    p.add_argument("--cmp-step", type=int, default=None)
+
+    sub.add_parser("log", help="what this CLI has done to the case")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        case = cfg.load_case(args.case)
+        handlers = {
+            "status": cmd_status,
+            "make-finit": cmd_make_finit,
+            "stage-dt0": cmd_stage_dt0,
+            "dryrun": cmd_dryrun,
+            "submit": cmd_submit,
+            "jobs": cmd_jobs,
+            "adjust": cmd_adjust,
+            "check": lambda c, a: cmd_adjust(c, a, check_only=True),
+            "log": cmd_log,
+        }
+        return handlers[args.command](case, args)
+    except (cfg.CaseError, proc.ProcedureError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

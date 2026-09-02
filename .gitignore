@@ -30,3 +30,6 @@ runs/test/
 .DS_Store
 machines.local.yaml
 kb/cases/*.local.yaml
+
+# f_init procedure: pulled comparison plots are regenerable; keep the JSON.
+f_init/cases/*/*.png

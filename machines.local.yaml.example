@@ -32,8 +32,9 @@ perlmutter:
     python: /pscratch/sd/a/alice/venvs/xgc-gui/bin/python3
     # env_script: /pscratch/sd/a/alice/env/xgc-gui.sh  # optional
     # remote_port: 5080  # optional; otherwise a high port is selected
-  # Only needed for analyze_run's oned_profiles product: where YOUR
-  # XGC-Analysis checkout lives on the machine (docs/data-analysis.md).
+  # Needed for analyze_run's oned_profiles product and for the optional f_init
+  # procedure (f_init/README.md): a login-node Python with adios2, numpy,
+  # scipy, matplotlib, and the path of YOUR XGC_reader checkout.
   analysis:
     python: /path/to/your/python3    # must be able to import xgc_analysis
     pythonpath: /path/to/XGC_reader  # parent of the xgc_analysis package
