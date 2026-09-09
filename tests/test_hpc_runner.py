@@ -384,6 +384,78 @@ class AuroraPlanTests(unittest.TestCase):
         self.assertIn("mpiexec --np 12 -ppn 12 hostname", launch)
         self.assertFalse(any("gpu-bind" in line for line in launch))
 
+    def test_aurora_daos_runs_inside_the_container_and_keeps_logs_on_flare(self) -> None:
+        self.cfg["daos"] = {"pool": "SomeProject", "container": "xgc"}
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "aurora",
+                run_id="run-aurora-daos",
+                run_dir="/lus/flare/projects/SomeProject/alice/case_a",
+                daos=True,
+            )
+
+        launch = [
+            line for line in plan.script.splitlines() if not line.startswith("#")
+        ]
+        directives = {line for line in launch if line.startswith("#PBS")}
+        self.assertEqual(plan.resources["filesystems"], "home:flare:daos_user_fs")
+        self.assertIn(
+            "/tmp/SomeProject/xgc/case_a", plan.resources["daos"]["work_dir"]
+        )
+        self.assertTrue(any("launch-dfuse.sh SomeProject:xgc" in l for l in launch))
+        self.assertTrue(any('cd "/tmp/SomeProject/xgc/case_a"' in l for l in launch))
+        self.assertTrue(
+            any("--no-vni --env LD_PRELOAD=/usr/lib64/libpil4dfs.so" in l for l in launch)
+        )
+        # Logs stay on the parallel filesystem where the login node can read them.
+        self.assertTrue(
+            any('exec >"/lus/flare/projects/SomeProject/alice/case_a/pbs-' in l for l in launch)
+        )
+        self.assertEqual(plan.remote_run_dir, "/lus/flare/projects/SomeProject/alice/case_a")
+
+    def test_aurora_daos_requires_pool_and_container(self) -> None:
+        self.cfg["daos"] = {"pool": "<daos_pool>", "container": "xgc"}
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            with self.assertRaisesRegex(hr.SubmissionError, "daos.pool"):
+                hr.prepare_submission("aurora", run_id="run-daos-missing", daos=True)
+        del self.cfg["daos"]
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            with self.assertRaisesRegex(hr.SubmissionError, "no daos section"):
+                hr.prepare_submission("aurora", run_id="run-daos-none", daos=True)
+
+    def test_aurora_without_daos_is_unchanged(self) -> None:
+        self.cfg["daos"] = {"pool": "SomeProject", "container": "xgc"}
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("aurora", run_id="run-aurora-plain")
+        self.assertNotIn("dfuse", plan.script)
+        self.assertNotIn("--no-vni", plan.script)
+        self.assertEqual(plan.resources["filesystems"], "home:flare")
+        self.assertIsNone(plan.resources["daos"])
+
+    def test_daos_submit_blocks_a_relative_input_file_dir(self) -> None:
+        self.cfg["daos"] = {"pool": "SomeProject", "container": "xgc"}
+        case = "/lus/flare/projects/SomeProject/alice/case_a"
+        remote_input = CommandResult(
+            0, "&sml_param\nsml_input_file_dir='../XGC_inputs/'\n/\n", "", "cat"
+        )
+        with (
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="aurora"),
+            patch.object(hr.ssh, "run", return_value=remote_input) as run,
+            patch.object(hr.ssh, "mkdir_p") as mkdir,
+        ):
+            plan = hr.prepare_submission(
+                "aurora", run_id="run-daos-relative", run_dir=case, daos=True
+            )
+            result = hr.submit(
+                "aurora", confirm=True, plan=plan, case_dir=case, skip_dryrun=True
+            )
+
+        self.assertFalse(result["submitted"])
+        self.assertIn("relative", result["reason"])
+        mkdir.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+
 
 class PerlmutterPlanTests(unittest.TestCase):
     def setUp(self) -> None:

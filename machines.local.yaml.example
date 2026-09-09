@@ -70,6 +70,11 @@ aurora:
   paths:
     scratch: /lus/flare/projects/YourProject/alice
     run_root: /lus/flare/projects/YourProject/alice/xgc-runs
+  # Optional: your project's DAOS pool and a POSIX container in it (see the
+  # daos comment in machines.yaml). Leave out to run on flare only.
+  daos:
+    pool: YourProject
+    container: xgc
   xgc:
     # Your own oneAPI/SYCL build (XGC-Devel quickstart, cmake_configs/aurora.sh).
     exe: /lus/flare/projects/YourProject/alice/XGC-Devel/build/bin/xgc

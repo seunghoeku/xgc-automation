@@ -123,6 +123,28 @@ aurora:
   paths:
     scratch: <project_path>          # /lus/flare/projects/<project>/<user>
     run_root: <project_path>/xgc-runs
+  # Optional: run inside a DAOS POSIX container instead of flare
+  # (docs.alcf.anl.gov/aurora/data-management/daos/daos-overview). A pool is
+  # allocated per project by ALCF support; the container is created once with
+  #   daos container create --type=POSIX --chunk-size=2097152 \
+  #     --properties=rd_fac:3,ec_cell_sz:131072,cksum:crc32,srv_cksum:on \
+  #     --file-oclass=EC_16P3G32 --dir-oclass=RP_4G1 <pool> <container>
+  # The job asks PBS for daos_user_fs, mounts the container on every node with
+  # launch-dfuse.sh at /tmp/<pool>/<container>, runs XGC there through the
+  # libpil4dfs interception library (mpiexec --no-vni), and keeps input,
+  # script, and logs in the flare case directory. Pool and container are
+  # per-user bindings (machines.local.yaml); the rest are site facts.
+  # Verified 2026-09-09 (job 8814705, ECBC smoke test, 2 nodes, rc=0).
+  daos:
+    pool: <daos_pool>
+    container: <daos_container>
+    filesystems_resource: daos_user_fs
+    mount_root: /tmp
+    modulefiles: /soft/modulefiles
+    module: daos
+    launch: launch-dfuse.sh
+    interception_library: /usr/lib64/libpil4dfs.so
+    tile_wrapper: /soft/daos/tools/scripts/gpu_tile_compact_LD_PRELOAD.sh
   xgc:
     # Intel oneAPI (icpx/ifx) + SYCL build; see the XGC-Devel quickstart
     # (cmake_configs/aurora.sh, modules_and_env/aurora.sh). Personal builds

@@ -279,6 +279,7 @@ def plan_job(
     account: str | None = None,
     partition: str | None = None,
     hello_world: bool = False,
+    daos: bool = False,
 ) -> dict[str, Any]:
     """Render a job script and estimate its cost WITHOUT submitting anything.
 
@@ -289,6 +290,8 @@ def plan_job(
         machine: machine key from machines.yaml (see list_machines).
         partition: Slurm partition or PBS queue.
         hello_world: run hostname through the machine launcher instead of XGC.
+        daos: execute inside the machine's DAOS container (Aurora) instead of
+            the parallel filesystem; logs and input stay in the case directory.
     Unspecified resources fall back to the machine's defaults.
     """
     plan = hr.prepare_submission(
@@ -303,6 +306,7 @@ def plan_job(
         account=account,
         partition=partition,
         hello_world=hello_world,
+        daos=daos,
     )
     return plan.to_dict()
 
@@ -688,6 +692,7 @@ def submit_job(
     partition: str | None = None,
     hello_world: bool = False,
     skip_dryrun: bool = False,
+    daos: bool = False,
 ) -> dict[str, Any]:
     """Submit a job to the scheduler. Requires explicit human confirmation.
 
@@ -723,6 +728,7 @@ def submit_job(
         account=account,
         partition=partition,
         hello_world=hello_world,
+        daos=daos,
     )
 
 

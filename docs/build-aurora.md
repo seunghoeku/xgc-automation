@@ -97,3 +97,77 @@ for Aurora is `cmake_configs/aurora.sh` after sourcing
 `modules_and_env/aurora.sh`; it uses `mpic++ -cxx=icpx`, `mpifort -fc=ifx`,
 `-fsycl` device code for `pvc`, and `-DUSE_GPU_AWARE_MPI=On`. Record the
 commit and the dependency modules that were loaded when it is done.
+
+## Running in DAOS instead of flare
+
+Aurora's DAOS (230 PB, up to 30 TB/s aggregate) is the fast tier; flare is
+650 GB/s and shared. The TokamakProfile project has a pool (1.6 PB NVMe,
+`daos pool query TokamakProfile`), and the POSIX container `dadt_predict` was
+created in it on 2026-09-09 with ALCF's recommended redundancy (`rd_fac:3`,
+`EC_16P3G32`, 2 MB chunks, crc32). XGC's restart dumps (one particle set per
+rank, tens of GB each at production size) and the dAdt training output are
+what make the bandwidth worth the extra steps.
+
+Verified 2026-09-09 with the same ECBC smoke test as the flare run: job
+`8814705`, 2 `debug` nodes, 24 ranks, 20 steps, `Exit_status=0`, 3 min 11 s
+wall time, empty stderr, `SimpleFOM` 7.92e7 against 7.83e7 on flare (the
+run is compute-bound at this size, so the equal figure says only that DAOS
+cost nothing). The container now holds the 39 GB of output plus
+`restart_dir/xgc.restart.00020.bp`, and the login-node mount below read it
+back with `bpls`. Provenance: `runs/test/run-20260909T211140Z/`.
+
+`plan_job(..., daos=True)` / `submit_job(..., daos=True)` render the DAOS
+variant of the Aurora template:
+
+1. `-l filesystems=home:flare:daos_user_fs` so the PBS prologue starts the
+   DAOS agent on the compute nodes.
+2. `module load daos` and `launch-dfuse.sh <pool>:<container>` mount the
+   container with dfuse on every node at `/tmp/<pool>/<container>`.
+3. `input`, `petsc.rc`, and `adios2cfg.xml` are copied from the flare case
+   directory into `/tmp/<pool>/<container>/<case basename>`, and XGC runs
+   there. The directory persists in the container across jobs, so
+   `restart_dir/` and restart chains work exactly as on flare.
+4. `mpiexec --no-vni --env LD_PRELOAD=/usr/lib64/libpil4dfs.so` runs XGC
+   through the interception library (data and metadata bypass the kernel).
+   `--no-vni` is mandatory for DAOS. For rank counts other than 12 per node
+   the ALCF `gpu_tile_compact_LD_PRELOAD.sh` copy is used, because the stock
+   tile wrapper's `udevadm` call misbehaves under the interception library.
+5. Job stdout/stderr and `submit.sh` stay in the flare case directory, so
+   `job_output`, the build-banner capture, and `xgc-queue-watch` need no
+   mount. The PBS epilogue unmounts the container.
+
+Constraints:
+
+- `sml_input_file_dir` must be an **absolute flare path** because XGC's
+  working directory is now the container mount, and XGC truncates the value
+  at 65 characters (`character(len=65)` in `XGC_core/module.F90`).
+  `/lus/flare/projects/TokamakProfile/shku/XGC_inputs/` is 51 characters.
+  `submit_job` reads the input and refuses a relative or over-long value
+  before `qsub`.
+- DAOS is still called a test configuration by ALCF and may be wiped with
+  notice. Treat the container as scratch: copy what must survive to flare.
+- The user's earlier hand-written DAOS attempts (January 2026,
+  `test/xgcs.test`) failed at the mount step (`Failed to connect to
+  container`, `DER_NOTSUPPORTED` reading the handles file); they used a
+  project-local mount helper. ALCF's `launch-dfuse.sh` (dfuse on the head
+  node, `dbcast` of the handles, `clush` for the rest) is what the template
+  uses.
+
+### Reading results afterwards
+
+The container is not visible on a login node until it is mounted there:
+
+```bash
+module use /soft/modulefiles && module load daos
+mkdir -p /tmp/$USER/TokamakProfile/dadt_predict
+start-dfuse.sh -m /tmp/$USER/TokamakProfile/dadt_predict --pool TokamakProfile --cont dadt_predict
+ls /tmp/$USER/TokamakProfile/dadt_predict/<case>
+# ... analysis, or copy reduced products to flare ...
+fusermount3 -u /tmp/$USER/TokamakProfile/dadt_predict   # always unmount on login nodes
+```
+
+For bulk moves between DAOS and flare use the DAOS data mover
+(`mpifileutils` `dcp`, see the ALCF "Moving data to Aurora" page) from a
+compute job rather than `cp` through a login-node dfuse mount. The
+`data_analyzer` tools take a remote directory path, so point them at the
+login-node mount above; the mount is per login node and per session.

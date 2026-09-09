@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -140,6 +141,7 @@ def prepare_submission(
     provenance_class: str | None = None,
     hello_world: bool = False,
     run_dir: str | None = None,
+    daos: bool = False,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -154,6 +156,12 @@ def prepare_submission(
         xgc_commit: source commit corresponding to an executable override.
         provenance_class: local record class, ``master`` or ``test``. Registered
             simulations default to master; other jobs default to test.
+        daos: run XGC inside the machine's DAOS POSIX container (Aurora). The
+            case directory on the parallel filesystem keeps the input, the
+            script, and the logs; XGC itself executes in
+            ``<mount_root>/<pool>/<container>/<case basename>``, which persists
+            across jobs so restart chains keep working. Needs a ``daos``
+            section with ``pool`` and ``container`` in the machine definition.
 
     Unspecified resource arguments fall back to the machine's `defaults`.
     """
@@ -199,6 +207,13 @@ def prepare_submission(
             warnings.append(f"{label} is still a placeholder ({value})")
     if m.is_placeholder(filesystems):
         warnings.append(f"filesystems is still a placeholder ({filesystems})")
+
+    daos_cfg = _daos_settings(machine, cfg) if daos else None
+    if daos_cfg and filesystems and daos_cfg["filesystems_resource"] not in str(
+        filesystems
+    ).split(":"):
+        # The PBS prologue starts the DAOS agent only when the job asks for it.
+        filesystems = f"{filesystems}:{daos_cfg['filesystems_resource']}"
 
     if hello_world:
         exe = None
@@ -275,6 +290,14 @@ def prepare_submission(
         raise SubmissionError(str(exc)) from exc
     total_ranks = nodes * ntasks_per_node
 
+    if daos_cfg:
+        # One directory per case inside the container; the basename is the
+        # canonical simulation directory name, so it is unique per simulation.
+        daos_cfg["work_dir"] = (
+            f"{daos_cfg['mount_root']}/{daos_cfg['pool']}/"
+            f"{daos_cfg['container']}/{Path(remote_run_dir).name}"
+        )
+
     template_name = Path(cfg["scheduler"]["submit_tpl"]).name
     script = _jinja_env().get_template(template_name).render(
         job_name=job_name,
@@ -298,6 +321,7 @@ def prepare_submission(
         modules=xgc_cfg.get("modules") or [],
         env_script=resolved_env_script,
         xgc_exe=exe,
+        daos=daos_cfg,
         generated_at=_now().isoformat(),
         provenance_id=run_id,
     )
@@ -321,6 +345,7 @@ def prepare_submission(
         "executable": exe or "(hello-world: hostname)",
         "env_script": resolved_env_script,
         "xgc_commit": resolved_xgc_commit,
+        "daos": daos_cfg,
     }
 
     return SubmissionPlan(
@@ -335,6 +360,78 @@ def prepare_submission(
         resources=resources,
         warnings=warnings,
     )
+
+
+# Site defaults for running inside a DAOS POSIX container (ALCF Aurora,
+# docs.alcf.anl.gov/aurora/data-management/daos/daos-overview). A machine's
+# ``daos`` section overrides any of them; pool and container have no default.
+_DAOS_DEFAULTS = {
+    "filesystems_resource": "daos_user_fs",
+    "mount_root": "/tmp",
+    "modulefiles": "/soft/modulefiles",
+    "module": "daos",
+    "launch": "launch-dfuse.sh",
+    # libpil4dfs intercepts data and metadata calls (kernel bypass); libioil
+    # would intercept data only.
+    "interception_library": "/usr/lib64/libpil4dfs.so",
+    # gpu_tile_compact.sh's udevadm call misbehaves under the interception
+    # library, so ALCF ships a copy that sets LD_PRELOAD after the ZE mask.
+    "tile_wrapper": "/soft/daos/tools/scripts/gpu_tile_compact_LD_PRELOAD.sh",
+}
+
+
+def _daos_settings(machine: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the machine's DAOS section, or explain what is missing."""
+    section = cfg.get("daos")
+    if not isinstance(section, dict):
+        raise SubmissionError(
+            f"{machine!r} has no daos section in machines.yaml; DAOS runs are "
+            f"only possible where a pool has been allocated to the project"
+        )
+    resolved = dict(_DAOS_DEFAULTS)
+    resolved.update({k: v for k, v in section.items() if v is not None})
+    for key in ("pool", "container"):
+        value = resolved.get(key)
+        if not value or m.is_placeholder(value):
+            raise SubmissionError(
+                f"daos.{key} for {machine!r} is not configured (got {value!r}); "
+                f"set it in machines.local.yaml"
+            )
+    return resolved
+
+
+_INPUT_FILE_DIR_RE = re.compile(
+    r"^\s*sml_input_file_dir\s*=\s*['\"]([^'\"]*)['\"]", re.MULTILINE | re.IGNORECASE
+)
+
+
+def _daos_input_dir_problem(plan: SubmissionPlan, case_dir: str) -> str | None:
+    """Why the input cannot run from inside the container, if it cannot.
+
+    XGC resolves ``sml_input_file_dir`` relative to its working directory,
+    which under DAOS is the container mount, not the case directory on the
+    parallel filesystem. A relative path therefore fails only once the job is
+    running, after the allocation has been charged. XGC also truncates the
+    value at 65 characters (``character(len=65)`` in module.F90).
+    """
+    cfg = m.get_machine(plan.machine)
+    host = ssh.host_for(cfg)
+    result = ssh.run(host, ["cat", f"{case_dir.rstrip('/')}/input"])
+    if not result.ok:
+        return f"cannot read {case_dir}/input to check sml_input_file_dir"
+    match = _INPUT_FILE_DIR_RE.search(result.stdout)
+    value = match.group(1) if match else "./"
+    if not value.startswith("/"):
+        return (
+            f"sml_input_file_dir={value!r} is relative; under DAOS XGC runs in "
+            f"{plan.resources['daos']['work_dir']} where it cannot resolve. Use "
+            f"an absolute path on the parallel filesystem (at most 65 characters)"
+        )
+    if len(value) > 65:
+        return (
+            f"sml_input_file_dir is {len(value)} characters; XGC truncates it at 65"
+        )
+    return None
 
 
 def _write_provenance(
@@ -538,6 +635,15 @@ def submit(
                 "submitted": False,
                 "reason": f"input validation failed: {report.summary()}",
                 "dryrun": dryrun_report,
+                "plan": plan.to_dict(),
+            }
+
+    if case_dir and plan.resources.get("daos"):
+        problem = _daos_input_dir_problem(plan, case_dir)
+        if problem:
+            return {
+                "submitted": False,
+                "reason": f"DAOS input check failed: {problem}",
                 "plan": plan.to_dict(),
             }
 

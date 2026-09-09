@@ -57,6 +57,20 @@ export ZES_ENABLE_SYSMAN=1
 # switches it to FLAT, which breaks both).
 export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
 
+{% if daos %}
+# DAOS: XGC runs inside the project's POSIX container, mounted with dfuse on
+# every node of this job (the PBS epilogue unmounts it). The case directory
+# on flare keeps input, script, and these logs; the container keeps the run.
+module use {{ daos.modulefiles }}
+module load {{ daos.module }}
+{{ daos.launch }} {{ daos.pool }}:{{ daos.container }}
+mkdir -p "{{ daos.work_dir }}"
+for f in input petsc.rc adios2cfg.xml; do
+  [ -e "{{ run_dir }}/$f" ] && cp -f "{{ run_dir }}/$f" "{{ daos.work_dir }}/"
+done
+cd "{{ daos.work_dir }}"
+echo "daos_work_dir={{ daos.work_dir }} mounted=$(mount | grep -c dfuse)"
+{% endif %}
 echo "host=$(hostname) job=${PBS_JOBID:-none} nodes={{ nodes }} start=$(date -Is)"
 echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_rank=${OMP_NUM_THREADS}"
 
@@ -69,16 +83,26 @@ CPU_BIND="--cpu-bind=list:1-8,105-112:9-16,113-120:17-24,121-128:25-32,129-136:3
 GPU_BIND="--gpu-bind=list:0.0:0.1:1.0:1.1:2.0:2.1:3.0:3.1:4.0:4.1:5.0:5.1"
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
   ${CPU_BIND} ${GPU_BIND} --rlimits CORE -genvall \
+{% if daos %}
+  --no-vni --env LD_PRELOAD={{ daos.interception_library }} \
+{% endif %}
   "{{ xgc_exe }}"
 {% else %}
 # Generic rank count: depth binding plus the ALCF round-robin tile wrapper.
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
   --depth={{ cpus_per_task or 1 }} --cpu-bind depth --rlimits CORE -genvall \
+{% if daos %}
+  --no-vni {{ daos.tile_wrapper }} "{{ xgc_exe }}"
+{% else %}
   gpu_tile_compact.sh "{{ xgc_exe }}"
+{% endif %}
 {% endif %}
 {% else %}
 # no XGC executable specified -> hello-world verification mode
-mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} hostname
+mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }}{% if daos %} --no-vni{% endif %} hostname
+{% endif %}
+{% if daos %}
+echo "container listing of {{ daos.work_dir }}:"; ls -la "{{ daos.work_dir }}" | head -60
 {% endif %}
 
 echo "end=$(date -Is) rc=$?"
