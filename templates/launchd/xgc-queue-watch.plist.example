@@ -8,8 +8,20 @@
       launchctl kickstart -p gui/$UID/gov.pppl.xgc.queue-watch   # run once now
       launchctl bootout   gui/$UID/gov.pppl.xgc.queue-watch      # stop watching
 
-  StartInterval is seconds. launchd runs a missed interval once the machine
-  wakes, so a sleeping laptop delays a poll rather than skipping it.
+  No --machine argument: every machine in machines.yaml is polled, and the
+  ones that cannot be reached without authenticating are skipped with a reason
+  instead of failing the poll. Which machines those are changes through the
+  day, so it is not something to pin in this file.
+
+  StartInterval is seconds; 600 is the default cadence. launchd runs a missed
+  interval once the machine wakes, so a sleeping laptop delays a poll rather
+  than skipping it.
+
+  --rotate-log names the same file as StandardOutPath: once a week the last
+  poll of that week moves it to xgc-queue-watch.log.1, discarding the previous
+  archive, and the next poll creates a fresh file at the original path. Two
+  files, no separate rotation job, and nothing else trims them.
+  Add --changes-only to log transitions instead of the whole queue.
 
   Linux equivalent: a crontab line calling the same command.
 -->
@@ -22,13 +34,13 @@
     <string>&lt;repository_path&gt;/.venv/bin/python</string>
     <string>-m</string>
     <string>tools.queue_watch</string>
-    <string>--machine</string>
-    <string>perlmutter</string>
+    <string>--rotate-log</string>
+    <string>&lt;home&gt;/Library/Logs/xgc-queue-watch.log</string>
   </array>
   <key>WorkingDirectory</key>
   <string>&lt;repository_path&gt;</string>
   <key>StartInterval</key>
-  <integer>7200</integer>
+  <integer>600</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>ProcessType</key>

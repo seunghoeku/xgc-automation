@@ -8,6 +8,7 @@ normalized JobState vocabulary and never branches on scheduler type
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Sequence
 
@@ -98,6 +99,34 @@ class Scheduler:
         raise NotImplementedError(
             f"the {self.type_name or 'configured'} adapter cannot list a "
             "user's queue yet"
+        )
+
+    def user_queue_detail_argv(self, job_ids: Sequence[str]) -> list[str] | None:
+        """Optional second round trip that completes the phase-one job dicts.
+
+        Some schedulers describe a whole user queue in one command; others can
+        only be asked "which ids are mine?" first and "what are they doing?"
+        second. Returning ``None`` means phase one was already complete, so a
+        caller never needs to know which kind of scheduler it is talking to.
+        """
+        return None
+
+    def parse_user_queue_detail(self, stdout: str) -> dict[str, dict[str, Any]]:
+        """Map job id -> fields to merge onto the phase-one job dicts."""
+        return {}
+
+    def accounting_argv(self, job_id: str) -> list[str]:
+        """Query how a job that has left the queue actually ended."""
+        raise NotImplementedError(
+            f"the {self.type_name or 'configured'} adapter cannot look up a "
+            "finished job yet"
+        )
+
+    def parse_accounting(self, stdout: str) -> tuple[str, str | None]:
+        """Parse ``accounting_argv`` output into (normalized state, exit code)."""
+        raise NotImplementedError(
+            f"the {self.type_name or 'configured'} adapter cannot look up a "
+            "finished job yet"
         )
 
     def parse_exit_code(self, stdout: str) -> str | None:
@@ -216,6 +245,9 @@ class SlurmScheduler(Scheduler):
             job["state"] = _SLURM_STATES.get(
                 raw_state.split()[0].upper() if raw_state else "", UNKNOWN
             )
+            # Slurm ids are already short; the field exists so that reporting
+            # code can shorten a PBS id without knowing which scheduler it is.
+            job["display_id"] = job["job_id"]
             jobs.append(job)
         return jobs
 
@@ -323,6 +355,170 @@ class PBSScheduler(Scheduler):
         """Extract PBS ``Exit_status`` from extended qstat output."""
         match = re.search(r"^\s*Exit_status\s*=\s*(\S+)", stdout, re.MULTILINE)
         return match.group(1) if match else None
+
+    def accounting_argv(self, job_id: str) -> list[str]:
+        """Ask about a job that has already left the queue.
+
+        ``-x`` is what makes a finished job visible at all; without it qstat
+        reports the id as unknown the moment the job ends. PBS keeps finished
+        jobs only for a site-configured window, so a job that ended long ago
+        legitimately resolves to ``unknown``.
+        """
+        return ["qstat", "-x", "-f", job_id]
+
+    def parse_accounting(self, stdout: str) -> tuple[str, str | None]:
+        """Reuse the extended-status parser, which already reads Exit_status."""
+        return self.parse_status(stdout, 0), self.parse_exit_code(stdout)
+
+    def user_queue_argv(self, user: str) -> list[str]:
+        """Ask which job ids belong to ``user``, and nothing else.
+
+        ``qstat -u`` exists but only in the table format, which truncates the
+        job id at a fixed column width and marks the loss with ``*``. A
+        truncated id cannot be used as a snapshot key or passed back to qstat,
+        and widening the format with ``-w`` still truncates. ``qselect`` prints
+        whole ids, one per line, and prints nothing for a user with no jobs --
+        so the fragile column parsing disappears and ``user_queue_detail_argv``
+        asks for the fields in a format meant to be machine-read.
+        """
+        return ["qselect", "-u", user]
+
+    def parse_user_queue(self, stdout: str) -> list[dict[str, Any]]:
+        """Turn the id list into skeleton jobs for the detail pass to fill in.
+
+        States stay ``unknown`` here on purpose: qselect reports membership,
+        not status. ``queue_watch`` treats a missing detail pass as an error
+        rather than reporting these skeletons, so an unknown state never
+        reaches a report.
+        """
+        jobs: list[dict[str, Any]] = []
+        for line in stdout.strip().splitlines():
+            job_id = line.strip()
+            if not job_id or not job_id[0].isdigit():
+                continue
+            jobs.append(
+                {
+                    "job_id": job_id,
+                    # PBS ids carry the whole server FQDN; the sequence number
+                    # alone is what a human reads and what qstat accepts.
+                    "display_id": job_id.split(".", 1)[0],
+                    "name": "?",
+                    "state": UNKNOWN,
+                    "raw_state": "",
+                    "nodes": "?",
+                    "elapsed": "",
+                    "time_limit": "",
+                    "reason": "",
+                    "work_dir": "?",
+                }
+            )
+        return jobs
+
+    def user_queue_detail_argv(self, job_ids: Sequence[str]) -> list[str] | None:
+        """Describe the listed jobs in one JSON round trip.
+
+        ``-F json`` is ignored when combined with ``-u``, which is the other
+        reason the id list is fetched separately: given explicit ids, qstat
+        emits structured output and no column truncation.
+        """
+        if not job_ids:
+            return None
+        return ["qstat", "-f", "-F", "json", *job_ids]
+
+    def parse_user_queue_detail(self, stdout: str) -> dict[str, dict[str, Any]]:
+        """Map full job id -> normalized fields from ``qstat -f -F json``."""
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as error:
+            raise SchedulerError(
+                f"could not parse qstat JSON output: {error}"
+            ) from error
+        records = payload.get("Jobs")
+        if not isinstance(records, dict):
+            return {}
+
+        detail: dict[str, dict[str, Any]] = {}
+        for job_id, record in records.items():
+            if not isinstance(record, dict):
+                continue
+            resources = record.get("Resource_List") or {}
+            used = record.get("resources_used") or {}
+            raw_state = str(record.get("job_state") or "").strip()
+            detail[job_id] = {
+                "name": str(record.get("Job_Name") or "?"),
+                "raw_state": raw_state,
+                "state": _PBS_STATES.get(raw_state.upper(), UNKNOWN),
+                "nodes": str(resources.get("nodect") or "?"),
+                "time_limit": str(resources.get("walltime") or ""),
+                "elapsed": str(used.get("walltime") or ""),
+                "queue": str(record.get("queue") or ""),
+                "work_dir": self._work_dir(record),
+                "reason": self._queue_reason(record),
+            }
+        return detail
+
+    @staticmethod
+    def _work_dir(record: dict[str, Any]) -> str:
+        """Recover the submission directory from the job's output path.
+
+        PBS does not report ``PBS_O_WORKDIR`` in qstat output on every site,
+        but ``Output_Path`` is always set and defaults to the submission
+        directory, which for this toolchain's jobs is the run directory. The
+        value is ``host:/abs/path/name.oID``; the host prefix is dropped.
+        """
+        output_path = str(record.get("Output_Path") or "")
+        _, _, remainder = output_path.partition(":")
+        candidate = remainder or output_path
+        if not candidate.startswith("/"):
+            return str(record.get("jobdir") or "?")
+        parent, _, _ = candidate.rpartition("/")
+        return parent or "?"
+
+    # PBS hold letters. Reported verbatim by qstat as Hold_Types; "n" means no
+    # hold at all. A dependency hold is the normal state of a chained XGC
+    # restart, so it has to read as intentional rather than as a problem.
+    _HOLD_REASONS = {
+        "u": "user hold",
+        "o": "operator hold",
+        "s": "system hold",
+        "d": "dependency hold",
+        "p": "bad password hold",
+    }
+
+    @classmethod
+    def _queue_reason(cls, record: dict[str, Any]) -> str:
+        """Explain why a job is not running, in one short phrase."""
+        if str(record.get("job_state") or "").strip().upper() == "R":
+            return ""
+
+        bits: list[str] = []
+        holds = str(record.get("Hold_Types") or "n").strip().lower()
+        if holds and holds != "n":
+            bits.extend(
+                cls._HOLD_REASONS.get(letter, f"hold {letter}") for letter in holds
+            )
+        dependency = str(record.get("depend") or "").strip()
+        if dependency:
+            bits.append(cls._short_dependency(dependency))
+        if not bits:
+            # qstat's comment is the scheduler's own explanation, e.g.
+            # "Not Running: Insufficient amount of resource". It can also be a
+            # multi-line node list once the job starts, hence the truncation.
+            comment = str(record.get("comment") or "").strip()
+            if comment:
+                bits.append(comment.splitlines()[0][:120])
+        return "; ".join(bits)
+
+    @staticmethod
+    def _short_dependency(dependency: str) -> str:
+        """Shorten ``afterany:123.server@server`` to ``afterany:123``."""
+        kind, _, remainder = dependency.partition(":")
+        ids = [
+            entry.strip().split("@", 1)[0].split(".", 1)[0]
+            for entry in remainder.split(",")
+            if entry.strip()
+        ]
+        return f"{kind}:{','.join(ids)}" if ids else kind
 
     def cancel_argv(self, job_id: str) -> list[str]:
         return ["qdel", job_id]

@@ -23,7 +23,7 @@ entry points: `xgc-sim` (`tools/simcat_cli.py`), `xgc-remote-gui`
 | `remote_gui` | `tools/remote_gui.py` | Resolves a remote simulation, starts XGC-Devel's existing Monitor on the login node, tunnels it to localhost, and manages its lifecycle. |
 | `simulation_catalog` | `tools/simulation_catalog.py`, `tools/simcat_cli.py`, `tools/refresh.py` | One durable record per simulation (`kb/simulations/<id>.yaml`) linking number, runs, status, archive location, and human note. Searchable without an LLM via `xgc-sim`. |
 | `f_init` (optional) | `f_init/` | The non-Maxwellian `f_init` procedure: f0 snapshot to `f_init` files, dt=0 check runs, density adjustment. Own CLI `xgc-finit` and skill `f-init`; deliberately outside `tools/` and outside the everyday context. See `f_init/README.md`. |
-| `queue_watch` | `tools/queue_watch.py` | Asks a machine what the user currently has queued, diffs against the last snapshot, and reports only changes. Read-only, built for a local timer rather than a chat session. See `docs/queue-watch.md`. |
+| `queue_watch` | `tools/queue_watch.py` | Asks every reachable machine what the user currently has queued, lists it, and diffs against the last snapshot. Machines that cannot be reached without authenticating are skipped with a reason. Read-only, built for a local timer rather than a chat session. See `docs/queue-watch.md`. |
 
 ## Supporting modules
 
