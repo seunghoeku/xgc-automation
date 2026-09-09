@@ -17,7 +17,7 @@ to another node when one misbehaves, by editing one line in
 
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar flux polaris1 frontier
+Host stellar flux polaris1 aurora frontier
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
@@ -34,6 +34,10 @@ Host flux
 
 Host polaris1
     HostName polaris-login-01.alcf.anl.gov
+    User <alcf_username>
+
+Host aurora
+    HostName aurora.alcf.anl.gov
     User <alcf_username>
 
 Host perlmutter
@@ -145,6 +149,10 @@ ssh -O exit stellar
 - `stellar.princeton.edu` is reachable externally.
 - `polaris` was reached manually in 2026-07; the automation still requires
   the user-created MFA session and reuses its ControlMaster.
+- `aurora` (aurora.alcf.anl.gov, round-robin over the login nodes) uses the
+  same ALCF MobilePASS+ MFA and the same ControlMaster contract as Polaris.
+  Its filesystems are separate from Polaris (`/lus/flare/projects` vs
+  `/grand`); nothing is shared between the two ALCF machines.
 - Perlmutter access was verified in 2026-08 with the `perlmutter` alias and
   the NERSC key/certificate (original project's account and scratch, now
   bound via `machines.local.yaml`). CPU builds, login-node dryruns, Slurm

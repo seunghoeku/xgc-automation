@@ -93,6 +93,67 @@ polaris:
     gpus_per_node: 4
     walltime: "01:00:00"
 
+aurora:
+  center: alcf
+  host: aurora.alcf.anl.gov
+  user: <alcf_username>
+  auth:
+    method: ssh_controlmaster   # MFA (MobilePASS+): human authenticates once, socket reused
+    ssh_config_host: <ssh_alias>  # an Aurora login ControlMaster alias
+    mfa: true
+  scheduler:
+    type: pbs
+    submit: qsub
+    status: qstat
+    cancel: qdel
+    submit_tpl: templates/aurora.pbs.j2
+    # pbsnodes advertises resources_available.system=aurora, but qsub rejects
+    # it inside select= ("Resource invalid in select specification", 2026-09-09).
+    # Kept for the PBS adapter's completeness check; the template does not emit it.
+    system: aurora
+    # Lustre "flare" (/lus/flare/projects) is the only filesystem jobs should
+    # run from; home is a separate Lustre (gecko). daos_user is opt-in.
+    filesystems: home:flare
+    verified:                   # live XGC round trip 2026-09-09 (2 nodes, debug, 20 steps)
+      submit: true
+      status: true
+      output: true
+      cancel: false
+      job_id: 8814507.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov
+  paths:
+    scratch: <project_path>          # /lus/flare/projects/<project>/<user>
+    run_root: <project_path>/xgc-runs
+  xgc:
+    # Intel oneAPI (icpx/ifx) + SYCL build; see the XGC-Devel quickstart
+    # (cmake_configs/aurora.sh, modules_and_env/aurora.sh). Personal builds
+    # belong in machines.local.yaml.
+    exe: null
+    xgca_exe: null
+    src: null
+    build: null
+    build_type: RelWithDebInfo
+    env_script: null
+    # XGC's Aurora cmake config compiles with -DUSE_GPU_AWARE_MPI=On, so the
+    # runtime must keep MPIR_CVAR_ENABLE_GPU=1. Set false only for a binary
+    # built without it.
+    gpu_aware_mpi: true
+    modules: []
+  defaults:
+    account: <alcf_project>
+    # Aurora queues (docs.alcf.anl.gov/aurora/running-jobs-aurora):
+    #   debug          1-2 nodes,    <= 1 h, one job per user
+    #   debug-scaling  2-256 nodes,  <= 1 h, one job per user
+    #   prod           >= 256 nodes, <= 24 h (routes to small/medium/large)
+    #   capacity       1-16 nodes,   <= 7 days, 2 running / 5 queued per user
+    # A small XGC test fits debug; multi-day production below 256 nodes must
+    # use capacity, because prod rejects anything smaller.
+    queue: debug
+    nodes: 1
+    ntasks_per_node: 12          # one MPI rank per GPU tile (6 PVC x 2 tiles)
+    cpus_per_task: 16            # 8 physical cores + hyperthreads per rank
+    gpus_per_node: 6
+    walltime: "00:30:00"
+
 stellar:
   center: princeton
   host: stellar.princeton.edu

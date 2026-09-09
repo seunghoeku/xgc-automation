@@ -296,6 +296,95 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertEqual(result["source"], "pbs")
 
 
+class AuroraPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = {
+            "scheduler": {
+                "type": "pbs",
+                "submit_tpl": "templates/aurora.pbs.j2",
+                "system": "aurora",
+                "filesystems": "home:flare",
+            },
+            "paths": {"run_root": "/lus/flare/projects/SomeProject/alice"},
+            "xgc": {
+                "exe": "/lus/flare/projects/SomeProject/alice/XGC-Devel/build/bin/xgc",
+                "gpu_aware_mpi": True,
+                "env_script": (
+                    "/lus/flare/projects/SomeProject/alice/XGC-Devel/"
+                    "quickstart/modules_and_env/aurora.sh"
+                ),
+                "modules": [],
+            },
+            "defaults": {
+                "account": "SomeProject",
+                "queue": "debug",
+                "nodes": 1,
+                "ntasks_per_node": 12,
+                "cpus_per_task": 16,
+                "gpus_per_node": 6,
+                "walltime": "00:30:00",
+            },
+        }
+
+    def test_aurora_template_binds_one_rank_per_gpu_tile(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("aurora", run_id="run-aurora-test")
+
+        directives = {
+            line for line in plan.script.splitlines() if line.startswith("#PBS")
+        }
+        # qsub on Aurora rejects a system= chunk resource (unlike Polaris).
+        self.assertIn("#PBS -l select=1", directives)
+        self.assertFalse(any("system=" in line for line in directives))
+        self.assertIn("#PBS -l place=scatter", directives)
+        self.assertIn("#PBS -l filesystems=home:flare", directives)
+        self.assertIn("#PBS -q debug", directives)
+        self.assertIn("#PBS -A SomeProject", directives)
+        self.assertIn("mpiexec --np 12 -ppn 12", plan.script)
+        # Twelve explicit CPU groups and twelve GPU tiles, one per rank.
+        self.assertIn("--cpu-bind=list:1-8,105-112:", plan.script)
+        self.assertIn("--gpu-bind=list:0.0:0.1:1.0:1.1:2.0:2.1:3.0:3.1:4.0:4.1:5.0:5.1", plan.script)
+        self.assertIn("export MPIR_CVAR_ENABLE_GPU=1", plan.script)
+        self.assertIn("ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE", plan.script)
+        self.assertNotIn("CUDA_VISIBLE_DEVICES", plan.script)
+        self.assertNotIn("MPICH_GPU_SUPPORT_ENABLED", plan.script)
+        self.assertIn("pbs-${PBS_JOBID}.out", plan.script)
+        self.assertEqual(plan.resources["total_ranks"], 12)
+        self.assertEqual(plan.resources["node_hours_max"], 0.5)
+
+    def test_aurora_other_rank_counts_use_tile_compact_wrapper(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "aurora", run_id="run-aurora-6", ntasks_per_node=6
+            )
+
+        launch = [
+            line for line in plan.script.splitlines() if not line.startswith("#")
+        ]
+        self.assertIn("mpiexec --np 6 -ppn 6 \\", launch)
+        self.assertTrue(any("gpu_tile_compact.sh" in line for line in launch))
+        self.assertFalse(any("--gpu-bind=list" in line for line in launch))
+
+    def test_aurora_disables_gpu_aware_mpi_when_configured(self) -> None:
+        self.cfg["xgc"]["gpu_aware_mpi"] = False
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("aurora", run_id="run-aurora-nogpu")
+
+        self.assertIn("export MPIR_CVAR_ENABLE_GPU=0", plan.script)
+
+    def test_aurora_hello_world_uses_plain_mpiexec(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "aurora", run_id="run-aurora-hello", hello_world=True
+            )
+
+        launch = [
+            line for line in plan.script.splitlines() if not line.startswith("#")
+        ]
+        self.assertIn("mpiexec --np 12 -ppn 12 hostname", launch)
+        self.assertFalse(any("gpu-bind" in line for line in launch))
+
+
 class PerlmutterPlanTests(unittest.TestCase):
     def setUp(self) -> None:
         self.cfg = {

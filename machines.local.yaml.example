@@ -63,6 +63,21 @@ polaris:
     python: /grand/YourProject/alice/venvs/xgc-gui/bin/python3
     # env_script: /grand/YourProject/alice/env/xgc-gui.sh
 
+aurora:
+  user: alice
+  auth:
+    ssh_config_host: aurora          # your Aurora ControlMaster alias
+  paths:
+    scratch: /lus/flare/projects/YourProject/alice
+    run_root: /lus/flare/projects/YourProject/alice/xgc-runs
+  xgc:
+    # Your own oneAPI/SYCL build (XGC-Devel quickstart, cmake_configs/aurora.sh).
+    exe: /lus/flare/projects/YourProject/alice/XGC-Devel/build/bin/xgc
+    src: /lus/flare/projects/YourProject/alice/XGC-Devel
+    env_script: /lus/flare/projects/YourProject/alice/XGC-Devel/quickstart/modules_and_env/aurora.sh
+  defaults:
+    account: YourProject             # ALCF allocation/project name
+
 stellar:
   user: alice
   auth:

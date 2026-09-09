@@ -79,6 +79,7 @@ Do not renumber them.
 |---|---|---|---|---|
 | Perlmutter | NERSC | Slurm (`sbatch/squeue/scancel`) | sshproxy → 24h SSH key | `$PSCRATCH` |
 | Polaris | ALCF | PBS (`qsub/qstat/qdel`) | ssh tunnel/port forwarding + MFA | `/grand/<project>` |
+| Aurora | ALCF | PBS (`qsub/qstat/qdel`) | ControlMaster + MFA | `/lus/flare/projects/<project>` (Lustre; jobs must run here) |
 
 `machines.yaml` (committed, machine-universal facts) plus the gitignored
 `machines.local.yaml` overlay (per-user bindings) and the `hpc_runner` tool
@@ -109,7 +110,7 @@ executable. A `hpc_runner.build(machine)` hook is possible later.
 | Remote reduction, analysis placement rules | `docs/data-analysis.md` |
 | SSH aliases, ControlMaster, sshproxy, multiplexing | `docs/ssh-setup.md` |
 | First-time setup, overlay files, absent personal data | `docs/setup-new-user.md` |
-| Building XGC per machine | `docs/build-stellar.md`, `docs/build-polaris.md` |
+| Building XGC per machine | `docs/build-stellar.md`, `docs/build-polaris.md`, `docs/build-aurora.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |
