@@ -738,7 +738,12 @@ def submit_job(
 
     When case_dir is given, `xgc --dryrun` validates the input first and a
     rejected input blocks submission. Always pass case_dir for real XGC runs.
-    Do not set skip_dryrun unless the user explicitly asks for it.
+    Do not set skip_dryrun unless the user explicitly asks for it. On machines
+    whose login nodes cannot run the dryrun (Polaris, Aurora: dryrun.login_node
+    false) the job is submitted first and, if it is still queued after a short
+    grace period, a 1-node debug job runs the dryrun in parallel; its verdict
+    appears on the next job_status / refresh as "dryrun_parallel". skip_dryrun
+    is no longer needed there.
 
     On success, writes a provenance record below ``runs/master/`` or
     ``runs/test/``. Registered simulations default to master; unregistered and

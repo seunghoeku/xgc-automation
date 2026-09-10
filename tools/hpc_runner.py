@@ -25,6 +25,7 @@ import hashlib
 import json
 import re
 import socket
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -146,6 +147,7 @@ def prepare_submission(
     hello_world: bool = False,
     run_dir: str | None = None,
     daos: bool = False,
+    xgc_args: str | None = None,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -160,6 +162,8 @@ def prepare_submission(
         xgc_commit: source commit corresponding to an executable override.
         provenance_class: local record class, ``master`` or ``test``. Registered
             simulations default to master; other jobs default to test.
+        xgc_args: extra command-line arguments for the executable, e.g.
+            ``--dryrun -n_ranks 128`` for a compute-node dryrun job.
         daos: run XGC inside the machine's DAOS POSIX container (Aurora). The
             case directory on the parallel filesystem keeps the input, the
             script, and the logs; XGC itself executes in
@@ -325,6 +329,7 @@ def prepare_submission(
         modules=xgc_cfg.get("modules") or [],
         env_script=resolved_env_script,
         xgc_exe=exe,
+        xgc_args=f" {xgc_args.strip()}" if xgc_args else "",
         daos=daos_cfg,
         generated_at=_now().isoformat(),
         provenance_id=run_id,
@@ -350,6 +355,7 @@ def prepare_submission(
         "env_script": resolved_env_script,
         "xgc_commit": resolved_xgc_commit,
         "daos": daos_cfg,
+        "xgc_args": xgc_args,
     }
 
     return SubmissionPlan(
@@ -764,6 +770,7 @@ def _link_catalog(record: dict[str, Any], meta_path: Path) -> dict[str, Any] | N
                 "referenced_inputs": record.get("referenced_inputs"),
                 "build_environment": record.get("build_environment"),
                 "input_backup": record.get("input_backup"),
+                "dryrun_parallel": record.get("dryrun_parallel"),
             },
             status="submitted",
         )
@@ -784,6 +791,214 @@ def _xgc_provenance(plan: SubmissionPlan) -> dict[str, Any]:
     }
 
 
+def dryrun_settings(cfg: dict[str, Any]) -> dict[str, Any]:
+    """How this machine validates an input.
+
+    ``login_node: true`` (the default) means ``xgc --dryrun`` runs on the login
+    node before submission and a rejection blocks the job. ``login_node:
+    false`` (Polaris, Aurora: the CUDA/oneAPI build cannot start without a
+    device or launcher) means the job is submitted first and the dryrun runs
+    as a parallel 1-node job only when the production job is still waiting
+    after ``start_grace_seconds``.
+    """
+    raw = cfg.get("dryrun") or {}
+    return {
+        "login_node": bool(raw.get("login_node", True)),
+        "queue": raw.get("queue"),
+        "nodes": int(raw.get("nodes", 1)),
+        "walltime": str(raw.get("walltime", "00:15:00")),
+        "start_grace_seconds": float(raw.get("start_grace_seconds", 20)),
+    }
+
+
+def _start_parallel_dryrun(
+    plan: SubmissionPlan,
+    cfg: dict[str, Any],
+    scheduler: sched.Scheduler,
+    host: str,
+    job_id: str,
+    case_dir: str,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate the input beside a production job that cannot be dryrun first.
+
+    Waits ``start_grace_seconds`` and asks the scheduler about the production
+    job. If it is already running, the run itself is the validation and no
+    second job is spent. Otherwise a 1-node job in the debug queue runs
+    ``xgc --dryrun -n_ranks <production ranks>`` in the same case directory;
+    its stdout is read and parsed on the next status check
+    (``maybe_capture_parallel_dryrun``). Never raises: the production job is
+    already queued, so a problem here is reported, not thrown.
+    """
+    grace = settings["start_grace_seconds"]
+    base: dict[str, Any] = {
+        "mode": "parallel",
+        "reason": f"xgc --dryrun cannot run on a {plan.machine} login node",
+        "grace_seconds": grace,
+    }
+    try:
+        if grace > 0:
+            time.sleep(grace)
+        probe = ssh.run(host, scheduler.status_argv(job_id))
+        state = scheduler.parse_status(probe.stdout, probe.returncode)
+    except ssh.SSHError as exc:
+        state = sched.UNKNOWN
+        base["probe_error"] = str(exc)
+    base["main_job_state_after_grace"] = state
+    if state == sched.RUNNING or state in sched.TERMINAL_STATES:
+        base.update(
+            started=False,
+            detail=(
+                "the production job started within the grace period; "
+                "the run itself validates the input"
+            ),
+        )
+        return base
+
+    try:
+        dry_plan = prepare_submission(
+            plan.machine,
+            run_id=f"{plan.run_id}-dryrun",
+            job_name=f"{plan.job_name}-dryrun",
+            nodes=settings["nodes"],
+            ntasks_per_node=1,
+            cpus_per_task=plan.resources.get("cpus_per_task"),
+            gpus_per_node=plan.resources.get("gpus_per_node"),
+            walltime=settings["walltime"],
+            account=plan.resources.get("account"),
+            partition=settings["queue"] or plan.resources.get("partition"),
+            xgc_exe=plan.resources.get("executable"),
+            env_script=plan.resources.get("env_script"),
+            xgc_commit=plan.resources.get("xgc_commit"),
+            run_dir=case_dir,
+            provenance_class="test",
+            daos=bool(plan.resources.get("daos")),
+            xgc_args=f"--dryrun -n_ranks {plan.resources.get('total_ranks')}",
+        )
+        # The production script owns <case_dir>/submit.sh; keep the dryrun's
+        # script beside it under its own name.
+        dry_plan.remote_script_path = f"{case_dir.rstrip('/')}/dryrun-{plan.run_id}.sh"
+        ssh.write_file(host, dry_plan.remote_script_path, dry_plan.script)
+        ssh.run(host, ["chmod", "+x", dry_plan.remote_script_path], check=True)
+        submitted = ssh.run(
+            host,
+            scheduler.submit_argv(dry_plan.remote_script_path),
+            cwd=case_dir,
+            check=True,
+        )
+        dry_job = scheduler.parse_job_id(submitted.stdout)
+    except (SubmissionError, sched.SchedulerError, ssh.SSHError) as exc:
+        base.update(started=False, error=str(exc))
+        return base
+
+    base.update(
+        started=True,
+        job_id=dry_job,
+        script=dry_plan.remote_script_path,
+        stdout=f"{case_dir.rstrip('/')}/pbs-{dry_job}.out",
+        stderr=f"{case_dir.rstrip('/')}/pbs-{dry_job}.err",
+        n_ranks=plan.resources.get("total_ranks"),
+        queue=dry_plan.resources.get("partition"),
+        nodes=settings["nodes"],
+        submitted_at=_now().isoformat(),
+        report=None,
+    )
+    return base
+
+
+def maybe_capture_parallel_dryrun(
+    machine: str, simulation_id: str, run_id: str
+) -> dict[str, Any] | None:
+    """Attach the parallel dryrun's verdict to its run, once it has finished.
+
+    Called from status checks and refresh, like ``maybe_capture_build``. A
+    rejection cannot block a job that is already queued, so it is reported as
+    a warning for the human to act on (cancel and fix) rather than acted upon.
+    """
+    try:
+        record = catalog.read_record(simulation_id)
+    except catalog.SimulationCatalogError:
+        return None
+    run_entry = next(
+        (
+            r
+            for r in record.get("runs") or []
+            if isinstance(r, dict) and r.get("run_id") == run_id
+        ),
+        None,
+    )
+    if run_entry is None:
+        return None
+    parallel = run_entry.get("dryrun_parallel")
+    if (
+        not isinstance(parallel, dict)
+        or not parallel.get("started")
+        or parallel.get("report")
+    ):
+        return None
+
+    cfg = m.get_machine(machine)
+    scheduler = sched.get_scheduler(cfg)
+    host = ssh.host_for(cfg)
+    try:
+        probe = ssh.run(host, scheduler.status_argv(str(parallel["job_id"])))
+        state = scheduler.parse_status(probe.stdout, probe.returncode)
+        if state not in sched.TERMINAL_STATES:
+            return {
+                "captured": False,
+                "reason": f"dryrun job {parallel['job_id']} is {state}",
+                "retry": True,
+            }
+        exit_code = scheduler.parse_exit_code(probe.stdout)
+        out = ssh.run(host, ["cat", parallel["stdout"]])
+        err = ssh.run(host, ["cat", parallel["stderr"]]) if parallel.get("stderr") else None
+    except ssh.SSHError as exc:
+        return {"captured": False, "reason": str(exc), "retry": True}
+    if not out.ok:
+        return {"captured": False, "reason": f"cannot read {parallel['stdout']}", "retry": True}
+    try:
+        rc = int(exit_code) if exit_code is not None else 0
+    except ValueError:
+        rc = 1
+    text = out.stdout + ("\n" + err.stdout if err is not None and err.ok else "")
+    report = dryrun.parse_dryrun_output(text, rc)
+    payload = report.to_dict()
+    payload["job_state"] = state
+    payload["checked_at"] = _now().isoformat()
+    parallel = dict(parallel)
+    parallel["report"] = payload
+    try:
+        catalog.set_run_field(simulation_id, run_id, "dryrun_parallel", parallel)
+    except catalog.SimulationCatalogError as exc:
+        return {"captured": False, "reason": str(exc)}
+    _store_provenance_field(run_id, "dryrun_parallel", parallel)
+    result: dict[str, Any] = {"captured": True, "summary": report.summary(), "ok": report.ok}
+    if report.blocking:
+        result["warning"] = (
+            f"the parallel dryrun REJECTED this input ({report.summary()}); the production "
+            f"job {run_entry.get('job_id')} will fail or has failed on the same input -- "
+            "consider cancelling it and fixing the input before resubmitting"
+        )
+    return result
+
+
+def _store_provenance_field(run_id: str, key: str, value: Any) -> None:
+    """Add one field to a run's provenance.json, when the record exists locally."""
+    try:
+        found = prov.find_record(RUNS_DIR, run_id)
+    except prov.ProvenanceError:
+        return
+    if not found:
+        return
+    _cls, path = found
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    record[key] = value
+    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+
 def submit(
     machine: str,
     *,
@@ -802,6 +1017,11 @@ def submit(
     rejected input blocks submission. It costs seconds and no allocation, so it
     is far cheaper than discovering a bad namelist after queueing. skip_dryrun
     forces past it; a caller doing that should have a reason.
+
+    On machines whose login nodes cannot run the dryrun (``dryrun.login_node:
+    false`` -- Polaris, Aurora) the job is submitted first; if it is still
+    queued after a short grace period a 1-node debug job runs the dryrun in
+    parallel and its verdict is attached on the next status check.
     """
     if plan is None:
         # A real XGC run must execute in its case directory; default to it.
@@ -815,8 +1035,15 @@ def submit(
             "plan": plan.to_dict(),
         }
 
+    cfg = m.get_machine(plan.machine)
+    settings = dryrun_settings(cfg)
     dryrun_report: dict[str, Any] | None = None
-    if case_dir and not skip_dryrun:
+    parallel_dryrun: dict[str, Any] | None = None
+    if case_dir and not skip_dryrun and not settings["login_node"]:
+        # No login-node dryrun on this machine: submit first, validate beside
+        # the job if it waits in the queue (_start_parallel_dryrun).
+        parallel_dryrun = {"mode": "parallel", "started": False, "pending": True}
+    elif case_dir and not skip_dryrun:
         # Validate with the same executable the job will run, not the
         # machine default, which may be unset or a different build.
         report = dryrun.run_dryrun(
@@ -844,7 +1071,6 @@ def submit(
                 "plan": plan.to_dict(),
             }
 
-    cfg = m.get_machine(plan.machine)
     scheduler = sched.get_scheduler(cfg)
     host = ssh.host_for(cfg)
 
@@ -859,6 +1085,11 @@ def submit(
         check=True,
     )
     job_id = scheduler.parse_job_id(result.stdout)
+
+    if parallel_dryrun is not None and case_dir:
+        parallel_dryrun = _start_parallel_dryrun(
+            plan, cfg, scheduler, host, job_id, case_dir, settings
+        )
 
     captured = _capture_input(plan.machine, case_dir)
     input_provenance = _input_provenance(
@@ -893,6 +1124,7 @@ def submit(
         "build_environment": reproduction["build_environment"],
         "input_backup": input_backup,
         "dryrun": dryrun_report,
+        "dryrun_parallel": parallel_dryrun,
     }
     if reproduction.get("error"):
         record["reproduction_error"] = reproduction["error"]
@@ -915,6 +1147,7 @@ def submit(
         "input_backup": input_backup,
         "notebook": notebook,
         "dryrun": dryrun_report,
+        "dryrun_parallel": parallel_dryrun,
     }
 
 
@@ -953,6 +1186,11 @@ def status(machine: str, job_id: str) -> dict[str, Any]:
     catalog_update = _record_observed_state(machine, job_id, out)
     if catalog_update is not None:
         out["catalog"] = catalog_update
+    linked = _find_run_for_job(machine, job_id)
+    if linked:
+        dry = maybe_capture_parallel_dryrun(machine, *linked)
+        if dry is not None:
+            out["dryrun_parallel"] = dry
     return out
 
 

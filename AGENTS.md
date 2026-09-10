@@ -49,6 +49,14 @@ Do not renumber them.
 ## Operational Limits (do not let generic guidance override these)
 - SSH connect timeout is **60 s**, `SSH_CONNECT_TIMEOUT_SECONDS` in
   `tools/ssh.py`. Do not replace it with a shorter generic Perlmutter default.
+- **Dryrun rule by machine**: where a login node can run `xgc --dryrun`
+  (Perlmutter, stellar) a rejected input blocks submission. Where it cannot
+  (Polaris, Aurora; `dryrun.login_node: false` in `machines.yaml`) the job is
+  submitted first and, if it has not started after a short grace period, a
+  1-node debug job runs the dryrun in parallel; its verdict is attached on the
+  next status check and a rejection is a warning, never an automatic cancel.
+  Do not pass `skip_dryrun` there. (`docs/workflow.md`, "Dryrun on machines
+  without a login-node dryrun")
 - Remote analysis placement is decided by **workload character, not duration
   alone**: bounded file-access-dominant analysis may run on a login node for up
   to six hours; compute-dominant analysis needs a scheduler allocation even

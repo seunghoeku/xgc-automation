@@ -581,6 +581,7 @@ def attach_run(
         "state": run.get("state"),
         "exit_code": run.get("exit_code"),
         "input": run.get("input"),
+        "dryrun_parallel": run.get("dryrun_parallel"),
     }
 
     runs = list(record.get("runs") or [])
@@ -696,6 +697,32 @@ def update_run_state(
         )
     record["runs"] = runs
     record["status"] = derive_status(record)
+    write_record(record, catalog_dir=catalog_dir)
+    return record
+
+
+def set_run_field(
+    record_id: str,
+    run_id: str,
+    key: str,
+    value: Any,
+    *,
+    catalog_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Set one field on one linked run (e.g. the parallel dryrun's verdict)."""
+    record = read_record(record_id, catalog_dir=catalog_dir)
+    runs = list(record.get("runs") or [])
+    for index, existing in enumerate(runs):
+        if isinstance(existing, dict) and existing.get("run_id") == run_id:
+            updated = dict(existing)
+            updated[key] = value
+            runs[index] = updated
+            break
+    else:
+        raise SimulationCatalogError(
+            f"run {run_id!r} is not linked to simulation {record_id!r}"
+        )
+    record["runs"] = runs
     write_record(record, catalog_dir=catalog_dir)
     return record
 

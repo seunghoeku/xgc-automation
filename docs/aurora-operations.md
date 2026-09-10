@@ -58,16 +58,20 @@ plan_input(...) / write_input(..., confirm=True)      # edits with a diff
 plan_job("aurora", simulation_id="n65Xau", nodes=8, walltime="06:00:00",
          partition="capacity", daos=True)             # script + node-hours
 submit_job("aurora", simulation_id="n65Xau", case_dir=<dir>,
-           partition="capacity", daos=True, skip_dryrun=True, confirm=True)
+           partition="capacity", daos=True, confirm=True)
 job_status / job_output / xgc-sim refresh             # as on Polaris
 ```
 
 Notes that differ from Polaris:
 
-- `skip_dryrun=True` is required. `xgc --dryrun` cannot run on an Aurora
-  login node (no PALS launcher, no GPU platform: it dies in `MPI_Init`). The
-  first minute of `pbs-<jobid>.out` is the validation; a bad namelist is
-  rejected there before particle loading.
+- No login-node dryrun: `xgc --dryrun` cannot run on an Aurora login node (no
+  PALS launcher, no GPU platform: it dies in `MPI_Init`). `submit_job` therefore
+  submits the production job first and, if it is still queued after 20 s, runs
+  the dryrun as a parallel 1-node `debug` job (`dryrun:` in `machines.yaml`);
+  the verdict appears on the next `job_status` / `xgc-sim refresh` as
+  `dryrun_parallel`. `skip_dryrun=True` is no longer needed. The first minute
+  of `pbs-<jobid>.out` remains a second check: a bad namelist is rejected there
+  before particle loading.
 - Omit `daos=True` to run on flare. The rendered script is identical except
   for the DAOS block.
 - The rendered script (`submit.sh`) and the logs `pbs-<jobid>.out/.err` are

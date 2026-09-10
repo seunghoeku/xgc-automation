@@ -1044,3 +1044,198 @@ class InputBackupTests(unittest.TestCase):
                 result = hr._backup_input(None, "text")
             self.assertFalse(result["written"])
             self.assertEqual(list(Path(tmp).iterdir()), [])
+
+
+class ParallelDryrunTests(unittest.TestCase):
+    """Machines without a login-node dryrun validate beside the queued job."""
+
+    def setUp(self) -> None:
+        self.cfg = {
+            "scheduler": {
+                "type": "pbs",
+                "submit_tpl": "templates/polaris.pbs.j2",
+                "system": "polaris",
+                "filesystems": "home:grand",
+            },
+            "paths": {"run_root": "/grand/P/alice/xgc-runs"},
+            "xgc": {
+                "exe": "/grand/P/alice/XGC-Devel/bin/bin/xgc",
+                "gpu_aware_mpi": False,
+                "env_script": "/grand/P/alice/XGC-Devel/quickstart/modules_and_env/polaris.sh",
+                "modules": [],
+                "verified": {"commit": "abc123"},
+            },
+            "dryrun": {"login_node": False, "queue": "debug", "nodes": 1,
+                       "walltime": "00:15:00", "start_grace_seconds": 0},
+            "defaults": {"account": "P", "queue": "prod", "nodes": 32, "ntasks_per_node": 4,
+                         "cpus_per_task": 16, "gpus_per_node": 4, "walltime": "06:00:00"},
+        }
+        self.case = "/grand/P/alice/xgc-runs/n660po_case"
+        self.submitted: list[str] = []
+        self.written: dict[str, str] = {}
+
+    def _remote_factory(self, main_state: str):
+        def _remote(host, argv, **kwargs):
+            if argv[0] == "qsub":
+                self.submitted.append(argv[-1])
+                return CommandResult(0, f"{7700000 + len(self.submitted)}.polaris-pbs-01", "", "qsub")
+            if argv[0] == "qstat":
+                return CommandResult(0, f"Job Id: x\n    job_state = {main_state}\n", "", "qstat")
+            if argv[0] == "cat":
+                return CommandResult(0, "&sml_param\nsml_mstep=10\n/\n", "", "cat")
+            return CommandResult(0, "", "", " ".join(map(str, argv)))
+        return _remote
+
+    def _submit(self, main_state: str):
+        def _write(host, path, text):
+            self.written[path] = text
+        with (
+            patch.object(hr, "RUNS_DIR", Path(self.tmp.name) / "runs"),
+            patch.object(hr.m, "get_machine", return_value=self.cfg),
+            patch.object(hr.ssh, "host_for", return_value="polaris1"),
+            patch.object(hr.ssh, "mkdir_p"),
+            patch.object(hr.ssh, "write_file", side_effect=_write),
+            patch.object(hr.ssh, "run", side_effect=self._remote_factory(main_state)),
+            patch.object(hr.dryrun, "run_dryrun") as login_dryrun,
+            patch.object(hr.time, "sleep") as sleep,
+        ):
+            result = hr.submit("polaris", confirm=True, case_dir=self.case, run_dir=self.case)
+        login_dryrun.assert_not_called()
+        return result, sleep
+
+    def test_queued_job_gets_a_parallel_debug_dryrun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("Q")
+            self.assertTrue(result["submitted"])
+            self.assertIsNone(result["dryrun"])
+            parallel = result["dryrun_parallel"]
+            self.assertTrue(parallel["started"])
+            self.assertEqual(parallel["main_job_state_after_grace"], "pending")
+            self.assertEqual(parallel["job_id"], "7700002.polaris-pbs-01")
+            self.assertEqual(parallel["n_ranks"], 128)
+            self.assertEqual(parallel["queue"], "debug")
+            self.assertEqual(parallel["stdout"], f"{self.case}/pbs-7700002.polaris-pbs-01.out")
+            # Two scripts: the production one and the dryrun one, side by side.
+            self.assertEqual(self.submitted, [f"{self.case}/submit.sh", parallel["script"]])
+            self.assertTrue(parallel["script"].startswith(f"{self.case}/dryrun-"))
+            script = self.written[parallel["script"]]
+            self.assertIn("#PBS -q debug", script)
+            self.assertIn("#PBS -l select=1:system=polaris", script)
+            self.assertIn("#PBS -l walltime=00:15:00", script)
+            self.assertIn('/grand/P/alice/XGC-Devel/bin/bin/xgc" --dryrun -n_ranks 128', script)
+            self.assertIn("mpiexec --np 1 -ppn 1", script)
+            provenance = json.loads(
+                (Path(tmp) / "runs" / "test" / result["run_id"] / "provenance.json").read_text()
+            )
+            self.assertEqual(provenance["dryrun_parallel"]["job_id"], "7700002.polaris-pbs-01")
+            self.assertIsNone(provenance["dryrun_parallel"]["report"])
+
+    def test_job_that_starts_at_once_needs_no_dryrun_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("R")
+            parallel = result["dryrun_parallel"]
+            self.assertFalse(parallel["started"])
+            self.assertEqual(parallel["main_job_state_after_grace"], "running")
+            self.assertEqual(self.submitted, [f"{self.case}/submit.sh"])
+
+    def test_grace_period_is_honoured(self) -> None:
+        self.cfg["dryrun"]["start_grace_seconds"] = 20
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            _result, sleep = self._submit("R")
+        sleep.assert_called_once_with(20.0)
+
+    def test_login_node_machines_keep_the_blocking_dryrun(self) -> None:
+        settings = hr.dryrun_settings({"paths": {}})
+        self.assertTrue(settings["login_node"])
+        self.assertEqual(settings["start_grace_seconds"], 20.0)
+
+    def test_verdict_is_attached_when_the_dryrun_job_finishes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(hr.catalog, "CATALOG_DIR", root / "simulations"), \
+                 patch.object(hr, "RUNS_DIR", root / "runs"):
+                hr.catalog.create_record("n660po", machines=["polaris"], short_name="case",
+                                         directory_name="n660po_case")
+                hr.catalog.attach_run("n660po", {
+                    "run_id": "run-1", "machine": "polaris", "job_id": "7700001.polaris-pbs-01",
+                    "remote_run_dir": self.case,
+                    "dryrun_parallel": {"mode": "parallel", "started": True,
+                                        "job_id": "7700002.polaris-pbs-01",
+                                        "stdout": f"{self.case}/pbs-7700002.polaris-pbs-01.out",
+                                        "stderr": f"{self.case}/pbs-7700002.polaris-pbs-01.err",
+                                        "report": None},
+                })
+
+                def _remote(host, argv, **kwargs):
+                    if argv[0] == "qstat":
+                        return CommandResult(0, "Job Id: x\n    job_state = F\n    Exit_status = 0\n", "", "qstat")
+                    if argv[0] == "cat" and argv[1].endswith(".out"):
+                        return CommandResult(0, "Reading input\nDryrun completed\n", "", "cat")
+                    return CommandResult(0, "", "", "cat")
+
+                with patch.object(hr.m, "get_machine", return_value=self.cfg), \
+                     patch.object(hr.ssh, "host_for", return_value="polaris1"), \
+                     patch.object(hr.ssh, "run", side_effect=_remote):
+                    first = hr.maybe_capture_parallel_dryrun("polaris", "n660po", "run-1")
+                    second = hr.maybe_capture_parallel_dryrun("polaris", "n660po", "run-1")
+
+                self.assertTrue(first["captured"])
+                self.assertTrue(first["ok"])
+                self.assertNotIn("warning", first)
+                self.assertIsNone(second, "a captured verdict is not re-read")
+                run = hr.catalog.read_record("n660po")["runs"][0]
+                self.assertTrue(run["dryrun_parallel"]["report"]["completed"])
+                self.assertEqual(run["dryrun_parallel"]["report"]["job_state"], "completed")
+
+    def test_rejection_is_a_warning_not_an_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(hr.catalog, "CATALOG_DIR", root / "simulations"), \
+                 patch.object(hr, "RUNS_DIR", root / "runs"):
+                hr.catalog.create_record("n661po", machines=["polaris"], short_name="case",
+                                         directory_name="n661po_case")
+                hr.catalog.attach_run("n661po", {
+                    "run_id": "run-1", "machine": "polaris", "job_id": "7700001.polaris-pbs-01",
+                    "remote_run_dir": self.case,
+                    "dryrun_parallel": {"mode": "parallel", "started": True,
+                                        "job_id": "7700002.polaris-pbs-01",
+                                        "stdout": f"{self.case}/pbs-7700002.polaris-pbs-01.out",
+                                        "stderr": None, "report": None},
+                })
+
+                def _remote(host, argv, **kwargs):
+                    if argv[0] == "qstat":
+                        return CommandResult(0, "Job Id: x\n    job_state = F\n    Exit_status = 1\n", "", "qstat")
+                    return CommandResult(0, "MPI_ABORT was invoked\n", "", "cat")
+
+                with patch.object(hr.m, "get_machine", return_value=self.cfg), \
+                     patch.object(hr.ssh, "host_for", return_value="polaris1"), \
+                     patch.object(hr.ssh, "run", side_effect=_remote) as run:
+                    verdict = hr.maybe_capture_parallel_dryrun("polaris", "n661po", "run-1")
+                self.assertTrue(verdict["captured"])
+                self.assertFalse(verdict["ok"])
+                self.assertIn("REJECTED", verdict["warning"])
+                self.assertIn("7700001", verdict["warning"])
+                self.assertNotIn("qdel", [c.args[1][0] for c in run.call_args_list])
+
+    def test_a_running_dryrun_job_is_retried_later(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(hr.catalog, "CATALOG_DIR", root / "simulations"), \
+                 patch.object(hr, "RUNS_DIR", root / "runs"):
+                hr.catalog.create_record("n662po", machines=["polaris"], short_name="case",
+                                         directory_name="n662po_case")
+                hr.catalog.attach_run("n662po", {
+                    "run_id": "run-1", "machine": "polaris", "job_id": "1.x", "remote_run_dir": self.case,
+                    "dryrun_parallel": {"started": True, "job_id": "2.x", "stdout": "o", "stderr": None, "report": None},
+                })
+                running = CommandResult(0, "Job Id: x\n    job_state = R\n", "", "qstat")
+                with patch.object(hr.m, "get_machine", return_value=self.cfg), \
+                     patch.object(hr.ssh, "host_for", return_value="polaris1"), \
+                     patch.object(hr.ssh, "run", return_value=running):
+                    verdict = hr.maybe_capture_parallel_dryrun("polaris", "n662po", "run-1")
+                self.assertFalse(verdict["captured"])
+                self.assertTrue(verdict["retry"])

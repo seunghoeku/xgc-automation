@@ -51,10 +51,10 @@ echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_r
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
   --cpu-bind depth -d {{ cpus_per_task or 1 }} -genvall \
   /bin/bash -c 'local_rank=${PMI_LOCAL_RANK:-0}; gpu=$(({{ gpus_per_node }} - 1 - local_rank % {{ gpus_per_node }})); export CUDA_VISIBLE_DEVICES=${gpu}; exec "$@"' \
-  xgc-rank "{{ xgc_exe }}"
+  xgc-rank "{{ xgc_exe }}"{{ xgc_args | default('') }}
 {% else %}
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
-  --cpu-bind depth -d {{ cpus_per_task or 1 }} -genvall "{{ xgc_exe }}"
+  --cpu-bind depth -d {{ cpus_per_task or 1 }} -genvall "{{ xgc_exe }}"{{ xgc_args | default('') }}
 {% endif %}
 {% else %}
 # no XGC executable specified -> hello-world verification mode

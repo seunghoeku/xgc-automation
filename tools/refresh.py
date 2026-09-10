@@ -283,6 +283,9 @@ def refresh(
             build_capture = hpc_runner.maybe_capture_build(
                 run_machine, simulation_id, run["run_id"], state
             )
+            dryrun_capture = hpc_runner.maybe_capture_parallel_dryrun(
+                run_machine, simulation_id, run["run_id"]
+            )
 
             if state == run.get("state"):
                 entry = {
@@ -292,6 +295,8 @@ def refresh(
                 }
                 if build_capture is not None:
                     entry["build_capture"] = build_capture
+                if dryrun_capture is not None:
+                    entry["dryrun_parallel"] = dryrun_capture
                 unchanged.append(entry)
                 continue
 
@@ -326,6 +331,8 @@ def refresh(
             }
             if build_capture is not None:
                 entry["build_capture"] = build_capture
+            if dryrun_capture is not None:
+                entry["dryrun_parallel"] = dryrun_capture
             updated.append(entry)
             before = record.get("status")
 

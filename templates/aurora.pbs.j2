@@ -86,15 +86,15 @@ mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
 {% if daos %}
   --no-vni --env LD_PRELOAD={{ daos.interception_library }} \
 {% endif %}
-  "{{ xgc_exe }}"
+  "{{ xgc_exe }}"{{ xgc_args | default('') }}
 {% else %}
 # Generic rank count: depth binding plus the ALCF round-robin tile wrapper.
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
   --depth={{ cpus_per_task or 1 }} --cpu-bind depth --rlimits CORE -genvall \
 {% if daos %}
-  --no-vni {{ daos.tile_wrapper }} "{{ xgc_exe }}"
+  --no-vni {{ daos.tile_wrapper }} "{{ xgc_exe }}"{{ xgc_args | default('') }}
 {% else %}
-  gpu_tile_compact.sh "{{ xgc_exe }}"
+  gpu_tile_compact.sh "{{ xgc_exe }}"{{ xgc_args | default('') }}
 {% endif %}
 {% endif %}
 {% else %}

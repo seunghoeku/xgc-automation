@@ -126,7 +126,37 @@ caller:
    touches nothing remote (AGENTS.md, absolute rule 1).
 2. **Dryrun** — when `case_dir` is given, a rejected input blocks submission
    even with `confirm=True`. `skip_dryrun=True` overrides this and should only
-   be used when the user explicitly asks.
+   be used when the user explicitly asks. On machines whose login nodes cannot
+   run `xgc --dryrun` at all the gate takes the parallel form described next.
+
+### Dryrun on machines without a login-node dryrun
+
+Polaris (CUDA build, no visible GPU, NVML broken on login nodes) and Aurora (no
+launcher on a UAN) cannot run `xgc --dryrun` before submission. Blocking on it
+would mean either a hand-made debug job before every submission or
+`skip_dryrun`, and in practice it meant the latter. So on machines with
+`dryrun.login_node: false` in `machines.yaml` the rule is:
+
+1. Submit the production job first. Nothing about the input has been checked
+   yet, and the plan says so (`dryrun: null`, `dryrun_parallel: {...}`).
+2. Wait `dryrun.start_grace_seconds` (20 s) and ask the scheduler about the
+   job. If it is already running, the run itself is the validation; no second
+   job is spent (`dryrun_parallel.started: false`).
+3. Otherwise submit a 1-node job in `dryrun.queue` (`debug`, 15 min) that runs
+   `xgc --dryrun -n_ranks <production ranks>` in the same case directory, with
+   the same executable and environment script. Its script is
+   `<case_dir>/dryrun-<run_id>.sh`; its output `pbs-<jobid>.out`.
+4. The next `job_status` or `xgc-sim refresh` reads that output once the debug
+   job has finished, parses it exactly like a login-node dryrun, and attaches
+   the verdict to the run (`dryrun_parallel.report` in the catalog record and
+   in `provenance.json`). A rejection is reported as a **warning naming the
+   production job**; nothing is cancelled automatically, because cancelling
+   is a human decision (absolute rule 1).
+
+`skip_dryrun=True` is therefore no longer needed on Polaris or Aurora. The
+debug queue allows one job per user, so a second submission while a dryrun
+job is still queued reports `dryrun_parallel.error` and the run proceeds
+unvalidated; the status check will say so.
 
 Always pass `case_dir` for real XGC runs. It is unnecessary for `hello_world`
 jobs, which do not read an input file.

@@ -135,7 +135,11 @@ optional here and the build links without them.
    GPU and login-node NVML is broken (`nvidia-smi` fails with "Failed to
    initialize NVML"; Kokkos aborts with `cudaErrorNoDevice` before XGC reads
    the input). Use a 1-node, 10-minute `debug` job; the dryrun itself takes
-   10 to 20 s.
+   10 to 20 s. `hpc_runner.submit` does this for you: on Polaris it submits
+   the production job first and, if the job is still queued after 20 s, runs
+   the dryrun as a parallel debug job whose verdict lands on the next status
+   check (`docs/workflow.md`, "Dryrun on machines without a login-node
+   dryrun").
 3. Smoke test on 2 nodes x 4 A100 (8 ranks, `--ppn 4 --cpu-bind depth -d 16`,
    one GPU per rank via `CUDA_VISIBLE_DEVICES=$((3 - PMI_LOCAL_RANK % 4))`).
    `Software/build_and_test.pbs` is the job that did this with the 10-step
