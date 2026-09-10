@@ -69,6 +69,12 @@ Do not renumber them.
   runs, outcome never recorded) / `notebook` (historical evidence only) — and
   only `automation` records own a reserved number. Adoption never mints one
   retroactively. (`docs/simulation-catalog.md`)
+- A submission also records what a rerun needs (hashes of the referenced mesh,
+  equilibrium and profile files; build settings), appends the input to
+  `input_backup/<directory_name>`, and rewrites `kb/simulation_notebook.csv`,
+  the in-repo spreadsheet view (`docs/simulation-catalog.md`, "Reproduction
+  evidence" and "CSV notebook"). `Other_data/simulation_note_XGC1.xlsx` is
+  historical and never written by automation.
 - One simulation spans many scheduler jobs, because long runs are sized to hit
   the wall clock and restart from a checkpoint. Status is derived from the
   whole restart chain, and a timed-out job leaves it **`interrupted`**

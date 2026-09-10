@@ -36,6 +36,7 @@ from tools import dryrun
 from tools import build_banner
 from tools import machines as m
 from tools import namelist as nlm
+from tools import notebook_csv
 from tools import provenance as prov
 from tools import scheduler as sched
 from tools import simulation_catalog as catalog
@@ -45,6 +46,9 @@ from tools import ssh
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = PROJECT_ROOT / "templates"
 RUNS_DIR = PROJECT_ROOT / "runs"
+# Every submitted input is also appended here under the simulation's directory
+# name, the same layout as the historical archive (docs/input-archive.md).
+INPUT_BACKUP_DIR = PROJECT_ROOT / "input_backup"
 
 
 class SubmissionError(RuntimeError):
@@ -544,6 +548,196 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+# CMakeCache entries worth keeping with a run: what the binary was built from
+# and how. Anything matching is copied verbatim; the list is deliberately short
+# so the block stays readable in a YAML record.
+_CMAKE_PROVENANCE_RE = re.compile(
+    r"^(CMAKE_BUILD_TYPE|CMAKE_(?:CXX|Fortran|CUDA)_COMPILER|CMAKE_(?:CXX|Fortran)_FLAGS"
+    r"|XGC_[A-Z0-9_]+|USE_[A-Z0-9_]+|BUILD_[A-Z0-9_]+"
+    r"|Kokkos_DIR|ADIOS2_DIR|PETSC_DIR|Ginkgo_DIR|Cabana_DIR):[A-Z]+=(.*)$"
+)
+
+
+def _reproduction_script(
+    case_dir: str,
+    input_file_dir: str | None,
+    names: list[str],
+    env_script: str | None,
+    build_dir: str | None,
+) -> str:
+    """One remote bash script that hashes everything a rerun would need.
+
+    Output is line-oriented and tab-separated so it parses without ambiguity:
+    ``FILE name sha size mtime`` (or ``FILE name MISSING``), ``ENV sha`` for the
+    environment script, and ``CMAKE key:type=value`` lines from the build cache.
+    """
+    import shlex
+
+    lines = [f"cd {shlex.quote(case_dir)} || exit 0"]
+    lines.append(f"d={shlex.quote(input_file_dir or '.')}")
+    for name in names:
+        q = shlex.quote(name)
+        lines.append(
+            f'p="$d"/{q}; if [ -f "$p" ]; then printf \'FILE\\t%s\\t%s\\t%s\\t%s\\n\' {q} '
+            f'"$(sha256sum "$p" | cut -d\' \' -f1)" "$(stat -c %s "$p")" '
+            f'"$(date -u -d @"$(stat -c %Y "$p")" +%Y-%m-%dT%H:%M:%SZ)"; '
+            f"else printf 'FILE\\t%s\\tMISSING\\n' {q}; fi"
+        )
+    if env_script:
+        q = shlex.quote(env_script)
+        lines.append(
+            f"[ -f {q} ] && printf 'ENV\\t%s\\n' \"$(sha256sum {q} | cut -d' ' -f1)\""
+        )
+    if build_dir:
+        q = shlex.quote(build_dir.rstrip("/") + "/CMakeCache.txt")
+        lines.append(
+            f"[ -f {q} ] && grep -E '^(CMAKE_BUILD_TYPE|CMAKE_(CXX|Fortran|CUDA)_COMPILER"
+            f"|CMAKE_(CXX|Fortran)_FLAGS|XGC_|USE_|BUILD_|Kokkos_DIR|ADIOS2_DIR|PETSC_DIR"
+            f"|Ginkgo_DIR|Cabana_DIR)' {q} | sed 's/^/CMAKE\\t/'"
+        )
+    lines.append("exit 0")
+    return "\n".join(lines)
+
+
+def _parse_reproduction_output(stdout: str) -> dict[str, Any]:
+    files: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    env_sha: str | None = None
+    cmake: dict[str, str] = {}
+    for raw in stdout.splitlines():
+        parts = raw.rstrip("\n").split("\t")
+        if parts[0] == "FILE" and len(parts) >= 3:
+            name = parts[1]
+            if parts[2] == "MISSING":
+                missing.append(name)
+            elif len(parts) >= 5:
+                try:
+                    size: int | None = int(parts[3])
+                except ValueError:
+                    size = None
+                files[name] = {"sha256": parts[2], "size_bytes": size, "mtime": parts[4]}
+        elif parts[0] == "ENV" and len(parts) >= 2:
+            env_sha = parts[1]
+        elif parts[0] == "CMAKE" and len(parts) >= 2:
+            match = _CMAKE_PROVENANCE_RE.match(parts[1])
+            if match:
+                cmake[match.group(1)] = match.group(2)
+    return {"files": files, "missing": missing, "env_sha256": env_sha, "cmake": cmake}
+
+
+def _reproduction_provenance(
+    machine: str,
+    case_dir: str | None,
+    input_text: str | None,
+    plan: SubmissionPlan,
+) -> dict[str, Any]:
+    """Hash the files the input names and describe the build. Best effort.
+
+    A namelist alone does not pin a simulation: the mesh, equilibrium and
+    profile files it names are edited in place, and the binary's build settings
+    are not in the banner. Both are read in one remote command right after
+    submission. Any failure is recorded, never raised -- the job is already
+    queued.
+    """
+    result: dict[str, Any] = {"referenced_inputs": None, "build_environment": None}
+    if not case_dir or not input_text:
+        return result
+    refs = nlm.referenced_input_files(input_text)
+    names = sorted({name for items in refs["files"].values() for name in items})
+    parameters_for: dict[str, list[str]] = {}
+    for parameter, items in refs["files"].items():
+        for name in items:
+            parameters_for.setdefault(name, []).append(parameter)
+
+    cfg = m.get_machine(machine)
+    env_script = plan.resources.get("env_script")
+    build_dir = (cfg.get("xgc") or {}).get("build")
+    script = _reproduction_script(case_dir, refs["input_file_dir"], names, env_script, build_dir)
+    try:
+        output = ssh.run(ssh.host_for(cfg), ["bash", "-c", script], timeout=180)
+    except ssh.SSHError as exc:
+        result["error"] = str(exc)
+        return result
+    parsed = _parse_reproduction_output(output.stdout)
+    checked = _now().isoformat()
+
+    files = {
+        name: {"parameters": parameters_for.get(name, []), **info}
+        for name, info in parsed["files"].items()
+    }
+    result["referenced_inputs"] = {
+        "case_dir": case_dir,
+        "input_file_dir": refs["input_file_dir"],
+        "files": files,
+        "missing": parsed["missing"],
+        "hashed_at": checked,
+    }
+    result["build_environment"] = {
+        "executable": plan.resources.get("executable"),
+        "xgc_commit": plan.resources.get("xgc_commit"),
+        "env_script": {"path": env_script, "sha256": parsed["env_sha256"]},
+        "cmake_cache": f"{build_dir.rstrip('/')}/CMakeCache.txt" if build_dir else None,
+        "cmake": parsed["cmake"],
+        "captured_at": checked,
+    }
+    return result
+
+
+def _backup_input(
+    simulation: dict[str, Any] | None,
+    input_text: str | None,
+    *,
+    when: datetime | None = None,
+) -> dict[str, Any]:
+    """Append the submitted input to input_backup/ under the directory name.
+
+    The archive's convention is one file per simulation named after its run
+    directory. The first submission claims that name; a later submission whose
+    input differs (a restart with a changed parameter) is kept as a dated
+    variant, ``<directory_name>.Sep10``, which ``tools.input_archive`` already
+    recognises as a variant rather than a second simulation. Identical inputs
+    write nothing. Never raises: a local copy failure must not mask an accepted
+    submission.
+    """
+    directory_name = (simulation or {}).get("directory_name")
+    if not directory_name or input_text is None:
+        return {"written": False, "reason": "no simulation directory name or no input"}
+    try:
+        INPUT_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        primary = INPUT_BACKUP_DIR / str(directory_name)
+        if not primary.exists():
+            primary.write_text(input_text, encoding="utf-8")
+            return {"written": True, "path": _display_path(primary)}
+        if primary.read_text(encoding="utf-8") == input_text:
+            return {"written": False, "reason": "identical", "path": _display_path(primary)}
+        stamp = (when or _now()).strftime("%b%d")
+        variant = INPUT_BACKUP_DIR / f"{directory_name}.{stamp}"
+        attempt = 1
+        while variant.exists() and variant.read_text(encoding="utf-8") != input_text:
+            attempt += 1
+            variant = INPUT_BACKUP_DIR / f"{directory_name}.{stamp}.bak{attempt}"
+        if not variant.exists():
+            variant.write_text(input_text, encoding="utf-8")
+            return {"written": True, "path": _display_path(variant), "variant_of": _display_path(primary)}
+        return {"written": False, "reason": "identical", "path": _display_path(variant)}
+    except OSError as exc:
+        return {"written": False, "error": str(exc)}
+
+
+def _sync_notebook() -> dict[str, Any]:
+    """Rewrite the CSV notebook from the catalog. Best effort, never raises."""
+    try:
+        payload = notebook_csv.sync(confirm=True)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        return {"synced": False, "error": str(exc)}
+    return {
+        "synced": True,
+        "path": payload.get("path"),
+        "rows": payload.get("pushed_rows"),
+        "pulled_notes": payload.get("pulled_notes", []),
+    }
+
+
 def _link_catalog(record: dict[str, Any], meta_path: Path) -> dict[str, Any] | None:
     """Attach a submitted run to its simulation's catalog record.
 
@@ -567,6 +761,9 @@ def _link_catalog(record: dict[str, Any], meta_path: Path) -> dict[str, Any] | N
                 "input_sha256": record.get("input_sha256"),
                 "input": record.get("input"),
                 "case": (record.get("simulation") or {}).get("case"),
+                "referenced_inputs": record.get("referenced_inputs"),
+                "build_environment": record.get("build_environment"),
+                "input_backup": record.get("input_backup"),
             },
             status="submitted",
         )
@@ -667,6 +864,10 @@ def submit(
     input_provenance = _input_provenance(
         plan.machine, case_dir, dryrun_report=dryrun_report
     )
+    reproduction = _reproduction_provenance(
+        plan.machine, case_dir, captured["input_text"], plan
+    )
+    input_backup = _backup_input(plan.simulation, captured["input_text"])
     record = {
         "run_id": plan.run_id,
         "machine": plan.machine,
@@ -688,10 +889,16 @@ def submit(
         "input_sha256": captured["input_sha256"],
         "input_capture": captured["input_capture"],
         "input": input_provenance,
+        "referenced_inputs": reproduction["referenced_inputs"],
+        "build_environment": reproduction["build_environment"],
+        "input_backup": input_backup,
         "dryrun": dryrun_report,
     }
+    if reproduction.get("error"):
+        record["reproduction_error"] = reproduction["error"]
     meta_path = _write_provenance(plan, record, input_text=captured["input_text"])
     catalog_link = _link_catalog(record, meta_path)
+    notebook = _sync_notebook() if catalog_link else None
 
     return {
         "submitted": True,
@@ -704,6 +911,9 @@ def submit(
         "input_sha256": captured["input_sha256"],
         "input": input_provenance,
         "catalog": catalog_link,
+        "referenced_inputs": reproduction["referenced_inputs"],
+        "input_backup": input_backup,
+        "notebook": notebook,
         "dryrun": dryrun_report,
     }
 

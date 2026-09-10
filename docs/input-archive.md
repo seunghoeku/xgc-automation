@@ -4,6 +4,16 @@
 code and input-schema generations. It is evidence for building the knowledge
 base, not a set of validated baselines.
 
+## Growth
+
+Since 2026-09-10 the archive is no longer hand-copied. Every accepted
+submission of a registered simulation appends its input here as
+`<directory_name>` (first submission) or `<directory_name>.<MonDD>` (a later
+submission whose input changed); see "Reproduction evidence" in
+`docs/simulation-catalog.md`. The exact text each job ran is always in
+`runs/master/<run_id>/input`; this directory is the browsable, one-file-per-
+simulation view.
+
 ## Prioritization policy
 
 Start with globally numbered inputs at `n600` or above. Older `n*`, `su*`,

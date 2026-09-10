@@ -11,6 +11,7 @@ functions; this is the same system with a keyboard instead of a model.
     xgc-sim archive n645pe --system hpss --path /home/s/sku/n645pe.tar
     xgc-sim import-notebook --confirm
     xgc-sim sync-sheet --confirm
+    xgc-sim sync-notebook --confirm
 
 Every subcommand prints a table by default and JSON with ``--json``, so it is
 equally usable by a person and by a script.
@@ -396,6 +397,23 @@ def _cmd_sync_sheet(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sync_notebook(args: argparse.Namespace) -> int:
+    from tools import notebook_csv
+
+    payload = notebook_csv.sync(
+        path=Path(args.path) if args.path else None,
+        catalog_dir=_catalog_dir(args),
+        pull_notes=not args.no_pull,
+        confirm=args.confirm,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"notebook:       {payload['path']}")
+        _print_sync(payload)
+    return 0
+
+
 def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--machine")
     parser.add_argument("--status", choices=list(catalog.STATUSES))
@@ -534,6 +552,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     sheet_parser.add_argument("--confirm", action="store_true")
     sheet_parser.set_defaults(func=_cmd_sync_sheet)
+
+    notebook_parser = add(
+        "sync-notebook",
+        help="rewrite kb/simulation_notebook.csv from the catalog (notes pull back)",
+    )
+    notebook_parser.add_argument("--path", help="CSV to write (default kb/simulation_notebook.csv)")
+    notebook_parser.add_argument(
+        "--no-pull", action="store_true", help="push only; ignore notes edited in the CSV"
+    )
+    notebook_parser.add_argument("--confirm", action="store_true")
+    notebook_parser.set_defaults(func=_cmd_sync_notebook)
 
     return parser
 

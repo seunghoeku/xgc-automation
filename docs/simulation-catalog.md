@@ -321,6 +321,61 @@ Of 742 rows, 741 import. The one skip is an annotation row. Three rows that used
 to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
 `f136-f139`) now survive under distinct sub-tags.
 
+## CSV notebook
+
+`kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept inside
+the repository: one row per simulation, the same columns as the Google Sheet
+(`tools/sheet_sync.COLUMNS`), the human `note` column last. It replaces the
+hand-kept `Other_data/simulation_note_XGC1.xlsx` going forward; that workbook
+stays as the historical notebook (rows through n656po) and is never written by
+automation, because openpyxl rewrites drop the cached values of its old
+formulas and a binary file shows no diff in git.
+
+The direction is the same as the sheet: machine facts are pushed from the
+catalog and overwrite the file; only `note` is pulled back.
+
+```bash
+xgc-sim sync-notebook            # diff only
+xgc-sim sync-notebook --confirm  # pull edited notes, rewrite the CSV
+```
+
+Every accepted submission (`hpc_runner.submit`) runs the same sync
+automatically, so the CSV is current without anyone remembering to run it.
+Editing a `note` cell in a spreadsheet program and saving as CSV is still the
+way to annotate a row; the next submission or sync pulls it in. A sync failure
+is reported in the submission result and never blocks a job. A note also
+survives in git history, which the xlsx never offered.
+
+The historical workbook's year tabs are not reproduced: `submitted_at` and
+`created_at` columns make a per-year filter a one-click sort.
+
+## Reproduction evidence
+
+The input namelist alone does not pin a simulation. Right after a submission is
+accepted, `hpc_runner.submit` gathers, in one remote command, what a rerun
+would need and stores it in the run's `provenance.json` and on the catalog
+record:
+
+| block | what it holds | why |
+|---|---|---|
+| `referenced_inputs` | SHA-256, size and mtime of every mesh, equilibrium and profile file the input names (`sml_node_file`, `eq_filename`, `eq_dens_file`, ...), resolved against `sml_input_file_dir` | these files are edited in place far more often than renamed |
+| `build_environment` | executable, commit, env-script hash, and the `CMAKE_BUILD_TYPE` / compiler / `USE_*` / dependency `*_DIR` entries of the build's `CMakeCache.txt` | the startup banner names the commit but not how it was configured |
+| `input_backup` | where the input was appended in `input_backup/` | see below |
+| run `build` | the XGC startup banner (commit, dirty tree, build type) parsed from stdout on the first status check | what actually ran, not what was planned |
+
+The submission also appends the input to `input_backup/<directory_name>`, the
+historical archive's own layout, so `input_backup/` keeps growing with every
+numbered simulation instead of stopping where the hand-copied collection did.
+The first submission claims the name; a later submission with a different
+input is kept as a dated variant (`<directory_name>.Sep10`), which
+`tools/input_archive` already treats as a variant rather than a new simulation.
+Identical inputs write nothing. The per-run copy under
+`runs/master/<run_id>/input` remains the exact text each job ran.
+
+The job script itself is `runs/master/<run_id>/submit.sh`. Hand-submitted runs
+adopted later (`origin: adopted`) get the same blocks filled in by hand; their
+scripts and banners live under `runs/adopted/<record_id>/` (see its README).
+
 ## Google Sheets
 
 The spreadsheet stays, as a view.

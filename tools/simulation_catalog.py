@@ -606,6 +606,12 @@ def attach_run(
         record["input"] = run["input"]
     if run.get("case") and not record.get("case"):
         record["case"] = run["case"]
+    # Reproduction evidence gathered at submission (hpc_runner): hashes of the
+    # mesh/equilibrium/profile files the input names, and the build
+    # environment. The newest submission describes the simulation as it now is.
+    for key in ("referenced_inputs", "build_environment", "input_backup"):
+        if isinstance(run.get(key), dict):
+            record[key] = run[key]
     if status and record.get("status") not in _HUMAN_JUDGEMENT_STATUSES:
         # Submitting a restart moves the simulation back into flight, but it
         # must not undo a conclusion the human already recorded.

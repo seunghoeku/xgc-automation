@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tools import hpc_runner as hr
@@ -838,6 +839,10 @@ class SubmitToStatusLifecycleTests(unittest.TestCase):
         accepted = hr.dryrun.DryrunReport(ok=True, returncode=0)
         with (
             patch.object(hr, "RUNS_DIR", self.root / "runs"),
+            patch.object(hr, "INPUT_BACKUP_DIR", self.root / "input_backup"),
+            patch.object(
+                hr.notebook_csv, "NOTEBOOK_PATH", self.root / "simulation_notebook.csv"
+            ),
             patch.object(hr.catalog, "CATALOG_DIR", self.root / "simulations"),
             patch.object(hr.m, "get_machine", return_value=self.cfg),
             patch.object(
@@ -889,6 +894,14 @@ class SubmitToStatusLifecycleTests(unittest.TestCase):
             )
             self.assertEqual(provenance["input"]["derived"]["species"], ["i"])
             self.assertEqual(provenance["input"]["derived"]["marker_model"], "total-f")
+            # The input is also appended to the archive under the directory
+            # name, and the CSV notebook is rewritten from the catalog.
+            backup = self.root / "input_backup" / self.simulation["directory_name"]
+            self.assertTrue(result["input_backup"]["written"])
+            self.assertIn("sml_mstep", backup.read_text(encoding="utf-8"))
+            notebook = (self.root / "simulation_notebook.csv").read_text(encoding="utf-8")
+            self.assertTrue(result["notebook"]["synced"])
+            self.assertIn("n645st", notebook)
 
             finished = CommandResult(0, "COMPLETED 0:0", "", "squeue")
             with patch.object(hr.ssh, "run", return_value=finished):
@@ -901,3 +914,138 @@ class SubmitToStatusLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReproductionProvenanceTests(unittest.TestCase):
+    """What a rerun needs beyond the namelist: the files it names, the build."""
+
+    def test_referenced_files_are_read_from_the_input_text(self) -> None:
+        text = (
+            "&sml_param\n"
+            "sml_node_file='m.node'   ! mesh\n"
+            "sml_input_file_dir='../XGC_inputs/'\n"
+            "/\n&eq_param\n"
+            "eq_filename='eq.eqd'\n"
+            "eq_dens_file='den.dat' 'den.dat'\n"
+            "/\n"
+        )
+        refs = hr.nlm.referenced_input_files(text)
+        self.assertEqual(refs["input_file_dir"], "../XGC_inputs/")
+        self.assertEqual(refs["files"]["eq_dens_file"], ["den.dat"])
+        self.assertEqual(refs["files"]["sml_node_file"], ["m.node"])
+        self.assertNotIn("sml_input_file_dir", refs["files"])
+
+    def test_remote_output_is_parsed_into_hashes_and_build_settings(self) -> None:
+        stdout = (
+            "FILE\tm.node\tabc\t742543\t2026-07-21T19:32:40Z\n"
+            "FILE\teq.eqd\tMISSING\n"
+            "ENV\tdef\n"
+            "CMAKE\tCMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n"
+            "CMAKE\tUSE_GPU:BOOL=ON\n"
+            "CMAKE\tUNRELATED:BOOL=ON\n"
+        )
+        parsed = hr._parse_reproduction_output(stdout)
+        self.assertEqual(parsed["files"]["m.node"]["sha256"], "abc")
+        self.assertEqual(parsed["files"]["m.node"]["size_bytes"], 742543)
+        self.assertEqual(parsed["missing"], ["eq.eqd"])
+        self.assertEqual(parsed["env_sha256"], "def")
+        self.assertEqual(
+            parsed["cmake"], {"CMAKE_BUILD_TYPE": "RelWithDebInfo", "USE_GPU": "ON"}
+        )
+
+    def test_reproduction_provenance_runs_one_remote_command(self) -> None:
+        cfg = {"paths": {"run_root": "/scratch"}, "xgc": {"build": "/scratch/XGC-Devel/bin"}}
+        plan = SimpleNamespace(
+            resources={"executable": "/b/xgc", "env_script": "/b/env.sh", "xgc_commit": "abc123"}
+        )
+        remote = CommandResult(0, "FILE\tm.node\tabc\t1\t2026-01-01T00:00:00Z\nENV\tdef\n", "", "bash")
+        with (
+            patch.object(hr.m, "get_machine", return_value=cfg),
+            patch.object(hr.ssh, "host_for", return_value="perlmutter"),
+            patch.object(hr.ssh, "run", return_value=remote) as run,
+        ):
+            result = hr._reproduction_provenance(
+                "perlmutter", "/scratch/case", "&sml_param\nsml_node_file='m.node'\n/\n", plan
+            )
+        run.assert_called_once()
+        script = run.call_args.args[1][2]
+        self.assertIn("cd /scratch/case", script)
+        self.assertIn("m.node", script)
+        self.assertIn("/scratch/XGC-Devel/bin/CMakeCache.txt", script)
+        files = result["referenced_inputs"]["files"]
+        self.assertEqual(files["m.node"]["parameters"], ["sml_node_file"])
+        self.assertEqual(files["m.node"]["sha256"], "abc")
+        self.assertEqual(result["build_environment"]["env_script"]["sha256"], "def")
+        self.assertEqual(result["build_environment"]["executable"], "/b/xgc")
+
+    def test_ssh_failure_is_recorded_not_raised(self) -> None:
+        cfg = {"paths": {"run_root": "/scratch"}}
+        plan = SimpleNamespace(resources={})
+        with (
+            patch.object(hr.m, "get_machine", return_value=cfg),
+            patch.object(hr.ssh, "host_for", return_value="perlmutter"),
+            patch.object(hr.ssh, "run", side_effect=hr.ssh.SSHError("down")),
+        ):
+            result = hr._reproduction_provenance("perlmutter", "/c", "&sml_param\n/\n", plan)
+        self.assertIsNone(result["referenced_inputs"])
+        self.assertEqual(result["error"], "down")
+
+    def test_hello_world_has_nothing_to_hash(self) -> None:
+        plan = SimpleNamespace(resources={})
+        with patch.object(hr.ssh, "run") as run:
+            result = hr._reproduction_provenance("perlmutter", None, None, plan)
+        run.assert_not_called()
+        self.assertIsNone(result["referenced_inputs"])
+
+
+class InputBackupTests(unittest.TestCase):
+    """Every submitted input lands in input_backup/ under the directory name."""
+
+    simulation = {"simulation_id": "n651po", "directory_name": "n651po_dadt_ecbc_df"}
+
+    def test_first_submission_claims_the_directory_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "INPUT_BACKUP_DIR", Path(tmp)):
+                result = hr._backup_input(self.simulation, "&sml_param\n/\n")
+            self.assertTrue(result["written"])
+            self.assertEqual(
+                (Path(tmp) / "n651po_dadt_ecbc_df").read_text(encoding="utf-8"),
+                "&sml_param\n/\n",
+            )
+
+    def test_identical_resubmission_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "INPUT_BACKUP_DIR", Path(tmp)):
+                hr._backup_input(self.simulation, "same")
+                result = hr._backup_input(self.simulation, "same")
+            self.assertFalse(result["written"])
+            self.assertEqual(result["reason"], "identical")
+            self.assertEqual(len(list(Path(tmp).iterdir())), 1)
+
+    def test_changed_input_becomes_a_dated_variant(self) -> None:
+        from datetime import datetime, timezone
+
+        when = datetime(2026, 9, 10, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "INPUT_BACKUP_DIR", Path(tmp)):
+                hr._backup_input(self.simulation, "first")
+                second = hr._backup_input(self.simulation, "second", when=when)
+                third = hr._backup_input(self.simulation, "third", when=when)
+            self.assertTrue(second["written"])
+            self.assertTrue(second["path"].endswith("n651po_dadt_ecbc_df.Sep10"))
+            self.assertTrue(third["path"].endswith("n651po_dadt_ecbc_df.Sep10.bak2"))
+            # The primary keeps the first input; variants never overwrite it.
+            self.assertEqual((Path(tmp) / "n651po_dadt_ecbc_df").read_text(), "first")
+
+    def test_variant_names_are_recognised_by_the_archive_scanner(self) -> None:
+        from tools import input_archive
+
+        self.assertEqual(input_archive._variant_kind("n651po_dadt_ecbc_df.Sep10") is not None, True)
+        self.assertIsNone(input_archive._variant_kind("n651po_dadt_ecbc_df"))
+
+    def test_unregistered_run_is_not_archived(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(hr, "INPUT_BACKUP_DIR", Path(tmp)):
+                result = hr._backup_input(None, "text")
+            self.assertFalse(result["written"])
+            self.assertEqual(list(Path(tmp).iterdir()), [])

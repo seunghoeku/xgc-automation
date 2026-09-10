@@ -25,6 +25,7 @@ default python3 is often too old: stellar ships 3.6, where
 
 from __future__ import annotations
 
+import re
 import json
 import shlex
 from dataclasses import dataclass
@@ -493,3 +494,56 @@ def apply_overrides(
             )
 
     return "".join(lines), notes
+
+
+# Namelist parameters whose values name files on disk. Everything XGC reads
+# besides the namelist itself flows through one of these, so hashing their
+# targets at submission is what makes an input reproducible rather than merely
+# recorded: the mesh, equilibrium and profile files are edited in place far
+# more often than they are renamed.
+REFERENCED_FILE_PARAMETERS = (
+    "sml_node_file",
+    "sml_ele_file",
+    "sml_surf_file",
+    "eq_filename",
+    "eq_dens_file",
+    "eq_temp_file",
+    "eq_flow_file",
+    "f0_file",
+    "ptl_init_file",
+    "neu_grid_file",
+)
+INPUT_FILE_DIR_PARAMETER = "sml_input_file_dir"
+_FILE_ASSIGNMENT_RE = re.compile(
+    r"^\s*([A-Za-z][A-Za-z0-9_]*)(?:\s*\([^)]*\))?\s*=\s*(.*?)\s*$"
+)
+
+
+def referenced_input_files(text: str) -> dict[str, Any]:
+    """Names of the files an input namelist refers to, from its text alone.
+
+    Returns ``{"input_file_dir": str | None, "files": {param: [names]}}``.
+    Works on the local snapshot of the input, so it needs neither the remote
+    machine nor XGC's own parser; quoted values are taken verbatim and
+    duplicates (the same profile for two species) are kept once, in order.
+    """
+    files: dict[str, list[str]] = {}
+    input_dir: str | None = None
+    for raw in text.splitlines():
+        line = raw.split("!", 1)[0]
+        match = _FILE_ASSIGNMENT_RE.match(line)
+        if not match:
+            continue
+        name = match.group(1).lower()
+        values = re.findall(r"'([^']*)'|\"([^\"]*)\"", match.group(2))
+        names = [a or b for a, b in values if (a or b).strip()]
+        if not names:
+            continue
+        if name == INPUT_FILE_DIR_PARAMETER:
+            input_dir = names[0]
+        elif name in REFERENCED_FILE_PARAMETERS:
+            seen = files.setdefault(name, [])
+            for item in names:
+                if item not in seen:
+                    seen.append(item)
+    return {"input_file_dir": input_dir, "files": files}
