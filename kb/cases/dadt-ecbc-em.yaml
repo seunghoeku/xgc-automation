@@ -1,0 +1,74 @@
+# dAdt ECBC electromagnetic case — the input that produced the dAdt NN training
+# runs n648po_dAdt_ecbc (Polaris, 2026-09-07..08, gstep 1-2042, jobs 7597263..7599942).
+# Values are recorded from the actual input file. Baseline directory holds only
+# input/adios2cfg.xml/petsc.rc (copied from n648po_dAdt_ecbc on 2026-09-09).
+
+name: dadt-ecbc-em
+description: >
+  ECBC circular-geometry core case run electromagnetically (explicit
+  mixed-variable, IdealMHD pullback) with TotalF markers; used to generate
+  dA_par/dt neural-network training data (diag_dadt_nn_input_on).
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/cases/dadt_ecbc_em
+input_file_dir: /grand/TokamakProfile/shku/XGC_inputs   # referenced as ../XGC_inputs/ from the run directory
+
+validated:
+  date: 2026-09-07
+  xgc_commit: 4cce91da1
+  input_md5: 3f82c2f5cf9c28be238a7367bc826920
+  dryrun: NOT_RUN            # Polaris login-node dryrun impossible (CUDA/NVML); validated by real runs
+  n_ranks: 128
+  runtime_tested: true       # n648po ran 2042 steps on 32 nodes (4 ranks/node)
+
+physics:
+  model: electromagnetic     # sml_electromagnetic, sml_em_mixed_variable, pullback IdealMHD
+  flavor: XGC1
+  delta_f: false             # no ptl_marker_type -> TotalF default
+  boundary: core             # sml_bounce=3, sml_inpsi=0, sml_outpsi=0.90
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF}
+  toroidal_mode:
+    nmin_real: 6
+    nmax_real: 96
+    wedge_n: 3
+    nphi_total: 16
+  radial_domain: {inpsi: 0.0, outpsi: 0.90}
+
+numerics:
+  dt: 1.2e-4                 # sml_dt, toroidal transit times (1.37e-8 s)
+  mstep: 4000
+  num_per_vertex: [8000, 8000]
+  f0_grid: {nmu: 32, nvp: 17, smu_max: 4.0, vp_max: 4.0}
+  collisions: off            # col_mode=0
+  restart_write_period: 100
+
+input_files:
+  mesh: [ma_0.50_rhoi_mesh.eqd.node, ma_0.50_rhoi_mesh.eqd.ele, ma_0.50_rhoi_mesh.eqd.flx.aif]
+  equilibrium: ma_151x151.eqd
+  profiles: {density: ECBC_den_bet00p500.dat, temp: ma_t_smooth.dat}
+  other: [adios2cfg.xml, petsc.rc]
+
+notes:
+  - "sml_bd_ext_delta1H/2H/Ai=0.18 (inner boundary of the n!=0 H/Ampere solvers) is required; -0.01/-0.18 diverged at step ~35."
+  - "sml_restart=.true. is harmless for a fresh start: XGC ignores it when timestep.dat is absent."
+  - "2026-09-09: the axisymmetric potential runs away in this configuration (pot0 -> -58 kV by step 1500, <dn_e>/n -> 0.4); n=0 physics of this case is under investigation (n649 em_n0=false, n651 ReducedDeltaF controls)."
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - {label: electromagnetic, patterns: ['\belectromagnetic\b', '\bEM\b']}
+    - {label: dAdt training data, patterns: ['\bdA/?dt\b', '\bdAdt\b', '\bpullback\b']}
+    - {label: ECBC core, patterns: ['\bECBC\b', '\bcore\b']}
+  exclusions:
+    - {label: edge-SOL, patterns: ['\bedge\b', '\bSOL\b'], reason: core case without open field lines}
+  baseline_parameters:
+    sml_electromagnetic: true
+    sml_em_mixed_variable: true
+    sml_em_pullback_method: IdealMHD
+    sml_wedge_n: 3
+    sml_nphi_total: 16
+    sml_dt: 1.2e-4
+    ptl_num_per_vertex: [8000, 8000]
+    col_mode: 0

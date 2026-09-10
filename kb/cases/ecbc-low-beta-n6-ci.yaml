@@ -1,0 +1,73 @@
+# ecbc_low_beta_n6 exactly as the Stellar CI EM physics test runs it
+# (.github/workflows/stellar_xgc-eem.yml): XGC-Examples/ecbc_low_beta_n6 @ 32dc8d7 +
+# quickstart/inputs/{adios2cfg.xml,petsc.rc}; the three obsolete parameters the CI comments out
+# (sml_f0_grid_alpha, sml_f0_grid_alpha_start, f0_update_analytic_alpha) are commented out in the
+# baseline the same way. The CI additionally adds sml_electromagnetic=.true. and sml_mstep=1000
+# (it restarts from a prepared restart set kept on Stellar); those are left as run-time overrides.
+
+name: ecbc-low-beta-n6-ci
+description: >
+  ECBC low-beta n=6 electromagnetic delta-f linear growth-rate case (the XGC CI "xgc-eem"
+  physics test). ReducedDeltaF ions and electrons, single toroidal mode n=6, no n=0 field
+  (sml_00_efield/sml_em_n0 off, m=0 removed), IdealMHD pullback. Reference growth rate 0.41e5 1/s
+  measured by utils/CI/verify_xgc_linear_growth_rate.py over steps 5000-9000.
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/cases/ecbc_low_beta_n6_ci
+input_file_dir: ./input_dir        # copied with the case (sml_input_file_dir='./input_dir')
+
+validated:
+  date: 2026-09-09
+  xgc_commit: 4cce91da1
+  input_md5: 3691e16e08b4a50f22d8fce67dc2a669
+  dryrun: ACCEPTED                 # debug job 7601956, 32 ranks: 0 removed/deprecated/warnings, 0.0517 ptl per 5D vertex, 0.225 GB/rank (same numbers as the 2026-07-28 stellar record)
+  runtime_tested: false
+  source: XGC-Examples 32dc8d7 ecbc_low_beta_n6
+
+physics:
+  model: electromagnetic           # sml_electromagnetic=.true. added at run time, as the CI does
+  flavor: XGC1
+  delta_f: true
+  boundary: core                   # sml_bounce=2, inpsi 0, outpsi 0.90
+  species:
+    - {name: electron, mass_au: 5.4545e-4, charge_eu: -1.0, marker: ReducedDeltaF}
+    - {name: ion, mass_au: 1.0, charge_eu: 1.0, marker: ReducedDeltaF}
+  toroidal_mode: {n: 6, wedge_n: 6, nphi_total: 8}
+  n0_field: off                    # sml_00_efield=.false., sml_em_n0=.false., sml_mode_select_no_m0=.true.
+
+numerics:
+  dt: 2.0e-4
+  mstep: 10000
+  num_per_vertex: [50, 50]
+  initial_noise: 1.0e-20
+  collisions: off
+  restart_write_period: 2000
+
+input_files:
+  mesh: [ECBC_0.50_rhoi_mesh.eqd.node, ECBC_0.50_rhoi_mesh.eqd.ele, ECBC_0.50_rhoi_mesh.eqd.flx.aif]
+  equilibrium: ECBC_151x151.eqd
+  profiles: {density: ECBC_den_bet00p500.dat, temp_electron: ECBC_te.dat, temp_ion: ECBC_ti.dat}
+  other: [adios2cfg.xml, petsc.rc]
+
+notes:
+  - "Mesh, eqd and n/T profiles are byte-identical to the dAdt case (ma_0.50_rhoi_mesh = ECBC_0.50_rhoi_mesh, ma_151x151 = ECBC_151x151, ma_t_smooth ~ ECBC_te/ti)."
+  - "CI reference: gamma0 = 0.41e5 1/s, tolerance 5%, min_step_gamma 5000, max_step 9000 (from a restart at ~step 5000)."
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - {label: electromagnetic, patterns: ['\belectromagnetic\b', '\bEM\b']}
+    - {label: linear growth rate, patterns: ['\blinear\b', '\bgrowth rate\b']}
+    - {label: ECBC, patterns: ['\bECBC\b']}
+    - {label: reduced delta-f, patterns: ['\bdelta[\s-]*f\b']}
+  exclusions:
+    - {label: edge-SOL, patterns: ['\bedge\b', '\bSOL\b'], reason: core case}
+  baseline_parameters:
+    ptl_marker_type: [ReducedDeltaF, ReducedDeltaF]
+    sml_mode_select_nmin_real: 6
+    sml_mode_select_nmax_real: 6
+    sml_wedge_n: 6
+    sml_nphi_total: 8
+    sml_dt: 2.0e-4
+    sml_00_efield: false
+    sml_em_n0: false

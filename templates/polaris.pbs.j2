@@ -35,6 +35,8 @@ module load {{ mod }}
 export OMP_NUM_THREADS={{ cpus_per_task or 1 }}
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
+# Fortran/OpenMP stack; the hand-written production scripts (n648po) use the same value.
+export OMP_STACKSIZE=2G
 {% if gpu_aware_mpi %}
 export MPICH_GPU_SUPPORT_ENABLED=1
 {% endif %}
