@@ -629,7 +629,7 @@ def _reproduction_provenance(
     machine: str,
     case_dir: str | None,
     input_text: str | None,
-    plan: SubmissionPlan,
+    resources: dict[str, Any],
 ) -> dict[str, Any]:
     """Hash the files the input names and describe the build. Best effort.
 
@@ -650,8 +650,8 @@ def _reproduction_provenance(
             parameters_for.setdefault(name, []).append(parameter)
 
     cfg = m.get_machine(machine)
-    env_script = plan.resources.get("env_script")
-    build_dir = (cfg.get("xgc") or {}).get("build")
+    env_script = resources.get("env_script")
+    build_dir = resources.get("build_dir") or (cfg.get("xgc") or {}).get("build")
     script = _reproduction_script(case_dir, refs["input_file_dir"], names, env_script, build_dir)
     try:
         output = ssh.run(ssh.host_for(cfg), ["bash", "-c", script], timeout=180)
@@ -673,8 +673,8 @@ def _reproduction_provenance(
         "hashed_at": checked,
     }
     result["build_environment"] = {
-        "executable": plan.resources.get("executable"),
-        "xgc_commit": plan.resources.get("xgc_commit"),
+        "executable": resources.get("executable"),
+        "xgc_commit": resources.get("xgc_commit"),
         "env_script": {"path": env_script, "sha256": parsed["env_sha256"]},
         "cmake_cache": f"{build_dir.rstrip('/')}/CMakeCache.txt" if build_dir else None,
         "cmake": parsed["cmake"],
@@ -865,7 +865,7 @@ def submit(
         plan.machine, case_dir, dryrun_report=dryrun_report
     )
     reproduction = _reproduction_provenance(
-        plan.machine, case_dir, captured["input_text"], plan
+        plan.machine, case_dir, captured["input_text"], plan.resources
     )
     input_backup = _backup_input(plan.simulation, captured["input_text"])
     record = {

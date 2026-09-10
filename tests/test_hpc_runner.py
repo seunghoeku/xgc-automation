@@ -4,7 +4,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from tools import hpc_runner as hr
@@ -955,9 +954,7 @@ class ReproductionProvenanceTests(unittest.TestCase):
 
     def test_reproduction_provenance_runs_one_remote_command(self) -> None:
         cfg = {"paths": {"run_root": "/scratch"}, "xgc": {"build": "/scratch/XGC-Devel/bin"}}
-        plan = SimpleNamespace(
-            resources={"executable": "/b/xgc", "env_script": "/b/env.sh", "xgc_commit": "abc123"}
-        )
+        resources = {"executable": "/b/xgc", "env_script": "/b/env.sh", "xgc_commit": "abc123"}
         remote = CommandResult(0, "FILE\tm.node\tabc\t1\t2026-01-01T00:00:00Z\nENV\tdef\n", "", "bash")
         with (
             patch.object(hr.m, "get_machine", return_value=cfg),
@@ -965,7 +962,7 @@ class ReproductionProvenanceTests(unittest.TestCase):
             patch.object(hr.ssh, "run", return_value=remote) as run,
         ):
             result = hr._reproduction_provenance(
-                "perlmutter", "/scratch/case", "&sml_param\nsml_node_file='m.node'\n/\n", plan
+                "perlmutter", "/scratch/case", "&sml_param\nsml_node_file='m.node'\n/\n", resources
             )
         run.assert_called_once()
         script = run.call_args.args[1][2]
@@ -980,20 +977,18 @@ class ReproductionProvenanceTests(unittest.TestCase):
 
     def test_ssh_failure_is_recorded_not_raised(self) -> None:
         cfg = {"paths": {"run_root": "/scratch"}}
-        plan = SimpleNamespace(resources={})
         with (
             patch.object(hr.m, "get_machine", return_value=cfg),
             patch.object(hr.ssh, "host_for", return_value="perlmutter"),
             patch.object(hr.ssh, "run", side_effect=hr.ssh.SSHError("down")),
         ):
-            result = hr._reproduction_provenance("perlmutter", "/c", "&sml_param\n/\n", plan)
+            result = hr._reproduction_provenance("perlmutter", "/c", "&sml_param\n/\n", {})
         self.assertIsNone(result["referenced_inputs"])
         self.assertEqual(result["error"], "down")
 
     def test_hello_world_has_nothing_to_hash(self) -> None:
-        plan = SimpleNamespace(resources={})
         with patch.object(hr.ssh, "run") as run:
-            result = hr._reproduction_provenance("perlmutter", None, None, plan)
+            result = hr._reproduction_provenance("perlmutter", None, None, {})
         run.assert_not_called()
         self.assertIsNone(result["referenced_inputs"])
 

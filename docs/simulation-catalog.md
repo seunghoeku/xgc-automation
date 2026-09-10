@@ -290,6 +290,40 @@ What adoption will not do:
 Scheduler smoke tests are excluded unless you pass `--include-smoke-tests`.
 Rerunning is safe; `--overwrite` picks up runs added since.
 
+## Adopting a run submitted by hand
+
+A run submitted with a hand-written `qsub` in some other chat left no
+provenance under `runs/` at all, so `adopt-runs` cannot see it. What remains is
+the remote directory and the scheduler's memory of its jobs, and that is enough:
+
+```bash
+xgc-sim adopt-remote polaris /grand/TokamakProfile/shku/n648po_dAdt_ecbc            # plan only
+xgc-sim adopt-remote polaris /grand/TokamakProfile/shku/n648po_dAdt_ecbc --confirm \
+    --tag dadt --case dadt-ecbc-em --note "..."
+```
+
+(MCP: `adopt_remote_run`.) In one pass it reads the `input`, finds every job
+from the stdout files left in the directory (`xgc.out.<id>`, `<name>.o<id>`,
+`slurm-<id>.out`, one level of subdirectories included), asks `qstat -x -f` or
+`sacct` about each, parses the XGC startup banner from each job's stdout, keeps
+the job script, and hashes the referenced input files and build environment
+exactly as a tool-driven submission would. It writes:
+
+* `kb/simulations/<directory_name lowercased>.yaml`, `origin: adopted`,
+  `number: null`, status derived from the newest run's scheduler state;
+* `input_backup/<directory_name>` (or a dated variant if that name already
+  holds a different input);
+* `runs/adopted/<record_id>/` with the job script and `banner_<jobid>.json`.
+
+Job states follow the scheduler: exit 0 is `completed`, a PBS walltime kill
+(-29) is `timeout`, a SIGTERM exit (143) is `cancelled`, anything else nonzero
+is `failed`. Whether the science is finished remains the human's call
+(`xgc-sim status`). Scheduler timestamps are recorded as the server reports
+them, without a time zone.
+
+Rerunning on the same directory needs `--overwrite` and keeps the existing
+note; a directory whose name is already an `automation` record is refused.
+
 ## Importing the historical notebook
 
 `Other_data/simulation_note_XGC1.xlsx` is the researcher's own document, one

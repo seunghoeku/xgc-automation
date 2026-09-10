@@ -12,6 +12,7 @@ functions; this is the same system with a keyboard instead of a model.
     xgc-sim import-notebook --confirm
     xgc-sim sync-sheet --confirm
     xgc-sim sync-notebook --confirm
+    xgc-sim adopt-remote polaris /grand/.../n648po_dAdt_ecbc --confirm
 
 Every subcommand prints a table by default and JSON with ``--json``, so it is
 equally usable by a person and by a script.
@@ -341,6 +342,58 @@ def _cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_adopt_remote(args: argparse.Namespace) -> int:
+    from tools import remote_adoption
+
+    try:
+        payload = remote_adoption.adopt_remote(
+            args.machine,
+            args.remote_dir,
+            confirm=args.confirm,
+            tags=args.tag or [],
+            case=args.case,
+            note=args.note or "",
+            overwrite=args.overwrite,
+            catalog_dir=_catalog_dir(args),
+        )
+    except remote_adoption.RemoteAdoptionError as exc:
+        print(f"xgc-sim: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        _print_json(payload)
+        return 0
+    if payload.get("adopted"):
+        print(
+            f"adopted {payload['record_id']} [{payload['status']}]: {payload['runs']} run(s), "
+            f"{payload['banners']} banner(s); record {payload['record_path']}"
+        )
+        backup = payload["input_backup"]
+        print(f"input backup: {backup.get('path') or backup.get('reason')}")
+        for item in payload["support_files"]:
+            print(f"    {item}")
+        return 0
+    record = payload["record"]
+    print(f"would adopt {record['record_id']} [{record['status']}] from {record['remote_dirs']}")
+    print(f"  input sha256 {record['input_sha256']}")
+    for run in record["runs"]:
+        build = run.get("build") or {}
+        commit = (build.get("git") or {}).get("commit", "")
+        print(
+            f"  job {run['job_id']:<45} {run.get('state'):<10} exit {run.get('exit_code')!s:<5} "
+            f"nodes {run.get('nodes')!s:<4} used {run.get('walltime_used') or '-':<9} "
+            f"banner {commit[:9] or '-'}"
+        )
+    refs = record.get("referenced_inputs") or {}
+    print(f"  referenced files hashed: {len(refs.get('files') or {})}, missing: {refs.get('missing')}")
+    print(f"  progress: {record.get('progress')}")
+    if payload.get("blocked"):
+        print(f"  BLOCKED: {payload['blocked']}")
+    elif payload.get("existing"):
+        print(f"  note: an adopted record already exists; --overwrite refreshes it")
+    print("\nnothing was written; rerun with --confirm to apply")
+    return 0
+
+
 def _cmd_refresh(args: argparse.Namespace) -> int:
     if args.dry_run:
         payload = refresh_tool.plan_refresh(
@@ -524,6 +577,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     adopt_parser.add_argument("--confirm", action="store_true")
     adopt_parser.set_defaults(func=_cmd_adopt)
+
+    remote_parser = add(
+        "adopt-remote",
+        help="adopt a hand-submitted run from its remote directory (input, jobs, banners)",
+    )
+    remote_parser.add_argument("machine")
+    remote_parser.add_argument("remote_dir")
+    remote_parser.add_argument("--tag", action="append", help="extra tag (repeatable)")
+    remote_parser.add_argument("--case", help="kb case the run started from")
+    remote_parser.add_argument("--note", help="human note for the record")
+    remote_parser.add_argument(
+        "--overwrite", action="store_true", help="refresh an existing adopted record"
+    )
+    remote_parser.add_argument("--confirm", action="store_true")
+    remote_parser.set_defaults(func=_cmd_adopt_remote)
 
     refresh_parser = add(
         "refresh",

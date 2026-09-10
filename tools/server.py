@@ -14,6 +14,7 @@ Tools implemented so far:
   - simulation_stats : catalog counts by status/machine/origin
   - refresh_simulations : poll schedulers for every in-flight run
   - set_simulation_note : write the human-owned note, gated on confirmation
+  - adopt_remote_run : catalogue a hand-submitted run from its remote directory, gated on confirm
   - inspect_input_archive : rank recent read-only input backups for migration
   - rank_promotion_candidates : join the archive with the simulation notebook
   - plan_case_promotion : draft a kb case from an archived input, writing nothing
@@ -464,6 +465,41 @@ def refresh_simulations(
     if dry_run:
         return refresh_tool.plan_refresh(machine=machine, record_id=record_id)
     return refresh_tool.refresh(machine=machine, record_id=record_id)
+
+
+@mcp.tool()
+def adopt_remote_run(
+    machine: str,
+    remote_dir: str,
+    confirm: bool = False,
+    tags: list[str] | None = None,
+    case: str | None = None,
+    note: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Adopt a run that was submitted by hand, from its remote directory.
+
+    Reads the directory's input, job scripts, stdout banners and the
+    scheduler's history of its jobs; writes an ``origin: adopted`` catalog
+    record, appends the input to input_backup/, and keeps the script and
+    banners under runs/adopted/. Never assigns a sequence number. With
+    confirm=False it only returns the record it would write. Only set
+    confirm=True after the user has approved that record.
+    """
+    from tools import remote_adoption
+
+    try:
+        return remote_adoption.adopt_remote(
+            machine,
+            remote_dir,
+            confirm=confirm,
+            tags=tags,
+            case=case,
+            note=note,
+            overwrite=overwrite,
+        )
+    except remote_adoption.RemoteAdoptionError as exc:
+        return {"adopted": False, "error": str(exc)}
 
 
 @mcp.tool()
