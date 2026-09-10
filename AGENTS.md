@@ -111,6 +111,7 @@ executable. A `hpc_runner.build(machine)` hook is possible later.
 | SSH aliases, ControlMaster, sshproxy, multiplexing | `docs/ssh-setup.md` |
 | First-time setup, overlay files, absent personal data | `docs/setup-new-user.md` |
 | Building XGC per machine | `docs/build-stellar.md`, `docs/build-polaris.md`, `docs/build-aurora.md` |
+| Aurora day to day: submit, DAOS container, reading results | `docs/aurora-operations.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |

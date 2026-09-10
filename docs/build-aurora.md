@@ -1,5 +1,8 @@
 # Running (and building) XGC on Aurora
 
+Day-to-day submission, the DAOS container, and reading results afterwards:
+`docs/aurora-operations.md`.
+
 Status 2026-09-09: live round trip passed. The user's own build
 (`XGC-Devel/build/bin/xgc`, branch `dadt_prediction` at `eb43591a`, IntelLLVM
 2025.3.2, 26.26.0 PE) ran the ECBC electromagnetic smoke test on 2 `debug`
@@ -115,6 +118,11 @@ run is compute-bound at this size, so the equal figure says only that DAOS
 cost nothing). The container now holds the 39 GB of output plus
 `restart_dir/xgc.restart.00020.bp`, and the login-node mount below read it
 back with `bpls`. Provenance: `runs/test/run-20260909T211140Z/`.
+
+Verified 2026-09-09/10: job 8814705 (2 debug nodes, 24 ranks, 20 steps)
+mounted the container, ran to `Exit_status=0` with the same SimpleFOM as the
+flare run (7.9e7), and its 39 GB of output were listed and read with adios2
+through a login-node dfuse mount the next day.
 
 `plan_job(..., daos=True)` / `submit_job(..., daos=True)` render the DAOS
 variant of the Aurora template:
