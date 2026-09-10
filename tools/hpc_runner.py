@@ -802,13 +802,93 @@ def dryrun_settings(cfg: dict[str, Any]) -> dict[str, Any]:
     after ``start_grace_seconds``.
     """
     raw = cfg.get("dryrun") or {}
+    queues: list[dict[str, Any]] = []
+    for item in raw.get("queues") or ([{"name": raw["queue"]}] if raw.get("queue") else []):
+        if isinstance(item, str):
+            item = {"name": item}
+        if isinstance(item, dict) and item.get("name"):
+            queues.append(
+                {
+                    "name": str(item["name"]),
+                    "min_nodes": int(item.get("min_nodes", 1)),
+                    "max_nodes": int(item["max_nodes"]) if item.get("max_nodes") else None,
+                    "per_user": int(item["per_user"]) if item.get("per_user") else None,
+                }
+            )
     return {
         "login_node": bool(raw.get("login_node", True)),
-        "queue": raw.get("queue"),
+        "queues": queues,
         "nodes": int(raw.get("nodes", 1)),
         "walltime": str(raw.get("walltime", "00:15:00")),
         "start_grace_seconds": float(raw.get("start_grace_seconds", 20)),
     }
+
+
+def _user_queue_occupancy(
+    cfg: dict[str, Any], scheduler: sched.Scheduler, host: str
+) -> dict[str, int]:
+    """How many of the user's jobs sit in each queue right now (queued or running).
+
+    Per-user queue limits count queued jobs too, so a dryrun sent to a queue
+    the user already occupies would wait behind their own job -- or be
+    rejected outright. PBS needs two calls (ids, then details in JSON); Slurm
+    answers in one.
+    """
+    user = cfg.get("user")
+    if not user or m.is_placeholder(user):
+        return {}
+    counts: dict[str, int] = {}
+    if isinstance(scheduler, sched.PBSScheduler):
+        ids = ssh.run(host, scheduler.user_queue_argv(str(user)))
+        job_ids = [j["job_id"] for j in scheduler.parse_user_queue(ids.stdout)] if ids.ok else []
+        argv = scheduler.user_queue_detail_argv(job_ids)
+        if not argv:
+            return {}
+        detail = ssh.run(host, argv)
+        if not detail.ok:
+            return {}
+        for job in scheduler.parse_user_queue_detail(detail.stdout).values():
+            if job.get("state") in (sched.PENDING, sched.RUNNING) and job.get("queue"):
+                counts[job["queue"]] = counts.get(job["queue"], 0) + 1
+    else:
+        listing = ssh.run(host, ["squeue", "-u", str(user), "-h", "-o", "%P|%T"])
+        if not listing.ok:
+            return {}
+        for line in listing.stdout.splitlines():
+            parts = line.split("|")
+            if len(parts) < 2:
+                continue
+            state = sched._SLURM_STATES.get(parts[1].strip().upper(), sched.UNKNOWN)
+            if state in (sched.PENDING, sched.RUNNING):
+                counts[parts[0].strip()] = counts.get(parts[0].strip(), 0) + 1
+    return counts
+
+
+def choose_dryrun_queue(
+    settings: dict[str, Any], occupancy: dict[str, int], nodes: int
+) -> dict[str, Any]:
+    """The first configured queue that can take an ``nodes``-node job now.
+
+    A queue is skipped when the user already holds its per-user job limit
+    (queued jobs count) or when the job does not fit its node range. The
+    reasons are returned so the provenance can say why the dryrun ended up in
+    ``preemptable`` rather than ``debug``.
+    """
+    skipped: dict[str, str] = {}
+    for queue in settings["queues"]:
+        name = queue["name"]
+        if nodes < queue["min_nodes"]:
+            skipped[name] = f"needs at least {queue['min_nodes']} node(s)"
+            continue
+        if queue["max_nodes"] is not None and nodes > queue["max_nodes"]:
+            skipped[name] = f"allows at most {queue['max_nodes']} node(s)"
+            continue
+        held = occupancy.get(name, 0)
+        if queue["per_user"] is not None and held >= queue["per_user"]:
+            skipped[name] = f"user already has {held} job(s) there (limit {queue['per_user']})"
+            continue
+        return {"queue": name, "skipped": skipped, "occupancy": occupancy}
+    return {"queue": None, "skipped": skipped, "occupancy": occupancy}
 
 
 def _start_parallel_dryrun(
@@ -856,6 +936,23 @@ def _start_parallel_dryrun(
         return base
 
     try:
+        occupancy = _user_queue_occupancy(cfg, scheduler, host)
+    except ssh.SSHError as exc:
+        occupancy = {}
+        base["occupancy_error"] = str(exc)
+    choice = choose_dryrun_queue(settings, occupancy, settings["nodes"])
+    base["queue_choice"] = {"skipped": choice["skipped"], "occupancy": occupancy}
+    if choice["queue"] is None:
+        base.update(
+            started=False,
+            error=(
+                "no configured queue can take a "
+                f"{settings['nodes']}-node dryrun job right now: {choice['skipped']}"
+            ),
+        )
+        return base
+
+    try:
         dry_plan = prepare_submission(
             plan.machine,
             run_id=f"{plan.run_id}-dryrun",
@@ -866,7 +963,7 @@ def _start_parallel_dryrun(
             gpus_per_node=plan.resources.get("gpus_per_node"),
             walltime=settings["walltime"],
             account=plan.resources.get("account"),
-            partition=settings["queue"] or plan.resources.get("partition"),
+            partition=choice["queue"],
             xgc_exe=plan.resources.get("executable"),
             env_script=plan.resources.get("env_script"),
             xgc_commit=plan.resources.get("xgc_commit"),
@@ -1020,8 +1117,10 @@ def submit(
 
     On machines whose login nodes cannot run the dryrun (``dryrun.login_node:
     false`` -- Polaris, Aurora) the job is submitted first; if it is still
-    queued after a short grace period a 1-node debug job runs the dryrun in
-    parallel and its verdict is attached on the next status check.
+    queued after a short grace period a 1-node job runs the dryrun in parallel
+    -- in the first configured queue that can take it now, so a debug queue the
+    user already occupies is skipped for a regular one -- and its verdict is
+    attached on the next status check.
     """
     if plan is None:
         # A real XGC run must execute in its case directory; default to it.

@@ -1065,20 +1065,36 @@ class ParallelDryrunTests(unittest.TestCase):
                 "modules": [],
                 "verified": {"commit": "abc123"},
             },
-            "dryrun": {"login_node": False, "queue": "debug", "nodes": 1,
-                       "walltime": "00:15:00", "start_grace_seconds": 0},
+            "dryrun": {"login_node": False, "nodes": 1, "walltime": "00:15:00",
+                       "start_grace_seconds": 0,
+                       "queues": [{"name": "debug", "max_nodes": 2, "per_user": 1},
+                                  {"name": "debug-scaling", "max_nodes": 10, "per_user": 1},
+                                  {"name": "preemptable", "max_nodes": 10, "per_user": 20}]},
+            "user": "alice",
             "defaults": {"account": "P", "queue": "prod", "nodes": 32, "ntasks_per_node": 4,
                          "cpus_per_task": 16, "gpus_per_node": 4, "walltime": "06:00:00"},
         }
         self.case = "/grand/P/alice/xgc-runs/n660po_case"
         self.submitted: list[str] = []
         self.written: dict[str, str] = {}
+        # Other jobs the user already has, as (queue, state) -- the debug slot.
+        self.user_jobs: list[tuple[str, str]] = []
 
     def _remote_factory(self, main_state: str):
         def _remote(host, argv, **kwargs):
             if argv[0] == "qsub":
                 self.submitted.append(argv[-1])
                 return CommandResult(0, f"{7700000 + len(self.submitted)}.polaris-pbs-01", "", "qsub")
+            if argv[0] == "qselect":
+                ids = [f"{900 + i}.polaris-pbs-01" for i in range(len(self.user_jobs))]
+                return CommandResult(0, "\n".join(ids), "", "qselect")
+            if argv[0] == "qstat" and "-F" in argv:
+                jobs = {
+                    f"{900 + i}.polaris-pbs-01": {"Job_Name": "other", "job_state": state, "queue": queue,
+                                                   "Resource_List": {"nodect": 4}}
+                    for i, (queue, state) in enumerate(self.user_jobs)
+                }
+                return CommandResult(0, json.dumps({"Jobs": jobs}), "", "qstat")
             if argv[0] == "qstat":
                 return CommandResult(0, f"Job Id: x\n    job_state = {main_state}\n", "", "qstat")
             if argv[0] == "cat":
@@ -1130,6 +1146,58 @@ class ParallelDryrunTests(unittest.TestCase):
             )
             self.assertEqual(provenance["dryrun_parallel"]["job_id"], "7700002.polaris-pbs-01")
             self.assertIsNone(provenance["dryrun_parallel"]["report"])
+
+    def test_a_taken_debug_slot_sends_the_dryrun_to_the_next_queue(self) -> None:
+        self.user_jobs = [("debug", "R")]
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("Q")
+            parallel = result["dryrun_parallel"]
+            self.assertTrue(parallel["started"])
+            self.assertEqual(parallel["queue"], "debug-scaling")
+            self.assertIn("#PBS -q debug-scaling", self.written[parallel["script"]])
+            self.assertIn("debug", parallel["queue_choice"]["skipped"])
+            self.assertEqual(parallel["queue_choice"]["occupancy"], {"debug": 1})
+
+    def test_queued_jobs_count_against_the_per_user_limit(self) -> None:
+        # A queued job holds the slot as much as a running one does.
+        self.user_jobs = [("debug", "Q"), ("debug-scaling", "Q")]
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("Q")
+            parallel = result["dryrun_parallel"]
+            self.assertTrue(parallel["started"])
+            self.assertEqual(parallel["queue"], "preemptable")
+
+    def test_finished_jobs_do_not_occupy_a_queue(self) -> None:
+        self.user_jobs = [("debug", "F")]
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("Q")
+            self.assertEqual(result["dryrun_parallel"]["queue"], "debug")
+
+    def test_no_free_queue_leaves_the_run_unvalidated_and_says_so(self) -> None:
+        self.cfg["dryrun"]["queues"] = [{"name": "debug", "max_nodes": 2, "per_user": 1}]
+        self.user_jobs = [("debug", "R")]
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tmp = type("T", (), {"name": tmp})()
+            result, _sleep = self._submit("Q")
+            parallel = result["dryrun_parallel"]
+            self.assertTrue(result["submitted"])
+            self.assertFalse(parallel["started"])
+            self.assertIn("no configured queue", parallel["error"])
+            self.assertEqual(self.submitted, [f"{self.case}/submit.sh"])
+
+    def test_choose_queue_respects_node_ranges(self) -> None:
+        settings = hr.dryrun_settings({"dryrun": {"queues": [
+            {"name": "debug-scaling", "min_nodes": 2, "max_nodes": 256, "per_user": 1},
+            {"name": "capacity", "max_nodes": 16, "per_user": 5},
+        ]}})
+        choice = hr.choose_dryrun_queue(settings, {}, 1)
+        self.assertEqual(choice["queue"], "capacity")
+        self.assertIn("at least 2", choice["skipped"]["debug-scaling"])
+        legacy = hr.dryrun_settings({"dryrun": {"queue": "debug"}})
+        self.assertEqual(hr.choose_dryrun_queue(legacy, {}, 1)["queue"], "debug")
 
     def test_job_that_starts_at_once_needs_no_dryrun_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

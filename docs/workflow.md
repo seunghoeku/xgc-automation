@@ -142,10 +142,17 @@ would mean either a hand-made debug job before every submission or
 2. Wait `dryrun.start_grace_seconds` (20 s) and ask the scheduler about the
    job. If it is already running, the run itself is the validation; no second
    job is spent (`dryrun_parallel.started: false`).
-3. Otherwise submit a 1-node job in `dryrun.queue` (`debug`, 15 min) that runs
+3. Otherwise submit a 1-node, 15-minute job that runs
    `xgc --dryrun -n_ranks <production ranks>` in the same case directory, with
-   the same executable and environment script. Its script is
-   `<case_dir>/dryrun-<run_id>.sh`; its output `pbs-<jobid>.out`.
+   the same executable and environment script. The queue is the first entry of
+   `dryrun.queues` that can take a 1-node job *now*: a queue is skipped when
+   the user already holds its per-user limit (queued jobs count -- the
+   production job itself, if it went to `debug-scaling`, counts) or when one
+   node is outside its size range. On Polaris that order is `debug`,
+   `debug-scaling`, `preemptable`; on Aurora `debug`, then `capacity`. The
+   choice and the reasons for skipping are recorded in
+   `dryrun_parallel.queue_choice`. Its script is `<case_dir>/dryrun-<run_id>.sh`;
+   its output `pbs-<jobid>.out`.
 4. The next `job_status` or `xgc-sim refresh` reads that output once the debug
    job has finished, parses it exactly like a login-node dryrun, and attaches
    the verdict to the run (`dryrun_parallel.report` in the catalog record and
@@ -153,10 +160,10 @@ would mean either a hand-made debug job before every submission or
    production job**; nothing is cancelled automatically, because cancelling
    is a human decision (absolute rule 1).
 
-`skip_dryrun=True` is therefore no longer needed on Polaris or Aurora. The
-debug queue allows one job per user, so a second submission while a dryrun
-job is still queued reports `dryrun_parallel.error` and the run proceeds
-unvalidated; the status check will say so.
+`skip_dryrun=True` is therefore no longer needed on Polaris or Aurora. Only
+when every configured queue is full for this user does the dryrun stay
+unsubmitted: `dryrun_parallel.error` names the queues and why, and the run
+proceeds unvalidated, which the status check will say.
 
 Always pass `case_dir` for real XGC runs. It is unnecessary for `hello_world`
 jobs, which do not read an input file.

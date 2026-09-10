@@ -137,7 +137,8 @@ optional here and the build links without them.
    the input). Use a 1-node, 10-minute `debug` job; the dryrun itself takes
    10 to 20 s. `hpc_runner.submit` does this for you: on Polaris it submits
    the production job first and, if the job is still queued after 20 s, runs
-   the dryrun as a parallel debug job whose verdict lands on the next status
+   the dryrun as a parallel 1-node job (debug, or debug-scaling/preemptable
+   when your debug slot is taken) whose verdict lands on the next status
    check (`docs/workflow.md`, "Dryrun on machines without a login-node
    dryrun").
 3. Smoke test on 2 nodes x 4 A100 (8 ranks, `--ppn 4 --cpu-bind depth -d 16`,

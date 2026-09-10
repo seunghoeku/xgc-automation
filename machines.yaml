@@ -86,14 +86,22 @@ polaris:
   # `xgc --dryrun` cannot run on a Polaris login node (CUDA build, no visible
   # GPU, NVML broken), so it does not gate submission here. The production job
   # is submitted first; if it has not started after start_grace_seconds, a
-  # 1-node debug job runs the dryrun in parallel and its verdict is attached to
-  # the run on the next status check. docs/workflow.md, "Dryrun".
+  # 1-node job runs the dryrun in parallel and its verdict is attached to the
+  # run on the next status check. docs/workflow.md, "Dryrun".
+  # `queues` are tried in order; a queue is skipped when the user already has
+  # per_user jobs in it or when a 1-node job does not fit its size limits
+  # (docs.alcf.anl.gov/polaris/running-jobs: debug 1-2 nodes <=1 h, one job
+  # per user; debug-scaling 1-10 nodes <=1 h, one per user; preemptable 1-10
+  # nodes, may be preempted, 20 queued per user; prod needs >= 10 nodes).
   dryrun:
     login_node: false
-    queue: debug
     nodes: 1
     walltime: "00:15:00"
     start_grace_seconds: 20
+    queues:
+      - {name: debug, max_nodes: 2, per_user: 1}
+      - {name: debug-scaling, max_nodes: 10, per_user: 1}
+      - {name: preemptable, max_nodes: 10, per_user: 20}
   defaults:
     account: <alcf_project>
     # Four-node prototype jobs fit debug-scaling; prod requires at least 10.
@@ -172,13 +180,17 @@ aurora:
     gpu_aware_mpi: true
     modules: []
   # Same as Polaris: no dryrun on a UAN (no launcher); validated in parallel
-  # by a 1-node debug job when the production job does not start at once.
+  # by a 1-node job when the production job does not start at once. debug is
+  # one job per user; debug-scaling needs 2 nodes, so capacity (1-16 nodes,
+  # 5 queued per user) is the fallback for a 1-node dryrun.
   dryrun:
     login_node: false
-    queue: debug
     nodes: 1
     walltime: "00:15:00"
     start_grace_seconds: 20
+    queues:
+      - {name: debug, max_nodes: 2, per_user: 1}
+      - {name: capacity, max_nodes: 16, per_user: 5}
   defaults:
     account: <alcf_project>
     # Aurora queues (docs.alcf.anl.gov/aurora/running-jobs-aurora):

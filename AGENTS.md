@@ -53,8 +53,10 @@ Do not renumber them.
   (Perlmutter, stellar) a rejected input blocks submission. Where it cannot
   (Polaris, Aurora; `dryrun.login_node: false` in `machines.yaml`) the job is
   submitted first and, if it has not started after a short grace period, a
-  1-node debug job runs the dryrun in parallel; its verdict is attached on the
-  next status check and a rejection is a warning, never an automatic cancel.
+  1-node job runs the dryrun in parallel in the first queue that can take it
+  now (`dryrun.queues`; a debug queue the user already occupies is skipped for
+  a regular one); its verdict is attached on the next status check and a
+  rejection is a warning, never an automatic cancel.
   Do not pass `skip_dryrun` there. (`docs/workflow.md`, "Dryrun on machines
   without a login-node dryrun")
 - Remote analysis placement is decided by **workload character, not duration

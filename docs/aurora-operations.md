@@ -67,7 +67,8 @@ Notes that differ from Polaris:
 - No login-node dryrun: `xgc --dryrun` cannot run on an Aurora login node (no
   PALS launcher, no GPU platform: it dies in `MPI_Init`). `submit_job` therefore
   submits the production job first and, if it is still queued after 20 s, runs
-  the dryrun as a parallel 1-node `debug` job (`dryrun:` in `machines.yaml`);
+  the dryrun as a parallel 1-node job in `debug`, or in `capacity` when the
+  debug slot is taken (`dryrun.queues` in `machines.yaml`);
   the verdict appears on the next `job_status` / `xgc-sim refresh` as
   `dryrun_parallel`. `skip_dryrun=True` is no longer needed. The first minute
   of `pbs-<jobid>.out` remains a second check: a bad namelist is rejected there
