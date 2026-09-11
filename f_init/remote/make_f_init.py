@@ -64,7 +64,13 @@ def main() -> int:
         if not args.smooth_name:
             raise SystemExit("--smooth-name is required when smoothing is requested")
         targets.append(os.path.join(out_dir, args.smooth_name))
-    clashes = [t for t in targets if os.path.exists(t)]
+    # The no-smooth file is the same for every smoothing setting of one f0
+    # step, so a smoothing scan keeps the existing copy instead of clashing on
+    # it; only the requested smooth file (or the no-smooth file when nothing
+    # else is requested) is protected against overwriting.
+    reuse_no_smooth = do_smooth and os.path.exists(targets[0]) and not args.overwrite
+    protected = targets[1:] if reuse_no_smooth else targets
+    clashes = [t for t in protected if os.path.exists(t)]
     if clashes and not args.overwrite:
         emit({"error": "exists", "paths": clashes})
         return 2
@@ -98,8 +104,11 @@ def main() -> int:
     dist.remove_maxwellian()
 
     outputs = []
-    dist.save(targets[0])
-    outputs.append({"kind": "no_smooth", "path": targets[0]})
+    if reuse_no_smooth:
+        outputs.append({"kind": "no_smooth", "path": targets[0], "reused": True})
+    else:
+        dist.save(targets[0])
+        outputs.append({"kind": "no_smooth", "path": targets[0]})
 
     fg_stats = {
         "no_smooth": {

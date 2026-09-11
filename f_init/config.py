@@ -41,6 +41,12 @@ DEFAULTS: dict[str, Any] = {
         "compare_step": None,    # xgc.2d.<step>.bp of the dt0 run; None = first
     },
     "adjust_factor": 1.0,
+    "run": {
+        # Production run started from an (adjusted) f_init: same input as
+        # stage A except the f_init slot, plus these namelist overrides.
+        "overrides": {},
+        "dir_prefix": "finit_",
+    },
     "job": {
         "script": "xgcs.cpu",
         "copy_files": ["adios2cfg.xml", "petsc.rc", "runscript.cpu"],
@@ -66,6 +72,7 @@ class Case:
     job: dict[str, Any]
     remote: dict[str, Any]
     path: Path
+    run: dict[str, Any] = field(default_factory=dict)
     note: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -127,7 +134,7 @@ def load_case(name_or_path: str) -> Case:
     if not root or machines.is_placeholder(root):
         raise CaseError(f"{path}: 'root' (remote case directory) is not set")
     known = {"name", "root", "machine", "maxwell_dir", "species", "smooth", "dt0",
-             "adjust_factor", "job", "remote", "note"}
+             "adjust_factor", "job", "remote", "note", "run"}
     return Case(
         name=str(data.get("name") or path.stem),
         root=str(root),
@@ -139,6 +146,7 @@ def load_case(name_or_path: str) -> Case:
         adjust_factor=float(data["adjust_factor"]),
         job=dict(data["job"]),
         remote=dict(data["remote"] or {}),
+        run=dict(data.get("run") or {}),
         path=path,
         note=data.get("note"),
         extra={k: v for k, v in data.items() if k not in known},
@@ -207,6 +215,23 @@ def finit_tag(filename: str) -> str:
 
 def dt0_dirname(finit_filename: str) -> str:
     return f"dt0_{finit_tag(finit_filename)}"
+
+
+def run_dirname(finit_filename: str, prefix: str = "finit_") -> str:
+    """Production-run directory for an f_init file, in the cbc3 convention.
+
+    ``xgc.f_init_adjusted_smooth_0.3_0.5.bp -> finit_sm_0.3_0.5``;
+    ``xgc.f_init_no_smooth.bp -> finit_sm_0_0``. The adjustment generation is
+    dropped because the run is identified by its smoothing, and the log
+    records which file was actually used.
+    """
+    tag = finit_tag(finit_filename)
+    tag = re.sub(r"^adjusted\d*_", "", tag)
+    if tag == "no_smooth":
+        tag = "sm_0_0"
+    elif tag.startswith("smooth_"):
+        tag = "sm_" + tag[len("smooth_"):]
+    return f"{prefix}{tag}"
 
 
 def adjusted_file(finit_filename: str) -> str:

@@ -183,9 +183,46 @@ def make_finit(
 
 def plan_dt0(case: Case, finit_file: str, *, dir_name: str | None = None) -> dict[str, Any]:
     """Everything a dt=0 directory would contain, without writing any of it."""
-    _cfg, target = _machine(case)
     finit_name = Path(finit_file).name
-    dir_name = dir_name or cfg.dt0_dirname(finit_name)
+    overrides = {
+        "sml_dt": str(case.dt0["sml_dt"]),
+        "sml_mstep": str(case.dt0["sml_mstep"]),
+        # A fresh start even if the source run was restarted several times.
+        "sml_restart": ".false.",
+    }
+    return _plan_from_maxwell(case, finit_name, dir_name or cfg.dt0_dirname(finit_name),
+                              overrides, kind="dt0")
+
+
+def plan_run(case: Case, finit_file: str, *, dir_name: str | None = None) -> dict[str, Any]:
+    """A production run from an f_init file: stage A's input with the f_init
+    slot switched and the case's ``run.overrides`` applied (cbc3's
+    ``finit_sm_*`` convention). ``sml_dt``/``sml_mstep``/``sml_restart`` are
+    kept as in stage A so a timed-out job can be restarted."""
+    finit_name = Path(finit_file).name
+    run_cfg = case.run or {}
+    overrides = {str(k): _fortran(v) for k, v in (run_cfg.get("overrides") or {}).items()}
+    dir_name = dir_name or cfg.run_dirname(finit_name, str(run_cfg.get("dir_prefix", "finit_")))
+    return _plan_from_maxwell(case, finit_name, dir_name, overrides, kind="run")
+
+
+def _fortran(value: Any) -> str:
+    """Render a YAML scalar the way the namelist wants it."""
+    if isinstance(value, bool):
+        return ".true." if value else ".false."
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in {".true.", ".false."} or stripped.startswith(("'", '"')):
+            return stripped
+        if re.fullmatch(r"[-+0-9.eEdD]+", stripped):
+            return stripped
+        return f"'{stripped}'"
+    return str(value)
+
+
+def _plan_from_maxwell(case: Case, finit_name: str, dir_name: str,
+                       overrides: dict[str, str], *, kind: str) -> dict[str, Any]:
+    _cfg, target = _machine(case)
     target_dir = case.subdir(dir_name)
     script_name = case.job["script"]
     copy_files = list(case.job.get("copy_files", []))
@@ -202,13 +239,8 @@ def plan_dt0(case: Case, finit_file: str, *, dir_name: str | None = None) -> dic
 
     old_input = ssh.read_file(target, f"{case.maxwell_path}/input")
     slot = int(case.species["slot"])
-    overrides: dict[str, str] = {
-        "sml_dt": str(case.dt0["sml_dt"]),
-        "sml_mstep": str(case.dt0["sml_mstep"]),
-        # A fresh start even if the source run was restarted several times.
-        "sml_restart": ".false.",
-        "ptl_input_file_dir": f"'../{case.maxwell_dir}/'",
-    }
+    overrides = dict(overrides)
+    overrides["ptl_input_file_dir"] = f"'../{case.maxwell_dir}/'"
     for name, token in (("ptl_f_init_file", f"'{finit_name}'"),
                         ("ptl_maxwellian_init", ".false.")):
         current = nle.read_value(old_input, name)
@@ -228,6 +260,7 @@ def plan_dt0(case: Case, finit_file: str, *, dir_name: str | None = None) -> dic
     new_script, script_notes = sb.rewrite(old_script, f"{case.name}_{dir_name}")
 
     return {
+        "kind": kind,
         "dir_name": dir_name,
         "target_dir": target_dir,
         "exists": ssh.exists(target, target_dir),
@@ -245,7 +278,8 @@ def plan_dt0(case: Case, finit_file: str, *, dir_name: str | None = None) -> dic
 
 
 def stage_dt0(case: Case, plan: dict[str, Any], *, overwrite: bool = False) -> dict[str, Any]:
-    """Write the planned dt=0 directory. Call only after the plan was approved."""
+    """Write a planned dt=0 or production-run directory. Call only after the
+    plan was approved."""
     _cfg, target = _machine(case)
     target_dir = plan["target_dir"]
     if ssh.exists(target, target_dir) and not overwrite:
@@ -260,7 +294,7 @@ def stage_dt0(case: Case, plan: dict[str, Any], *, overwrite: bool = False) -> d
     ssh.write_file(target, f"{target_dir}/input", plan["input_text"])
     ssh.write_file(target, f"{target_dir}/{plan['script_name']}", plan["script_text"])
     entry = cfg.append_log(
-        case, "stage-dt0",
+        case, "stage-run" if plan.get("kind") == "run" else "stage-dt0",
         dir=plan["dir_name"], finit_file=plan["finit_file"],
         input_notes=plan["input_notes"], script_notes=plan["script_notes"],
         resources=plan["resources"],
@@ -447,3 +481,89 @@ def adjust(
         metrics=payload.get("metrics"), output=payload.get("output"), local=local,
     )
     return payload
+
+
+# --- initial-transient comparison (paper figures) ---------------------------
+
+def compare(
+    case: Case,
+    dirs: list[str] | None = None,
+    *,
+    labels: list[str] | None = None,
+    psi: float = 0.45,
+    f0_step: int | None = None,
+    particles: bool = True,
+    end_window_ms: float = 0.04,
+) -> dict[str, Any]:
+    """Run ``remote/transient_compare.py`` over the Maxwellian run and the
+    production runs (default: every ``finit_*`` directory in the inventory),
+    then pull the JSON and PNGs into the case's artifacts directory."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    prefix = str((case.run or {}).get("dir_prefix", "finit_"))
+    if not dirs:
+        inv = inventory(case)
+        dirs = sorted(
+            (d["name"] for d in inv["dirs"] if d["name"].startswith(prefix) and d["has_input"]),
+            key=_smooth_sort_key,
+        )
+    if not dirs:
+        raise ProcedureError(f"no {prefix}* directories under {case.root}; run stage-run first")
+    if labels and len(labels) != len(dirs):
+        raise ProcedureError("--label must be given once per directory")
+    labels = labels or [_default_label(d, prefix) for d in dirs]
+
+    out_dir = f"{case.root}/.xgc-finit/compare"
+    ssh.mkdir_p(target, out_dir)
+    stem = f"transient_psi{psi:g}"
+    remote_prefix = f"{out_dir}/{stem}"
+    script = _push_helper(case, target, "transient_compare.py")
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--psi", str(psi), "--end-window", str(end_window_ms), "--out-prefix", remote_prefix]
+    for d, lbl in zip(dirs, labels):
+        argv += ["--finit-dir", case.subdir(d), "--label", lbl]
+    if f0_step is not None:
+        argv += ["--f0-step", str(f0_step)]
+    if not particles:
+        argv.append("--no-particles")
+
+    payload = _run_json(target, argv, timeout=3600)
+
+    case.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    local: dict[str, str] = {}
+    pulls = [("json", payload["json"])] + [(f"png_{k}", v) for k, v in payload.get("png", {}).items()]
+    for key, remote in pulls:
+        local_path = case.artifacts_dir / Path(remote).name
+        try:
+            ssh.pull(target, remote, str(local_path))
+            local[key] = str(local_path)
+        except ssh.SSHError as exc:
+            local[f"{key}_error"] = str(exc)
+    payload["local"] = local
+    cfg.append_log(
+        case, "compare", dirs=dirs, labels=labels, psi=payload.get("psi_at"),
+        f0_step=payload.get("f0_step"), summary=payload.get("summary"), local=local,
+    )
+    return payload
+
+
+def _smooth_sort_key(name: str) -> tuple[float, float]:
+    nums = re.findall(r"[0-9.]+", name)
+    try:
+        return (float(nums[-2]), float(nums[-1]))
+    except (IndexError, ValueError):
+        return (float("inf"), float("inf"))
+
+
+def _default_label(dir_name: str, prefix: str) -> str:
+    """``finit_sm_0.5_0.5 -> 'pol. smooth 0.5 rad'``; ``finit_sm_0_0.5 -> 'v smooth, no pol. smooth'``."""
+    tag = dir_name[len(prefix):] if dir_name.startswith(prefix) else dir_name
+    match = re.match(r"^sm_([0-9.]+)_([0-9.]+)$", tag)
+    if not match:
+        return dir_name
+    sigma, width = float(match.group(1)), float(match.group(2))
+    if sigma == 0 and width == 0:
+        return "No smooth"
+    if sigma == 0:
+        return "v smooth, no pol. smooth"
+    return f"pol. smooth {cfg.fmt_num(sigma)} rad"

@@ -47,7 +47,10 @@ use_initial_moments=True)`, removes the analytic Maxwellian, and saves
 applies `poloidal_smooth_f_init(sigma_theta)` (Gaussian along each flux
 surface, radians) and `vspace_smooth(v_width)` (Gaussian in velocity space,
 grid cells) and saves `xgc.f_init_smooth_<sigma>_<width>.bp`. Numbers are
-rendered the way the notebook did (`0.3_0.5`, `0_0`, `1_0.5`).
+rendered the way the notebook did (`0.3_0.5`, `0_0`, `1_0.5`). In a smoothing
+scan the no-smooth file already exists after the first call; it is then kept
+as is (logged as `reused`) and only the new smooth file is written, so
+`--overwrite` is needed only to replace a file that really exists.
 
 **C.** `stage-dt0 --finit <file>` copies the job files from `maxwell/` into
 `dt0_<tag>/` and edits the input in place so the diff is reviewable:
@@ -94,6 +97,29 @@ The flux-surface average is `xgc_reader.distribution.core.flux_surface_average`
 interpolated through the 1-D diagnostic psi grid instead; on cbc6 both grids
 have 68 points and coincide, and the library route does not depend on that.
 
+**F. Production run.** `stage-run --finit xgc.f_init_adjusted_<tag>.bp`
+writes `finit_sm_<sigma>_<width>/` (cbc3's convention; the `adjusted` prefix
+is dropped from the directory name, the log records the file). It is stage
+A's input with only the f_init slot switched, plus whatever the case file
+lists under `run.overrides` (cbc6: the `diag_particle_*` settings, which the
+maxwell input already carried). `sml_dt`, `sml_mstep` and `sml_restart` are
+kept so a job that hits the wall clock can be restarted like any XGC run.
+`submit finit_sm_<tag> --confirm` works as for the dt=0 directories. These
+runs are not given registry `simulation_id`s; they live and are logged inside
+the f_init case, as the cbc3 runs were.
+
+**G. Transient comparison.** `compare` runs `remote/transient_compare.py`
+on the login node over the Maxwellian run and every `finit_*` directory (or
+the ones named). It reproduces the paper's CBC figures and the plotting
+notebook: radial vorticity flux `-<Gamma_i> eB/(2 m_p n_i0)` and
+flux-surface-averaged ExB shear at one `psi_N` (default 0.45), the shear
+magnified over the last `--end-window` ms, vorticity flux over `(psi_N, t)`
+on one colour scale, the radial energy flux, and the particle-noise rms from
+`xgc.particle.*.bp`. The f_init runs are shifted by the time of the f0 step
+they came from so they continue the precursor curve. JSON and PNGs are pulled
+to `f_init/cases/<case>/transient_psi<psi>*`; a summary table (transient
+peaks, end-of-run shear scatter, last noise level) is printed and logged.
+
 **E.** `stage-dt0 --finit xgc.f_init_adjusted_<tag>.bp`, `submit`, then
 `check dt0_adjusted_<tag>` prints the residual mismatch without writing a
 file. Repeat `adjust` on that directory if another pass is wanted. The
@@ -120,6 +146,9 @@ xgc-finit cbc6 adjust dt0_smooth_0.3_0.5
 xgc-finit cbc6 stage-dt0 --finit xgc.f_init_adjusted_smooth_0.3_0.5.bp --confirm
 xgc-finit cbc6 submit dt0_adjusted_smooth_0.3_0.5 --confirm
 xgc-finit cbc6 check dt0_adjusted_smooth_0.3_0.5
+xgc-finit cbc6 stage-run --finit xgc.f_init_adjusted_smooth_0.3_0.5.bp --confirm   # finit_sm_0.3_0.5/
+xgc-finit cbc6 submit finit_sm_0.3_0.5 --confirm
+xgc-finit cbc6 compare                                  # paper-style transient figures
 xgc-finit cbc6 log
 ```
 
@@ -136,7 +165,8 @@ xgc-finit cbc6 log
 | `sbatch.py` | read/rewrite the hand-written `xgcs.cpu`, node-hour estimate |
 | `remote/make_f_init.py` | login-node script for stage B |
 | `remote/adjust_f_init.py` | login-node script for stages D/E |
-| `cases/<name>.yaml` | one case: root, species slot, smoothing, dt0 settings |
+| `remote/transient_compare.py` | login-node script for the transient comparison figures (G) |
+| `cases/<name>.yaml` | one case: root, species slot, smoothing, dt0 settings, `run.overrides` for production runs |
 | `cases/<name>.log.yaml` | what was done, when, with which job ids and metrics |
 | `cases/<name>/` | pulled JSON/PNG summaries of the density comparisons |
 

@@ -3,11 +3,13 @@
     xgc-finit CASE status
     xgc-finit CASE make-finit [--sigma-theta S] [--v-width W] [--step N] [--overwrite]
     xgc-finit CASE stage-dt0 --finit FILE [--dir NAME] [--confirm] [--overwrite]
+    xgc-finit CASE stage-run --finit FILE [--dir NAME] [--confirm] [--overwrite]
     xgc-finit CASE dryrun DIR
     xgc-finit CASE submit DIR [--confirm] [--skip-dryrun]
     xgc-finit CASE jobs
     xgc-finit CASE adjust DIR [--factor F] [--check-only] [--ref-step N] [--cmp-step N] [--overwrite]
     xgc-finit CASE check DIR
+    xgc-finit CASE compare [DIR ...] [--psi P] [--label L ...] [--no-particles]
     xgc-finit CASE log
 
 ``CASE`` is a name under ``f_init/cases/`` or a path to a case YAML. Anything
@@ -74,7 +76,8 @@ def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells")
     for out in payload["outputs"]:
         stats = payload["f_g_stats"].get(out["kind"], {})
-        print(f"  wrote {out['path']}  (|f_g| max {stats.get('abs_max', 0):.3e}, rms {stats.get('rms', 0):.3e})")
+        verb = "kept " if out.get("reused") else "wrote"
+        print(f"  {verb} {out['path']}  (|f_g| max {stats.get('abs_max', 0):.3e}, rms {stats.get('rms', 0):.3e})")
     return 0
 
 
@@ -83,12 +86,14 @@ def _print_resources(res: dict[str, Any]) -> None:
           f"account={res['account']} -> up to {res['node_hours']} node-hours")
 
 
-def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace) -> int:
-    plan = proc.plan_dt0(case, args.finit, dir_name=args.dir)
+def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace, *, run: bool = False) -> int:
+    planner = proc.plan_run if run else proc.plan_dt0
+    plan = planner(case, args.finit, dir_name=args.dir)
     if args.json and not args.confirm:
         _print(plan, True)
         return 0
-    print(f"dt=0 directory: {plan['target_dir']}" + ("  (EXISTS)" if plan["exists"] else ""))
+    label = "production-run" if run else "dt=0"
+    print(f"{label} directory: {plan['target_dir']}" + ("  (EXISTS)" if plan["exists"] else ""))
     print(f"copy from {case.maxwell_dir}/: {', '.join(plan['copy_files'])}")
     print("input changes:")
     for note in plan["input_notes"]:
@@ -179,6 +184,28 @@ def cmd_adjust(case: cfg.Case, args: argparse.Namespace, *, check_only: bool = F
     return 0
 
 
+def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.compare(
+        case, args.dirs or None, labels=args.label or None, psi=args.psi,
+        f0_step=args.f0_step, particles=not args.no_particles, end_window_ms=args.end_window,
+    )
+    if args.json:
+        _print(payload, True)
+        return 0
+    print(f"traces at psi_N={payload['psi_at']:.3f} (index {payload['psi_index']}); "
+          f"f_init runs shifted by {payload['t_offset_ms']:.4f} ms (f0 step {payload['f0_step']})")
+    print(f"{'run':<22} {'label':<26} {'|vort| peak':>11} {'|shear| pk':>10} {'|eflux| pk':>10} {'shear std end':>13} {'noise last':>10}")
+    for row in payload["summary"]:
+        def f(v, fmt="{:.3g}"):
+            return "-" if v is None else fmt.format(v)
+        print(f"{row['name']:<22} {row['label']:<26} {f(row['vort_flux_peak']):>11} "
+              f"{f(row['shear_peak_khz']):>10} {f(row['eflux_peak_mw']):>10} "
+              f"{f(row['shear_end_std_khz']):>13} {f(row['noise_rms_last']):>10}")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
+    return 0
+
+
 def cmd_log(case: cfg.Case, args: argparse.Namespace) -> int:
     entries = cfg.read_log(case)
     if args.json:
@@ -215,6 +242,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--overwrite", action="store_true")
 
+    p = sub.add_parser("stage-run", help="plan/write a production-run directory (finit_sm_<tag>) for one f_init file")
+    p.add_argument("--finit", required=True, help="f_init file name in the stage A directory, usually an adjusted one")
+    p.add_argument("--dir", default=None, help="directory name; default finit_sm_<sigma>_<width>")
+    p.add_argument("--confirm", action="store_true")
+    p.add_argument("--overwrite", action="store_true")
+
     p = sub.add_parser("dryrun", help="xgca --dryrun in a staged directory")
     p.add_argument("dir")
 
@@ -238,6 +271,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ref-step", type=int, default=None)
     p.add_argument("--cmp-step", type=int, default=None)
 
+    p = sub.add_parser("compare", help="initial-transient figures: Maxwellian vs f_init production runs (login node)")
+    p.add_argument("dirs", nargs="*", help="production-run directories; default every finit_* directory")
+    p.add_argument("--label", action="append", default=[], help="legend label per directory")
+    p.add_argument("--psi", type=float, default=0.45, help="psi_N of the 1-D traces")
+    p.add_argument("--f0-step", type=int, default=None, help="time offset step; default last f0 step")
+    p.add_argument("--end-window", type=float, default=0.04, help="magnified shear window [ms]")
+    p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
+
     sub.add_parser("log", help="what this CLI has done to the case")
     return parser
 
@@ -250,11 +291,13 @@ def main(argv: list[str] | None = None) -> int:
             "status": cmd_status,
             "make-finit": cmd_make_finit,
             "stage-dt0": cmd_stage_dt0,
+            "stage-run": lambda c, a: cmd_stage_dt0(c, a, run=True),
             "dryrun": cmd_dryrun,
             "submit": cmd_submit,
             "jobs": cmd_jobs,
             "adjust": cmd_adjust,
             "check": lambda c, a: cmd_adjust(c, a, check_only=True),
+            "compare": cmd_compare,
             "log": cmd_log,
         }
         return handlers[args.command](case, args)
