@@ -494,6 +494,7 @@ def compare(
     f0_step: int | None = None,
     particles: bool = True,
     end_window_ms: float = 0.04,
+    shift_finit: bool = False,
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -521,11 +522,15 @@ def compare(
     argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
             "--psi", str(psi), "--end-window", str(end_window_ms), "--out-prefix", remote_prefix]
     for d, lbl in zip(dirs, labels):
-        argv += ["--finit-dir", case.subdir(d), "--label", lbl]
+        color, style = _line_appearance(d, prefix)
+        # '=' form: a style such as '-.' would otherwise be read as an option.
+        argv += ["--finit-dir", case.subdir(d), "--label", lbl, f"--color={color}", f"--style={style}"]
     if f0_step is not None:
         argv += ["--f0-step", str(f0_step)]
     if not particles:
         argv.append("--no-particles")
+    if shift_finit:
+        argv.append("--shift-finit")
 
     payload = _run_json(target, argv, timeout=3600)
 
@@ -542,7 +547,8 @@ def compare(
     payload["local"] = local
     cfg.append_log(
         case, "compare", dirs=dirs, labels=labels, psi=payload.get("psi_at"),
-        f0_step=payload.get("f0_step"), summary=payload.get("summary"), local=local,
+        f0_step=payload.get("f0_step"), shift_finit=shift_finit,
+        summary=payload.get("summary"), local=local,
     )
     return payload
 
@@ -553,6 +559,30 @@ def _smooth_sort_key(name: str) -> tuple[float, float]:
         return (float(nums[-2]), float(nums[-1]))
     except (IndexError, ValueError):
         return (float("inf"), float("inf"))
+
+
+# Fixed colours so a curve keeps its identity when runs are added to the scan:
+# Maxwellian is always C0 (blue); the smoothing settings below keep the
+# matplotlib cycle they were first drawn with (0.5 rad = C3, red).
+_APPEARANCE: dict[tuple[float, float], tuple[str, str]] = {
+    (0.0, 0.0): ("black", "-."),
+    (0.0, 0.5): ("C1", "-."),
+    (0.3, 0.5): ("C2", "--"),
+    (0.5, 0.5): ("C3", "-"),
+    (0.8, 0.5): ("C4", ":"),
+    (1.0, 0.5): ("C5", "(0, (3, 1, 1, 1, 1, 1))"),
+}
+_FALLBACK_COLOURS = ["C6", "C7", "C8", "C9"]
+
+
+def _line_appearance(dir_name: str, prefix: str) -> tuple[str, str]:
+    key = _smooth_sort_key(dir_name)
+    if key in _APPEARANCE:
+        return _APPEARANCE[key]
+    used = {v[0] for v in _APPEARANCE.values()}
+    spare = [c for c in _FALLBACK_COLOURS if c not in used]
+    idx = abs(hash(key)) % len(spare)
+    return spare[idx], "--"
 
 
 def _default_label(dir_name: str, prefix: str) -> str:

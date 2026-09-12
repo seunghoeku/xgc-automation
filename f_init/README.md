@@ -115,8 +115,9 @@ notebook: radial vorticity flux `-<Gamma_i> eB/(2 m_p n_i0)` and
 flux-surface-averaged ExB shear at one `psi_N` (default 0.45), the shear
 magnified over the last `--end-window` ms, vorticity flux over `(psi_N, t)`
 on one colour scale, the radial energy flux, and the particle-noise rms from
-`xgc.particle.*.bp`. The f_init runs are shifted by the time of the f0 step
-they came from so they continue the precursor curve. JSON and PNGs are pulled
+`xgc.particle.*.bp`. Every run starts at t = 0 as in the paper; with
+`--shift-finit` the f_init runs are shifted by the time of the f0 step they
+came from and continue the precursor curve instead. JSON and PNGs are pulled
 to `f_init/cases/<case>/transient_psi<psi>*`; a summary table (transient
 peaks, end-of-run shear scatter, last noise level) is printed and logged.
 

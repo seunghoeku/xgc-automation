@@ -188,12 +188,15 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.compare(
         case, args.dirs or None, labels=args.label or None, psi=args.psi,
         f0_step=args.f0_step, particles=not args.no_particles, end_window_ms=args.end_window,
+        shift_finit=args.shift_finit,
     )
     if args.json:
         _print(payload, True)
         return 0
-    print(f"traces at psi_N={payload['psi_at']:.3f} (index {payload['psi_index']}); "
-          f"f_init runs shifted by {payload['t_offset_ms']:.4f} ms (f0 step {payload['f0_step']})")
+    how = (f"shifted by {payload['t_offset_ms']:.4f} ms (f0 step {payload['f0_step']})"
+           if payload.get("shift_finit") else
+           f"plotted from t=0 (f_init extracted at {payload['t_offset_ms']:.4f} ms, f0 step {payload['f0_step']})")
+    print(f"traces at psi_N={payload['psi_at']:.3f} (index {payload['psi_index']}); f_init runs {how}")
     print(f"{'run':<22} {'label':<26} {'|vort| peak':>11} {'|shear| pk':>10} {'|eflux| pk':>10} {'shear std end':>13} {'noise last':>10}")
     for row in payload["summary"]:
         def f(v, fmt="{:.3g}"):
@@ -277,6 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--psi", type=float, default=0.45, help="psi_N of the 1-D traces")
     p.add_argument("--f0-step", type=int, default=None, help="time offset step; default last f0 step")
     p.add_argument("--end-window", type=float, default=0.04, help="magnified shear window [ms]")
+    p.add_argument("--shift-finit", action="store_true",
+                   help="continue the Maxwellian curve: shift f_init runs by the f0 extraction time")
     p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
 
     sub.add_parser("log", help="what this CLI has done to the case")
