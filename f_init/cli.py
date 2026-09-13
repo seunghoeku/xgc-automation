@@ -9,7 +9,8 @@
     xgc-finit CASE jobs
     xgc-finit CASE adjust DIR [--factor F] [--check-only] [--ref-step N] [--cmp-step N] [--overwrite]
     xgc-finit CASE check DIR
-    xgc-finit CASE compare [DIR ...] [--psi P] [--label L ...] [--no-particles]
+    xgc-finit CASE compare [DIR ...] [--psi P] [--shift-finit] [--paper] [--no-particles]
+    xgc-finit CASE extend-maxwell [--confirm]
     xgc-finit CASE log
 
 ``CASE`` is a name under ``f_init/cases/`` or a path to a case YAML. Anything
@@ -188,7 +189,7 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.compare(
         case, args.dirs or None, labels=args.label or None, psi=args.psi,
         f0_step=args.f0_step, particles=not args.no_particles, end_window_ms=args.end_window,
-        shift_finit=args.shift_finit,
+        shift_finit=args.shift_finit, paper=args.paper, twod_runs=args.twod_runs or None,
     )
     if args.json:
         _print(payload, True)
@@ -206,6 +207,32 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
               f"{f(row['shear_end_std_khz']):>13} {f(row['noise_rms_last']):>10}")
     for key, path in payload.get("local", {}).items():
         print(f"  {key}: {path}")
+    return 0
+
+
+def cmd_extend_maxwell(case: cfg.Case, args: argparse.Namespace) -> int:
+    plan = proc.plan_extend_maxwell(case)
+    if args.json and not args.confirm:
+        _print(plan, True)
+        return 0
+    print(f"continue {plan['target_dir']} from restart step {plan['restart_step']} "
+          f"(last 2d output {plan['last_2d_step']}); sml_mstep={plan['sml_mstep']} unchanged "
+          f"-> expected end step {plan['expected_end_step']}")
+    print(f"{plan['script_name']} changes:")
+    for note in plan["script_notes"]:
+        print(f"  {note}")
+    _print_resources(plan["resources"])
+    if not args.confirm:
+        print("\nPlan only. Re-run with --confirm to write the script and submit (dryrun gate first).")
+        return 0
+    result = proc.extend_maxwell(case, plan)
+    if args.json:
+        _print(result, True)
+        return 0
+    if result["dryrun"]:
+        print("dryrun: " + result["dryrun"]["summary"].splitlines()[0])
+    print(f"submitted job {result['job_id']} for {result['dir']}")
+    _print_resources(result["resources"])
     return 0
 
 
@@ -282,7 +309,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end-window", type=float, default=0.04, help="magnified shear window [ms]")
     p.add_argument("--shift-finit", action="store_true",
                    help="continue the Maxwellian curve: shift f_init runs by the f0 extraction time")
+    p.add_argument("--paper", action="store_true",
+                   help="publication styling (large fonts, 13x10 in, thick lines); files get a _paper suffix")
+    p.add_argument("--twod-runs", nargs="*", default=None,
+                   help="runs for the (psi_N, t) figure, e.g. maxwell finit_sm_0.5_0.5; default all")
     p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
+
+    p = sub.add_parser("extend-maxwell", help="resubmit stage A so it continues from its last checkpoint")
+    p.add_argument("--confirm", action="store_true")
 
     sub.add_parser("log", help="what this CLI has done to the case")
     return parser
@@ -303,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
             "adjust": cmd_adjust,
             "check": lambda c, a: cmd_adjust(c, a, check_only=True),
             "compare": cmd_compare,
+            "extend-maxwell": cmd_extend_maxwell,
             "log": cmd_log,
         }
         return handlers[args.command](case, args)

@@ -41,6 +41,7 @@ DEFAULTS: dict[str, Any] = {
         "compare_step": None,    # xgc.2d.<step>.bp of the dt0 run; None = first
     },
     "adjust_factor": 1.0,
+    "f0_step": None,             # f0 snapshot the f_init came from; None = last one in stage A
     "run": {
         # Production run started from an (adjusted) f_init: same input as
         # stage A except the f_init slot, plus these namelist overrides.
@@ -73,6 +74,7 @@ class Case:
     remote: dict[str, Any]
     path: Path
     run: dict[str, Any] = field(default_factory=dict)
+    f0_step: int | None = None
     note: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -134,7 +136,7 @@ def load_case(name_or_path: str) -> Case:
     if not root or machines.is_placeholder(root):
         raise CaseError(f"{path}: 'root' (remote case directory) is not set")
     known = {"name", "root", "machine", "maxwell_dir", "species", "smooth", "dt0",
-             "adjust_factor", "job", "remote", "note", "run"}
+             "adjust_factor", "job", "remote", "note", "run", "f0_step"}
     return Case(
         name=str(data.get("name") or path.stem),
         root=str(root),
@@ -147,6 +149,7 @@ def load_case(name_or_path: str) -> Case:
         job=dict(data["job"]),
         remote=dict(data["remote"] or {}),
         run=dict(data.get("run") or {}),
+        f0_step=None if data.get("f0_step") is None else int(data["f0_step"]),
         path=path,
         note=data.get("note"),
         extra={k: v for k, v in data.items() if k not in known},

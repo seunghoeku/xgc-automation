@@ -100,6 +100,11 @@ def main() -> int:
     parser.add_argument("--shift-finit", action="store_true",
                         help="shift f_init runs by the f0 extraction time instead of starting at 0")
     parser.add_argument("--no-particles", action="store_true")
+    parser.add_argument("--paper", action="store_true",
+                        help="publication styling: font 28, 13x10 in figures, linewidth 3, dpi 180")
+    parser.add_argument("--twod-runs", nargs="*", default=None,
+                        help="run names (directory basenames, 'maxwell' for stage A) for the 2-D "
+                             "figure; default all. Two panels are labelled (a)/(b) like the paper")
     parser.add_argument("--out-prefix", required=True)
     args = parser.parse_args()
 
@@ -179,7 +184,8 @@ def main() -> int:
         runs[0]["noise_rms"] = rms
 
     # --- figures ----------------------------------------------------------
-    plt.rcParams.update({"font.size": 16})
+    font, figsize, lw, dpi, legend_fs = (28, (13, 10), 3.0, 180, 24) if args.paper else (16, (9, 6.5), 2.2, 150, 13)
+    plt.rcParams.update({"font.size": font})
     outputs = {}
 
     def parse_style(value):
@@ -195,7 +201,7 @@ def main() -> int:
     def series_figure(key, ylabel, title, fname, xlim=None, loc="best"):
         """One trace per run; with ``xlim`` the y range follows the data inside
         the window and runs without samples there stay out of the legend."""
-        fig, ax = plt.subplots(figsize=(9, 6.5))
+        fig, ax = plt.subplots(figsize=figsize)
         inside = []
         for i, r in enumerate(runs):
             t = np.asarray(r["time_ms"])
@@ -204,7 +210,7 @@ def main() -> int:
             if not np.any(m):
                 continue
             inside.extend(v[m].tolist())
-            ax.plot(t, v, label=r["label"], linewidth=2.2, linestyle=r["style"], color=r["color"])
+            ax.plot(t, v, label=r["label"], linewidth=lw, linestyle=r["style"], color=r["color"])
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -213,10 +219,10 @@ def main() -> int:
             if inside:
                 pad = 0.1 * (max(inside) - min(inside)) or 1.0
                 ax.set_ylim(min(inside) - pad, max(inside) + pad)
-        ax.legend(loc=loc, fontsize=13)
+        ax.legend(loc=loc, fontsize=legend_fs)
         fig.tight_layout()
         path = f"{out_prefix}_{fname}.png"
-        fig.savefig(path, dpi=150)
+        fig.savefig(path, dpi=dpi)
         plt.close(fig)
         outputs[fname] = path
 
@@ -242,41 +248,57 @@ def main() -> int:
     # uses the same explicit levels so the colour bar applies to all of them.
     z0 = np.asarray(runs[0]["vort_flux_2d"])
     levels = np.linspace(float(z0.min()), float(z0.max()), 101)
-    ncol = len(runs)
-    fig, axes = plt.subplots(1, ncol, figsize=(4.4 * ncol, 6.5))
-    axes = np.atleast_1d(axes)
-    fig.subplots_adjust(wspace=0.45)
-    span = 0.3   # ms shown after each start
-    for ax, r in zip(axes, runs):
-        z = np.clip(np.asarray(r["vort_flux_2d"]), levels[0], levels[-1])
-        cf = ax.contourf(psi_1d, np.asarray(r["time_ms"]), z, levels=levels, cmap="viridis")
-        ax.set_xlabel("$\\psi_N$")
-        ax.set_title(r["label"], fontsize=13)
-        ax.set_xlim(0.0, 0.8)
-        t0 = 0.0 if r["name"] == "maxwell" else t_first
-        ax.set_ylim(t0, t0 + span)
-        if t_first == 0.0 and ax is not axes[0]:
-            ax.tick_params(labelleft=False)
-    axes[0].set_ylabel("Time (ms)")
-    fig.colorbar(cf, ax=axes.tolist(), shrink=0.8, label="Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)")
-    path = f"{out_prefix}_vorticity_2d.png"
-    fig.savefig(path, dpi=130, bbox_inches="tight")
-    plt.close(fig)
+    twod = runs if args.twod_runs is None else [r for r in runs if r["name"] in args.twod_runs]
+    if args.twod_runs is not None and len(twod) != len(args.twod_runs):
+        known = [r["name"] for r in runs]
+        raise SystemExit(f"--twod-runs: unknown run among {args.twod_runs}; known: {known}")
+    ncol = len(twod)
+    paper_2d = args.paper and ncol == 2
+    with plt.rc_context({"font.size": 19 if paper_2d else font}):
+        fig, axes = plt.subplots(1, ncol, figsize=(14, 7) if paper_2d else (4.4 * ncol, 6.5),
+                                 sharey=paper_2d)
+        axes = np.atleast_1d(axes)
+        if not paper_2d:
+            fig.subplots_adjust(wspace=0.45)
+        span = 0.3   # ms shown after each start
+        for k, (ax, r) in enumerate(zip(axes, twod)):
+            z = np.clip(np.asarray(r["vort_flux_2d"]), levels[0], levels[-1])
+            cf = ax.contourf(psi_1d, np.asarray(r["time_ms"]), z, levels=levels, cmap="viridis")
+            ax.set_xlabel("$\\psi_N$")
+            if paper_2d:
+                ax.set_title(f"({'ab'[k]}) " + ("From Maxwellian" if r["name"] == "maxwell" else "Neoclassical Start"))
+            else:
+                ax.set_title(r["label"], fontsize=13)
+            ax.set_xlim(0.0, 0.8)
+            t0 = 0.0 if r["name"] == "maxwell" else t_first
+            ax.set_ylim(t0, t0 + span)
+            if t_first == 0.0 and ax is not axes[0] and not paper_2d:
+                ax.tick_params(labelleft=False)
+            if paper_2d:
+                fig.colorbar(cf, ax=ax)
+        axes[0].set_ylabel("Time (ms)")
+        if not paper_2d:
+            fig.colorbar(cf, ax=axes.tolist(), shrink=0.8, label="Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)")
+        path = f"{out_prefix}_vorticity_2d.png"
+        fig.savefig(path, dpi=dpi if paper_2d else 130, bbox_inches="tight")
+        plt.close(fig)
     outputs["vorticity_2d"] = path
 
     if not args.no_particles:
-        fig, ax = plt.subplots(figsize=(9, 6.5))
+        fig, ax = plt.subplots(figsize=figsize)
         for i, r in enumerate(runs):
             if r.get("noise_time_ms"):
                 ax.plot(r["noise_time_ms"], np.asarray(r["noise_rms"]) * 1e-12, label=r["label"],
-                        linewidth=2, linestyle=r["style"], color=r["color"])
+                        linewidth=lw, linestyle=r["style"], color=r["color"])
+        if not args.shift_finit:
+            ax.set_xlim(0.0, min(r["time_ms"][-1] for r in runs))
         ax.set_xlabel("time [ms]")
         ax.set_ylabel("RMS particle weights (A.U.)")
         ax.set_title(f"Particle noise, {args.psi_band[0]} < $\\psi_N$ < {args.psi_band[1]}")
-        ax.legend(fontsize=13)
+        ax.legend(fontsize=legend_fs)
         fig.tight_layout()
         path = f"{out_prefix}_noise.png"
-        fig.savefig(path, dpi=150)
+        fig.savefig(path, dpi=dpi)
         plt.close(fig)
         outputs["noise"] = path
 

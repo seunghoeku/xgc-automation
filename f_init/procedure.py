@@ -162,6 +162,7 @@ def make_finit(
         argv += ["--smooth-name", cfg.smooth_file(sigma, width)]
     if species.get("has_electron"):
         argv.append("--has-electron")
+    step = case.f0_step if step is None else step
     if step is not None:
         argv += ["--step", str(step)]
     if overwrite:
@@ -454,6 +455,7 @@ def adjust(
         argv.append("--check-only")
     else:
         argv += ["--out", f"{finit_dir}/{out_file}"]
+    ref_step = case.f0_step if ref_step is None else ref_step
     if ref_step is not None:
         argv += ["--ref-step", str(ref_step)]
     if cmp_step is not None:
@@ -495,6 +497,8 @@ def compare(
     particles: bool = True,
     end_window_ms: float = 0.04,
     shift_finit: bool = False,
+    paper: bool = False,
+    twod_runs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -514,9 +518,10 @@ def compare(
         raise ProcedureError("--label must be given once per directory")
     labels = labels or [_default_label(d, prefix) for d in dirs]
 
+    f0_step = case.f0_step if f0_step is None else f0_step
     out_dir = f"{case.root}/.xgc-finit/compare"
     ssh.mkdir_p(target, out_dir)
-    stem = f"transient_psi{psi:g}"
+    stem = f"transient_psi{psi:g}" + ("_shift" if shift_finit else "") + ("_paper" if paper else "")
     remote_prefix = f"{out_dir}/{stem}"
     script = _push_helper(case, target, "transient_compare.py")
     argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
@@ -531,6 +536,10 @@ def compare(
         argv.append("--no-particles")
     if shift_finit:
         argv.append("--shift-finit")
+    if paper:
+        argv.append("--paper")
+    if twod_runs:
+        argv += ["--twod-runs", *twod_runs]
 
     payload = _run_json(target, argv, timeout=3600)
 
@@ -547,7 +556,7 @@ def compare(
     payload["local"] = local
     cfg.append_log(
         case, "compare", dirs=dirs, labels=labels, psi=payload.get("psi_at"),
-        f0_step=payload.get("f0_step"), shift_finit=shift_finit,
+        f0_step=payload.get("f0_step"), shift_finit=shift_finit, paper=paper,
         summary=payload.get("summary"), local=local,
     )
     return payload
@@ -597,3 +606,47 @@ def _default_label(dir_name: str, prefix: str) -> str:
     if sigma == 0:
         return "v smooth, no pol. smooth"
     return f"pol. smooth {cfg.fmt_num(sigma)} rad"
+
+
+# --- stage A continuation ---------------------------------------------------
+
+def plan_extend_maxwell(case: Case) -> dict[str, Any]:
+    """Resubmit the stage A job so XGC continues from its last checkpoint.
+
+    XGC with ``sml_restart=.true.`` and a populated ``restart_dir`` resumes from
+    the latest ``xgc.restart.<step>.bp`` and runs another ``sml_mstep`` steps
+    (cbc3's maxwell reached step 4000 this way with sml_mstep=2000 unchanged).
+    The input is therefore left alone; only the sbatch script is rewritten
+    (job name, stale dependency dropped). Nothing is written without confirm."""
+    _cfg, target = _machine(case)
+    directory = case.maxwell_path
+    input_text = ssh.read_file(target, f"{directory}/input")
+    restart = nle.read_value(input_text, "sml_restart")
+    if restart is None or restart.strip().lower() != ".true.":
+        raise ProcedureError(f"{directory}/input has sml_restart={restart!r}; the continuation needs .true.")
+    listing = ssh.run(target, ["ls", f"{directory}/restart_dir"], timeout=60)
+    steps = sorted(int(m.group(1)) for m in re.finditer(r"xgc\.restart\.(\d+)\.bp", listing.stdout))
+    if not steps:
+        raise ProcedureError(f"{directory}/restart_dir holds no xgc.restart.*.bp; nothing to continue from")
+    inv = inventory(case)
+    maxwell = inv["maxwell"] or {}
+    mstep = nle.read_value(input_text, "sml_mstep")
+    script_name = case.job["script"]
+    old_script = ssh.read_file(target, f"{directory}/{script_name}")
+    new_script, notes = sb.rewrite(old_script, f"{case.name}_{case.maxwell_dir}_from{steps[-1]}")
+    return {
+        "dir_name": case.maxwell_dir, "target_dir": directory,
+        "restart_step": steps[-1], "last_2d_step": (maxwell.get("twod_steps") or [None])[-1],
+        "sml_mstep": mstep, "expected_end_step": steps[-1] + int(float(mstep.replace("D", "E"))) if mstep else None,
+        "script_name": script_name, "script_text": new_script, "script_notes": notes,
+        "resources": sb.resources(new_script),
+    }
+
+
+def extend_maxwell(case: Case, plan: dict[str, Any]) -> dict[str, Any]:
+    """Write the rewritten sbatch script and submit it (dryrun gate inside submit)."""
+    _cfg, target = _machine(case)
+    ssh.write_file(target, f"{plan['target_dir']}/{plan['script_name']}", plan["script_text"])
+    cfg.append_log(case, "extend-maxwell", dir=plan["dir_name"], restart_step=plan["restart_step"],
+                   expected_end_step=plan["expected_end_step"], script_notes=plan["script_notes"])
+    return submit(case, plan["dir_name"])

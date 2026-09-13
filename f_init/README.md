@@ -40,8 +40,17 @@ it: `submit maxwell`). It must run long enough to reach a neoclassical
 steady state and write `xgc.f0.<last>.bp` and `xgc.2d.<last>.bp` at the same
 step; cbc6 used `sml_dt=2e-3`, `sml_mstep=2000`, `diag_f0_period=100`.
 
+**A, continued.** `extend-maxwell` resubmits the stage A job unchanged so
+XGC resumes from the newest `restart_dir/xgc.restart.<step>.bp` and runs
+another `sml_mstep` steps (cbc6: 2000 -> 4000, 0.31 -> 0.62 ms, for the
+paper's long Maxwellian trace). Only the sbatch script is rewritten (job name,
+stale dependency dropped). Once stage A runs past the snapshot the f_init came
+from, set `f0_step` in the case file: it becomes the default snapshot for
+`make-finit`, the reference `xgc.2d` step for `adjust`/`check`, and the time
+offset for `compare`; otherwise those default to the last f0 step.
+
 **B.** `make-finit` runs `remote/make_f_init.py` on the login node. It reads
-the last f0 snapshot with `XGCDistribution.from_xgc_output(...,
+the last f0 snapshot (or `f0_step`) with `XGCDistribution.from_xgc_output(...,
 use_initial_moments=True)`, removes the analytic Maxwellian, and saves
 `xgc.f_init_no_smooth.bp`. If either smoothing width is positive it also
 applies `poloidal_smooth_f_init(sigma_theta)` (Gaussian along each flux
@@ -117,7 +126,9 @@ magnified over the last `--end-window` ms, vorticity flux over `(psi_N, t)`
 on one colour scale, the radial energy flux, and the particle-noise rms from
 `xgc.particle.*.bp`. Every run starts at t = 0 as in the paper; with
 `--shift-finit` the f_init runs are shifted by the time of the f0 step they
-came from and continue the precursor curve instead. JSON and PNGs are pulled
+came from and continue the precursor curve instead; `--paper` switches to
+publication styling (font 28, 13x10 in, thick lines). The file stem gains
+`_shift` / `_paper` so the variants coexist. JSON and PNGs are pulled
 to `f_init/cases/<case>/transient_psi<psi>*`; a summary table (transient
 peaks, end-of-run shear scatter, last noise level) is printed and logged.
 
@@ -149,7 +160,9 @@ xgc-finit cbc6 submit dt0_adjusted_smooth_0.3_0.5 --confirm
 xgc-finit cbc6 check dt0_adjusted_smooth_0.3_0.5
 xgc-finit cbc6 stage-run --finit xgc.f_init_adjusted_smooth_0.3_0.5.bp --confirm   # finit_sm_0.3_0.5/
 xgc-finit cbc6 submit finit_sm_0.3_0.5 --confirm
-xgc-finit cbc6 compare                                  # paper-style transient figures
+xgc-finit cbc6 compare                                  # transient figures, every run from t=0
+xgc-finit cbc6 compare --shift-finit --paper            # paper Fig. GAM: f_init runs continue the Maxwellian curve
+xgc-finit cbc6 extend-maxwell --confirm                 # continue stage A from its last checkpoint
 xgc-finit cbc6 log
 ```
 
