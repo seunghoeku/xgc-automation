@@ -101,8 +101,20 @@ saved next to its source as `xgc.f_init_adjusted_<tag>.bp` (then
 `adjusted2_`, ... for further iterations). A JSON summary and a PNG land in
 the dt0 directory and are pulled to `f_init/cases/<case>/`.
 
-The flux-surface average is `xgc_reader.distribution.core.flux_surface_average`
-(per-surface average scattered back through `mesh.psi_surf`). The notebook
+The flux-surface average is `xgc_reader`'s `fsa_simple` (volume-weighted
+per-surface mean) scattered back to the nodes through the surface membership
+lists `surf_idx`/`surf_len`; nodes on no stored surface (wall nodes) get no
+metric and no scaling, and by default (`adjust_region_max: 1` in the case
+file) neither do SOL or private-region nodes: the correction is applied on
+closed flux surfaces only, because the SOL of an XGCa run is still relaxing
+and its f0-grid density is too noisy to trust as a target (asdexu2,
+2026-09-14). Set `adjust_region_max: 2` to include the SOL.
+`xgc_reader.distribution.core.flux_surface_average`
+is not used because it interpolates surface values onto node psi, and with
+the private-flux surfaces appended after the SOL surfaces in `psi_surf` that
+interpolation is not monotonic: on asdexu2 (2026-09-14) it handed every node
+beyond psi_n 1.16 a private-region `<dn>`, which divided by the tiny far-SOL
+density looked like a 50% mismatch. The notebook
 interpolated through the 1-D diagnostic psi grid instead; on cbc6 both grids
 have 68 points and coincide, and the library route does not depend on that.
 

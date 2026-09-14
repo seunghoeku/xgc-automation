@@ -41,6 +41,9 @@ DEFAULTS: dict[str, Any] = {
         "compare_step": None,    # xgc.2d.<step>.bp of the dt0 run; None = first
     },
     "adjust_factor": 1.0,
+    # Mesh regions whose nodes are scored and rescaled by `adjust`: 1 = closed
+    # flux surfaces only (SOL and private region left untouched), 2 = also SOL.
+    "adjust_region_max": 1,
     "f0_step": None,             # f0 snapshot the f_init came from; None = last one in stage A
     "run": {
         # Production run started from an (adjusted) f_init: same input as

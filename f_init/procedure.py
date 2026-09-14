@@ -451,6 +451,7 @@ def adjust(
         "--json-out", json_remote,
         "--png-out", png_remote,
     ]
+    argv += ["--region-max", str(int(case.extra.get("adjust_region_max", 1)))]
     if check_only:
         argv.append("--check-only")
     else:

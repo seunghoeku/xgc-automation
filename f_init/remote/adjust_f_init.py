@@ -53,8 +53,9 @@ def main() -> int:
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--png-out", default=None)
-    parser.add_argument("--region-max", type=int, default=2,
-                        help="mesh regions <= this enter the metrics (2 = closed flux surfaces)")
+    parser.add_argument("--region-max", type=int, default=1,
+                        help="mesh regions <= this are scored and rescaled "
+                             "(1 = closed flux surfaces only, SOL untouched; 2 = also SOL)")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -111,7 +112,23 @@ def main() -> int:
     x1.setup_f0mesh()
 
     delta_n = iden_ref - iden_cmp
-    dn_fsa = xd.flux_surface_average(delta_n, x1)
+
+    def fsa_scatter(var: np.ndarray) -> np.ndarray:
+        # Per-surface volume-weighted average scattered back through the
+        # surface membership lists (surf_idx/surf_len). xgc_reader's
+        # flux_surface_average interpolates surface values onto node psi
+        # instead; with private-flux surfaces appended after the SOL ones in
+        # psi_surf that interpolation is not monotonic and hands far-SOL nodes
+        # a private-region value. Nodes on no surface stay NaN.
+        surf = x1.fsa_simple(var)
+        out = np.full(var.shape, np.nan)
+        for i in range(surf.size):
+            length = int(x1.mesh.surf_len[i])
+            if length > 0:
+                out[np.asarray(x1.mesh.surf_idx[i, :length]) - 1] = surf[i]
+        return out
+
+    dn_fsa = fsa_scatter(delta_n)
 
     dist = xd.XGCDistribution.from_xgc_input(finit)
     den, _temp, _flow = dist.update_maxwellian_moments(
@@ -126,9 +143,13 @@ def main() -> int:
     if region is not None:
         mask &= np.asarray(region) <= args.region_max
     mask &= den > 0
+    on_surface = np.isfinite(dn_fsa)
+    n_off_surface = int(np.sum(mask & ~on_surface))
+    mask &= on_surface   # nodes on no stored flux surface: no metric, no scaling
+    dn_fsa = np.where(on_surface, dn_fsa, 0.0)
 
     rel = np.zeros_like(dn_fsa)
-    rel[den > 0] = dn_fsa[den > 0] / den[den > 0]
+    rel[mask] = dn_fsa[mask] / den[mask]
     raw = np.zeros_like(delta_n)
     raw[den > 0] = delta_n[den > 0] / den[den > 0]
 
@@ -149,6 +170,7 @@ def main() -> int:
         "iden_dt0_range_m3": [float(iden_cmp[mask].min()), float(iden_cmp[mask].max())],
         "finit_density_range_m3": [float(den[mask].min()), float(den[mask].max())],
         "n_nodes_in_metric": int(mask.sum()),
+        "n_nodes_off_surface_excluded": n_off_surface,
     }
 
     payload = {
@@ -166,6 +188,7 @@ def main() -> int:
 
     if not args.check_only:
         scale = 1.0 + args.factor * rel
+        scale[~mask] = 1.0   # no correction outside the metric region
         dist.f *= scale[:, np.newaxis, np.newaxis]
         den_adj, _t, _f = dist.update_maxwellian_moments(
             x1, do_flux_average=False, no_update=True
