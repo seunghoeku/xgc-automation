@@ -128,9 +128,26 @@ on one colour scale, the radial energy flux, and the particle-noise rms from
 `--shift-finit` the f_init runs are shifted by the time of the f0 step they
 came from and continue the precursor curve instead; `--paper` switches to
 publication styling (font 28, 13x10 in, thick lines). The file stem gains
-`_shift` / `_paper` so the variants coexist. JSON and PNGs are pulled
+`_shift` / `_paper` so the variants coexist. With `--shift-finit` the
+vorticity-flux and shear figures carry an inset over the first 0.2 ms after
+the f_init start (referee request). `--twod-runs maxwell finit_sm_0.5_0.5`
+restricts the `(psi_N, t)` figure to the paper's two panels and
+`--twod-scale per-panel` gives each its own labelled colour bar (diverging
+map centred at zero) so a quiet run stays readable. The noise measure is the
+rms of `w1*w0` over the written marker sample (columns 4 and 7 of `iphase`:
+delta-f weight times full-f weight, i.e. physical ions per marker); `rms(w1)`
+is kept in the JSON as well. JSON and PNGs are pulled
 to `f_init/cases/<case>/transient_psi<psi>*`; a summary table (transient
 peaks, end-of-run shear scatter, last noise level) is printed and logged.
+
+**H. Paper Fig. 1 and E_r.** `distribution [--smooth FILE] [--normalize
+local|peak] [--paper]` draws `(f - f_M)` of the unsmoothed and the smoothed
+f_init at one node (default: outboard midplane nearest `--psi`), either per
+cell relative to the local `f_M` (masked where `f_M` is below 1 % of its
+peak) or relative to the node's peak `f_M`, with a diverging colour map and a
+labelled colour bar. `er-profile [--paper]` draws `<E_r>(psi_N) =
+-(d<phi>_00/dpsi) <|grad psi|>` of stage A at the f_init snapshot and at the
+end of the run. Both pull JSON and PNGs to `f_init/cases/<case>/`.
 
 **E.** `stage-dt0 --finit xgc.f_init_adjusted_<tag>.bp`, `submit`, then
 `check dt0_adjusted_<tag>` prints the residual mismatch without writing a
@@ -161,7 +178,10 @@ xgc-finit cbc6 check dt0_adjusted_smooth_0.3_0.5
 xgc-finit cbc6 stage-run --finit xgc.f_init_adjusted_smooth_0.3_0.5.bp --confirm   # finit_sm_0.3_0.5/
 xgc-finit cbc6 submit finit_sm_0.3_0.5 --confirm
 xgc-finit cbc6 compare                                  # transient figures, every run from t=0
-xgc-finit cbc6 compare --shift-finit --paper            # paper Fig. GAM: f_init runs continue the Maxwellian curve
+xgc-finit cbc6 compare --shift-finit --paper            # paper Fig. GAM: f_init runs continue the Maxwellian curve, with insets
+xgc-finit cbc6 compare --paper --twod-runs maxwell finit_sm_0.5_0.5 --twod-scale per-panel   # paper Figs. 3 and 4
+xgc-finit cbc6 distribution --paper --smooth xgc.f_init_smooth_0.5_0.5.bp --normalize peak   # paper Fig. 1
+xgc-finit cbc6 er-profile --paper                       # relaxed E_r(psi_N) of stage A
 xgc-finit cbc6 extend-maxwell --confirm                 # continue stage A from its last checkpoint
 xgc-finit cbc6 log
 ```
@@ -180,6 +200,8 @@ xgc-finit cbc6 log
 | `remote/make_f_init.py` | login-node script for stage B |
 | `remote/adjust_f_init.py` | login-node script for stages D/E |
 | `remote/transient_compare.py` | login-node script for the transient comparison figures (G) |
+| `remote/distribution_figure.py` | paper Fig. 1: deviation of f_init from the local Maxwellian at one node (H) |
+| `remote/er_profile.py` | relaxed `<E_r>(psi_N)` of stage A (H) |
 | `cases/<name>.yaml` | one case: root, species slot, smoothing, dt0 settings, `run.overrides` for production runs |
 | `cases/<name>.log.yaml` | what was done, when, with which job ids and metrics |
 | `cases/<name>/` | pulled JSON/PNG summaries of the density comparisons |

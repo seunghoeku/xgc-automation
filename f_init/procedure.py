@@ -499,6 +499,7 @@ def compare(
     shift_finit: bool = False,
     paper: bool = False,
     twod_runs: list[str] | None = None,
+    twod_scale: str = "shared",
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -540,6 +541,8 @@ def compare(
         argv.append("--paper")
     if twod_runs:
         argv += ["--twod-runs", *twod_runs]
+    if twod_scale != "shared":
+        argv += ["--twod-scale", twod_scale]
 
     payload = _run_json(target, argv, timeout=3600)
 
@@ -650,3 +653,79 @@ def extend_maxwell(case: Case, plan: dict[str, Any]) -> dict[str, Any]:
     cfg.append_log(case, "extend-maxwell", dir=plan["dir_name"], restart_step=plan["restart_step"],
                    expected_end_step=plan["expected_end_step"], script_notes=plan["script_notes"])
     return submit(case, plan["dir_name"])
+
+
+# --- paper Fig. 1 and the relaxed E_r profile --------------------------------
+
+def distribution_figure(case: Case, *, no_smooth: str | None = None, smooth: str | None = None,
+                        smooth_label: str | None = None, psi: float = 0.45, node: int | None = None,
+                        clip_percent: float | None = None, paper: bool = False,
+                        normalize: str = "local") -> dict[str, Any]:
+    """Relative deviation (f - f_M)/f_M of the unsmoothed and smoothed f_init at one node."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    sigma, width = float(case.smooth["sigma_theta"]), float(case.smooth["v_width"])
+    no_smooth = no_smooth or cfg.NO_SMOOTH_FILE
+    smooth = smooth or cfg.smooth_file(sigma, width)
+    smooth_label = smooth_label or f"$\\Delta\\theta={cfg.fmt_num(sigma)}$ rad, ${cfg.fmt_num(width)}\\Delta v$"
+    out_dir = f"{case.root}/.xgc-finit/compare"
+    ssh.mkdir_p(target, out_dir)
+    stem = "distribution" + ("_paper" if paper else "")
+    script = _push_helper(case, target, "distribution_figure.py")
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--no-smooth", f"{case.maxwell_path}/{no_smooth}", "--smooth", f"{case.maxwell_path}/{smooth}",
+            "--smooth-label", smooth_label, "--psi", str(psi), "--out-prefix", f"{out_dir}/{stem}"]
+    if node is not None:
+        argv += ["--node", str(node)]
+    if clip_percent is not None:
+        argv += ["--clip-percent", str(clip_percent)]
+    if paper:
+        argv.append("--paper")
+    argv += ["--normalize", normalize]
+    payload = _run_json(target, argv, timeout=1800)
+    payload["local"] = _pull_outputs(case, target, payload)
+    cfg.append_log(case, "distribution-figure", files=[no_smooth, smooth], where=payload.get("where"),
+                   normalize=normalize,
+                   clip_percent=payload.get("clip_percent"), panels=payload.get("panels"),
+                   local=payload["local"])
+    return payload
+
+
+def er_profile(case: Case, *, f0_step: int | None = None, paper: bool = False,
+               psi_max: float = 0.9) -> dict[str, Any]:
+    """<E_r>(psi_N) of the stage A run at the f_init snapshot and at the end."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    f0_step = case.f0_step if f0_step is None else f0_step
+    if f0_step is None:
+        inv = inventory(case)
+        f0_step = (inv["maxwell"] or {}).get("last_f0_step")
+    if f0_step is None:
+        raise ProcedureError("no f0 step known; set f0_step in the case file or pass --f0-step")
+    out_dir = f"{case.root}/.xgc-finit/compare"
+    ssh.mkdir_p(target, out_dir)
+    stem = "er_profile" + ("_paper" if paper else "")
+    script = _push_helper(case, target, "er_profile.py")
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--f0-step", str(f0_step), "--psi-max", str(psi_max), "--out-prefix", f"{out_dir}/{stem}"]
+    if paper:
+        argv.append("--paper")
+    payload = _run_json(target, argv, timeout=1800)
+    payload["local"] = _pull_outputs(case, target, payload)
+    cfg.append_log(case, "er-profile", psi_max=psi_max, steps=payload.get("steps"), time_ms=payload.get("time_ms"),
+                   er_range_kv_per_m=payload.get("er_range_kv_per_m"), local=payload["local"])
+    return payload
+
+
+def _pull_outputs(case: Case, target: ssh.SSHTarget, payload: dict[str, Any]) -> dict[str, str]:
+    case.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    local: dict[str, str] = {}
+    pulls = [("json", payload["json"])] + [(f"png_{k}", v) for k, v in payload.get("png", {}).items()]
+    for key, remote in pulls:
+        local_path = case.artifacts_dir / Path(remote).name
+        try:
+            ssh.pull(target, remote, str(local_path))
+            local[key] = str(local_path)
+        except ssh.SSHError as exc:
+            local[f"{key}_error"] = str(exc)
+    return local

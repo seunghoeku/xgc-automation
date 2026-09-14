@@ -11,6 +11,8 @@
     xgc-finit CASE check DIR
     xgc-finit CASE compare [DIR ...] [--psi P] [--shift-finit] [--paper] [--no-particles]
     xgc-finit CASE extend-maxwell [--confirm]
+    xgc-finit CASE distribution [--psi P] [--node N] [--paper]
+    xgc-finit CASE er-profile [--paper]
     xgc-finit CASE log
 
 ``CASE`` is a name under ``f_init/cases/`` or a path to a case YAML. Anything
@@ -190,6 +192,7 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
         case, args.dirs or None, labels=args.label or None, psi=args.psi,
         f0_step=args.f0_step, particles=not args.no_particles, end_window_ms=args.end_window,
         shift_finit=args.shift_finit, paper=args.paper, twod_runs=args.twod_runs or None,
+        twod_scale=args.twod_scale,
     )
     if args.json:
         _print(payload, True)
@@ -233,6 +236,38 @@ def cmd_extend_maxwell(case: cfg.Case, args: argparse.Namespace) -> int:
         print("dryrun: " + result["dryrun"]["summary"].splitlines()[0])
     print(f"submitted job {result['job_id']} for {result['dir']}")
     _print_resources(result["resources"])
+    return 0
+
+
+def cmd_distribution(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.distribution_figure(
+        case, no_smooth=args.no_smooth, smooth=args.smooth, smooth_label=args.smooth_label,
+        psi=args.psi, node=args.node, clip_percent=args.clip_percent, paper=args.paper,
+        normalize=args.normalize,
+    )
+    if args.json:
+        _print(payload, True)
+        return 0
+    w = payload["where"]
+    print(f"node {w['node']} at R={w['R_m']:.3f} m, Z={w['Z_m']:.3f} m, psi_N={w['psi_n']:.3f}; "
+          f"colour range +-{payload['clip_percent']:.1f} %")
+    for p in payload["panels"]:
+        print(f"  {p['label']:<28} rms {p['rms_percent']:.2f} %  max {p['max_percent']:.1f} %   {p['file'].rsplit('/', 1)[-1]}")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
+    return 0
+
+
+def cmd_er_profile(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.er_profile(case, f0_step=args.f0_step, paper=args.paper, psi_max=args.psi_max)
+    if args.json:
+        _print(payload, True)
+        return 0
+    lo, hi = payload["er_range_kv_per_m"]
+    print(f"<E_r> at steps {payload['steps']} (t = {payload['time_ms'][0]:.3f}, {payload['time_ms'][1]:.3f} ms); "
+          f"snapshot range {lo:.2f} .. {hi:.2f} kV/m")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
     return 0
 
 
@@ -313,10 +348,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="publication styling (large fonts, 13x10 in, thick lines); files get a _paper suffix")
     p.add_argument("--twod-runs", nargs="*", default=None,
                    help="runs for the (psi_N, t) figure, e.g. maxwell finit_sm_0.5_0.5; default all")
+    p.add_argument("--twod-scale", choices=["shared", "per-panel"], default="shared",
+                   help="colour range of the (psi_N, t) panels; per-panel makes a quiet run readable")
     p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
 
     p = sub.add_parser("extend-maxwell", help="resubmit stage A so it continues from its last checkpoint")
     p.add_argument("--confirm", action="store_true")
+
+    p = sub.add_parser("distribution", help="paper Fig. 1: (f-f_M)/f_M of the unsmoothed and smoothed f_init at one node")
+    p.add_argument("--no-smooth", default=None, help="file in stage A dir; default xgc.f_init_no_smooth.bp")
+    p.add_argument("--smooth", default=None, help="file in stage A dir; default from the case's smooth settings")
+    p.add_argument("--smooth-label", default=None)
+    p.add_argument("--psi", type=float, default=0.45, help="psi_N of the outboard-midplane node")
+    p.add_argument("--node", type=int, default=None, help="mesh node instead of --psi")
+    p.add_argument("--clip-percent", type=float, default=None, help="symmetric colour range [%%]")
+    p.add_argument("--normalize", choices=["local", "peak"], default="local",
+                   help="(f-f_M)/f_M per cell, or relative to the node's peak f_M")
+    p.add_argument("--paper", action="store_true")
+
+    p = sub.add_parser("er-profile", help="<E_r>(psi_N) of stage A at the f_init snapshot and at the end")
+    p.add_argument("--f0-step", type=int, default=None)
+    p.add_argument("--psi-max", type=float, default=0.9, help="cut the plot here (outer boundary layer)")
+    p.add_argument("--paper", action="store_true")
 
     sub.add_parser("log", help="what this CLI has done to the case")
     return parser
@@ -338,6 +391,8 @@ def main(argv: list[str] | None = None) -> int:
             "check": lambda c, a: cmd_adjust(c, a, check_only=True),
             "compare": cmd_compare,
             "extend-maxwell": cmd_extend_maxwell,
+            "distribution": cmd_distribution,
+            "er-profile": cmd_er_profile,
             "log": cmd_log,
         }
         return handlers[args.command](case, args)

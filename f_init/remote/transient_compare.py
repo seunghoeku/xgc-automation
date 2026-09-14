@@ -56,26 +56,34 @@ def load_run(xgc_reader, path: str):
 
 
 def particle_noise(x, directory: str, psi_min: float, psi_max: float):
-    """rms(delta-f weight) of the written marker sample inside a psi_N band."""
+    """Marker-noise measures of the written particle sample inside a psi_N band.
+
+    ``iphase`` columns follow XGC's ptl layout (module.F90: ptl_nphase=6 then
+    the constants): 0 r, 1 z, 2 phi, 3 rho_parallel, 4 w1, 5 w2, 6 mu, 7 w0,
+    8 f0. w1 is the delta-f weight (fraction of the marker's full-f weight that
+    is delta-f), w0 the full-f weight (physical particles per marker). Returns
+    times, rms(w1*w0) [particles per marker] and rms(w1) [dimensionless]."""
     import numpy as np
     import adios2
     from matplotlib.tri import LinearTriInterpolator
 
     files = sorted(glob.glob(os.path.join(directory, "xgc.particle.*.bp")))
     interp = LinearTriInterpolator(x.mesh.triobj, x.mesh.psi / x.psix)
-    times, rms = [], []
+    times, rms, rms_w1 = [], [], []
     for pf in files:
         with adios2.FileReader(pf) as fh:
             iphase = fh.read("iphase")
             time = float(np.asarray(fh.read("time")).ravel()[0])
-        weight = iphase[:, 4] * iphase[:, 7]
+        w1 = iphase[:, 4]
+        weight = w1 * iphase[:, 7]
         psi = interp(iphase[:, 0], iphase[:, 1])
         mask = np.logical_and(psi > psi_min, psi < psi_max)
         if not np.any(mask):
             continue
         times.append(time)
         rms.append(float(np.sqrt(np.mean(weight[mask] ** 2))))
-    return times, rms
+        rms_w1.append(float(np.sqrt(np.mean(w1[mask] ** 2))))
+    return times, rms, rms_w1
 
 
 def main() -> int:
@@ -102,6 +110,9 @@ def main() -> int:
     parser.add_argument("--no-particles", action="store_true")
     parser.add_argument("--paper", action="store_true",
                         help="publication styling: font 28, 13x10 in figures, linewidth 3, dpi 180")
+    parser.add_argument("--twod-scale", choices=["shared", "per-panel"], default="shared",
+                        help="colour range of the (psi_N, t) panels: the Maxwellian run's for all, "
+                             "or each panel's own (labelled colour bars either way)")
     parser.add_argument("--twod-runs", nargs="*", default=None,
                         help="run names (directory basenames, 'maxwell' for stage A) for the 2-D "
                              "figure; default all. Two panels are labelled (a)/(b) like the paper")
@@ -175,13 +186,15 @@ def main() -> int:
                      "style": args.style[i - 1] if args.style else default_styles[i % len(default_styles)],
                      **reduce(x, plot_offset)})
         if not args.no_particles:
-            times, rms = particle_noise(x, d, *args.psi_band)
+            times, rms, rms_w1 = particle_noise(x, d, *args.psi_band)
             runs[-1]["noise_time_ms"] = [(t + plot_offset) * s2ms for t in times]
             runs[-1]["noise_rms"] = rms
+            runs[-1]["noise_rms_w1"] = rms_w1
     if not args.no_particles:
-        times, rms = particle_noise(x1, run_dir, *args.psi_band)
+        times, rms, rms_w1 = particle_noise(x1, run_dir, *args.psi_band)
         runs[0]["noise_time_ms"] = [t * s2ms for t in times]
         runs[0]["noise_rms"] = rms
+        runs[0]["noise_rms_w1"] = rms_w1
 
     # --- figures ----------------------------------------------------------
     font, figsize, lw, dpi, legend_fs = (28, (13, 10), 3.0, 180, 24) if args.paper else (16, (9, 6.5), 2.2, 150, 13)
@@ -198,9 +211,29 @@ def main() -> int:
     for r in runs:
         r["style"] = parse_style(r["style"])
 
-    def series_figure(key, ylabel, title, fname, xlim=None, loc="best"):
+    def draw_series(ax, key, xlim=None, lw_=None):
+        """Plot every run on ``ax``; returns the values inside ``xlim``."""
+        inside = []
+        for i, r in enumerate(runs):
+            t = np.asarray(r["time_ms"])
+            v = np.asarray(r[key])
+            m = np.ones_like(t, dtype=bool) if xlim is None else (t >= xlim[0]) & (t <= xlim[1])
+            if not np.any(m):
+                continue
+            inside.extend(v[m].tolist())
+            ax.plot(t, v, label=r["label"], linewidth=lw_ or lw, linestyle=r["style"], color=r["color"])
+        if xlim:
+            ax.set_xlim(*xlim)
+            if inside:
+                pad = 0.1 * (max(inside) - min(inside)) or 1.0
+                ax.set_ylim(min(inside) - pad, max(inside) + pad)
+        return inside
+
+    def series_figure(key, ylabel, title, fname, xlim=None, loc="best", inset=None, ylim_top=None):
         """One trace per run; with ``xlim`` the y range follows the data inside
-        the window and runs without samples there stay out of the legend."""
+        the window and runs without samples there stay out of the legend.
+        ``inset`` = (t0, t1, bounds) magnifies that window inside the axes;
+        ``ylim_top`` raises the upper limit so the inset sits above the data."""
         fig, ax = plt.subplots(figsize=figsize)
         inside = []
         for i, r in enumerate(runs):
@@ -219,7 +252,20 @@ def main() -> int:
             if inside:
                 pad = 0.1 * (max(inside) - min(inside)) or 1.0
                 ax.set_ylim(min(inside) - pad, max(inside) + pad)
+        if ylim_top is not None:
+            lo, hi = ax.get_ylim()
+            ax.set_ylim(lo, max(hi, ylim_top))
         ax.legend(loc=loc, fontsize=legend_fs)
+        if inset is not None:
+            t0, t1, bounds = inset
+            from matplotlib.ticker import MaxNLocator
+            axins = ax.inset_axes(bounds)
+            draw_series(axins, key, xlim=(t0, t1), lw_=lw * 0.7)
+            axins.xaxis.set_major_locator(MaxNLocator(4))
+            axins.yaxis.set_major_locator(MaxNLocator(4))
+            axins.tick_params(labelsize=int(font * 0.6))
+            axins.set_title(f"{t0:.2f} - {t1:.2f} ms", fontsize=int(font * 0.65))
+            ax.indicate_inset_zoom(axins, edgecolor="0.3")
         fig.tight_layout()
         path = f"{out_prefix}_{fname}.png"
         fig.savefig(path, dpi=dpi)
@@ -227,9 +273,18 @@ def main() -> int:
         outputs[fname] = path
 
     psi_txt = f"$\\psi_N={psi_at:3.2f}$"
+    # With the f_init runs shifted, the referee's inset (0.3-0.5 ms) sits over
+    # the f_init start; without a shift the zoom figure below plays that role.
+    inset_win = (plot_offset * s2ms, plot_offset * s2ms + 0.2) if args.shift_finit else None
+    # The inset lives in the empty band above the Maxwellian relaxation
+    # (t > 0.15 ms, flux > 2.5): the y range is raised to 5 to make room.
     series_figure("vort_flux", "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)",
-                  f"(a) Radial Vorticity Flux at {psi_txt}", "vorticity", loc="lower right")
-    series_figure("shear_khz", "ExB shear (kHz)", f"(b) ExB shear at {psi_txt}", "exb_shear")
+                  f"(a) Radial Vorticity Flux at {psi_txt}", "vorticity", loc="lower right",
+                  inset=None if inset_win is None else (*inset_win, [0.30, 0.62, 0.67, 0.29]),
+                  ylim_top=None if inset_win is None else 5.0)
+    series_figure("shear_khz", "ExB shear (kHz)", f"(b) ExB shear at {psi_txt}", "exb_shear",
+                  loc="upper right",
+                  inset=None if inset_win is None else (*inset_win, [0.40, 0.10, 0.57, 0.30]))
     series_figure("eflux_mw", "Energy Flux (MW)", f"Radial Energy Flux at {psi_txt}", "energy_flux")
 
     t_end = max(r["time_ms"][-1] for r in runs)
@@ -247,7 +302,9 @@ def main() -> int:
     # colour scale from the Maxwellian run (the paper's choice); every panel
     # uses the same explicit levels so the colour bar applies to all of them.
     z0 = np.asarray(runs[0]["vort_flux_2d"])
-    levels = np.linspace(float(z0.min()), float(z0.max()), 101)
+    vlim0 = float(np.max(np.abs(z0)))
+    levels = np.linspace(-vlim0, vlim0, 101)
+    cbar_label = "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)"
     twod = runs if args.twod_runs is None else [r for r in runs if r["name"] in args.twod_runs]
     if args.twod_runs is not None and len(twod) != len(args.twod_runs):
         known = [r["name"] for r in runs]
@@ -262,8 +319,17 @@ def main() -> int:
             fig.subplots_adjust(wspace=0.45)
         span = 0.3   # ms shown after each start
         for k, (ax, r) in enumerate(zip(axes, twod)):
-            z = np.clip(np.asarray(r["vort_flux_2d"]), levels[0], levels[-1])
-            cf = ax.contourf(psi_1d, np.asarray(r["time_ms"]), z, levels=levels, cmap="viridis")
+            z = np.asarray(r["vort_flux_2d"])
+            lv = levels
+            if args.twod_scale == "per-panel":
+                span_t = 0.3
+                t_arr = np.asarray(r["time_ms"])
+                t0_ = 0.0 if r["name"] == "maxwell" else t_first
+                win = (t_arr >= t0_) & (t_arr <= t0_ + span_t)
+                vl = float(np.max(np.abs(z[win]))) if np.any(win) else vlim0
+                lv = np.linspace(-vl, vl, 101)
+            z = np.clip(z, lv[0], lv[-1])
+            cf = ax.contourf(psi_1d, np.asarray(r["time_ms"]), z, levels=lv, cmap="RdBu_r")
             ax.set_xlabel("$\\psi_N$")
             if paper_2d:
                 ax.set_title(f"({'ab'[k]}) " + ("From Maxwellian" if r["name"] == "maxwell" else "Neoclassical Start"))
@@ -274,11 +340,12 @@ def main() -> int:
             ax.set_ylim(t0, t0 + span)
             if t_first == 0.0 and ax is not axes[0] and not paper_2d:
                 ax.tick_params(labelleft=False)
-            if paper_2d:
-                fig.colorbar(cf, ax=ax)
+            if paper_2d or args.twod_scale == "per-panel":
+                cb = fig.colorbar(cf, ax=ax)
+                cb.set_label(cbar_label, fontsize=int((19 if paper_2d else font) * 0.8))
         axes[0].set_ylabel("Time (ms)")
-        if not paper_2d:
-            fig.colorbar(cf, ax=axes.tolist(), shrink=0.8, label="Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)")
+        if not (paper_2d or args.twod_scale == "per-panel"):
+            fig.colorbar(cf, ax=axes.tolist(), shrink=0.8, label=cbar_label)
         path = f"{out_prefix}_vorticity_2d.png"
         fig.savefig(path, dpi=dpi if paper_2d else 130, bbox_inches="tight")
         plt.close(fig)
@@ -292,10 +359,13 @@ def main() -> int:
                         linewidth=lw, linestyle=r["style"], color=r["color"])
         if not args.shift_finit:
             ax.set_xlim(0.0, min(r["time_ms"][-1] for r in runs))
-        ax.set_xlabel("time [ms]")
-        ax.set_ylabel("RMS particle weights (A.U.)")
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("RMS $w_1 w_0$ ($10^{12}$ ions per marker)")
         ax.set_title(f"Particle noise, {args.psi_band[0]} < $\\psi_N$ < {args.psi_band[1]}")
-        ax.legend(fontsize=legend_fs)
+        ax.set_ylim(bottom=0.0)
+        # the curves sit in the upper half after the first 0.05 ms; two
+        # columns along the bottom keep the legend off every line
+        ax.legend(fontsize=int(legend_fs * 0.85), ncol=2, loc="lower center")
         fig.tight_layout()
         path = f"{out_prefix}_noise.png"
         fig.savefig(path, dpi=dpi)
@@ -324,6 +394,7 @@ def main() -> int:
             "eflux_peak_mw": peak_after_start(r, "eflux_mw"),
             "shear_end_std_khz": end_rms(r, "shear_khz"),
             "noise_rms_last": (r["noise_rms"][-1] if r.get("noise_rms") else None),
+            "noise_rms_w1_last": (r["noise_rms_w1"][-1] if r.get("noise_rms_w1") else None),
             "t_end_ms": r["time_ms"][-1],
         })
 
