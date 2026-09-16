@@ -110,6 +110,19 @@ when their titles or children change; restarting the app only temporarily
 restores them. See [upstream issue #515](https://github.com/swiftbar/SwiftBar/issues/515)
 and [fix #518](https://github.com/swiftbar/SwiftBar/pull/518).
 
+All plugin menu labels are in English. Pending jobs show **Est. start** beside
+their requested wall time. Each scheduled poll collects the scheduler's own
+estimate in the existing queue query: Slurm `%S`, or PBS JSON
+`estimated.start_time`. No additional per-job SSH requests are needed.
+Queries use UTC and the C locale; the normalized `estimated_start` field in
+JSON/cache is ISO 8601 with a UTC offset. The text log includes that timestamp,
+and SwiftBar converts it to the Mac's local time with an explicit timezone.
+Missing, hidden, or invalid estimates appear as `unavailable`; old estimates
+are replaced on each successful poll, including when withdrawn. A timestamp
+that has passed is labeled `estimate passed`. These are scheduling estimates,
+not guaranteed start times; no estimate is inferred from queue position or
+dependencies. Running and finished jobs do not display a pending-start estimate.
+
 Keep the launchd timer above running: it queries the servers every ten minutes.
 SwiftBar reads those local snapshots every thirty seconds, so opening the menu
 does not wait for SSH, authenticate, or start another poll. The menu's refresh

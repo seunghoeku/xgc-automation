@@ -191,6 +191,8 @@ def _describe(job: dict[str, Any]) -> str:
         bits.append(str(job["reason"]))
     if job.get("time_limit"):
         bits.append(f"limit {job['time_limit']}")
+    if job.get("state") == sched.PENDING:
+        bits.append(f"est. start {job.get('estimated_start') or 'unavailable'}")
     return ", ".join(bits)
 
 

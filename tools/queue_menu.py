@@ -6,10 +6,10 @@ from typing import Any
 from tools import scheduler as sched
 
 LABELS = {
-    sched.RUNNING: "🟢 실행 중", sched.PENDING: "🟡 대기 중",
-    sched.COMPLETED: "✅ 잡 완료", sched.FAILED: "🔴 실패",
-    sched.CANCELLED: "⚪ 취소", sched.TIMEOUT: "🟠 시간 제한 종료",
-    sched.UNKNOWN: "❔ 종료 상태 확인 중",
+    sched.RUNNING: "🟢 Running", sched.PENDING: "🟡 Pending",
+    sched.COMPLETED: "✅ Completed", sched.FAILED: "🔴 Failed",
+    sched.CANCELLED: "⚪ Cancelled", sched.TIMEOUT: "🟠 Time limit reached",
+    sched.UNKNOWN: "❔ Outcome unconfirmed",
 }
 
 
@@ -24,14 +24,14 @@ def age(stamp: str | None, now: datetime) -> str:
         when = datetime.fromisoformat(stamp or "")
         seconds = max(0, (now - when).total_seconds())
     except (ValueError, TypeError):
-        return "확인 기록 없음"
+        return "Not checked yet"
     if seconds < 60:
-        return "방금"
+        return "just now"
     if seconds < 3600:
-        return f"{int(seconds // 60)}분 전"
+        return f"{int(seconds // 60)}m ago"
     if seconds < 86400:
-        return f"{int(seconds // 3600)}시간 전"
-    return f"{int(seconds // 86400)}일 전"
+        return f"{int(seconds // 3600)}h ago"
+    return f"{int(seconds // 86400)}d ago"
 
 
 def stale(snapshot: dict[str, Any], now: datetime) -> bool:
@@ -42,19 +42,36 @@ def stale(snapshot: dict[str, Any], now: datetime) -> bool:
         return True
 
 
+def estimated_start_label(job: dict[str, Any]) -> str:
+    """Display an absolute estimate in the Mac's local zone, never guess one."""
+    try:
+        when = datetime.fromisoformat(job.get("estimated_start") or "")
+        if when.tzinfo is None:
+            return "unavailable"
+        local = when.astimezone()
+        label = local.strftime("%Y-%m-%d %H:%M %Z")
+        if when < datetime.now().astimezone():
+            label += " (estimate passed)"
+        return label
+    except (ValueError, TypeError):
+        return "unavailable"
+
+
 def job_lines(job: dict[str, Any], *, finished: bool = False) -> list[str]:
-    state = LABELS.get(job.get("state"), "❔ 상태 미확인")
+    state = LABELS.get(job.get("state"), "❔ Unknown")
     ident = job.get("display_id") or job.get("job_id", "?")
     lines = [f"--{state} · {clean(job.get('name', '?'))} · #{clean(ident)} · "
              f"{clean(job.get('nodes') or '?')} nodes · "
-             f"요청 {clean(job.get('time_limit') or '?')}"]
+             f"requested {clean(job.get('time_limit') or '?')}"]
+    if not finished and job.get("state") == sched.PENDING:
+        lines[0] += f" · Est. start: {estimated_start_label(job)}"
     if finished:
-        lines.append(f"----큐 이탈 확인: {clean(job.get('left_queue_at', '?'))}")
+        lines.append(f"----Left queue (observed): {clean(job.get('left_queue_at', '?'))}")
         if job.get("exit_code") is not None:
             lines.append(f"----Exit: {clean(job['exit_code'])}")
     else:
         if job.get("elapsed"):
-            lines.append(f"----경과 {clean(job['elapsed'])}")
+            lines.append(f"----Elapsed {clean(job['elapsed'])}")
         if job.get("reason"):
             lines.append(f"----{clean(job['reason'])}")
     return lines
@@ -71,7 +88,7 @@ def render(snapshots: list[dict[str, Any]], *, history_limit: int = 5,
         for job in snapshot.get("jobs", {}).values():
             running += job.get("state") == sched.RUNNING
             pending += job.get("state") == sched.PENDING
-    title = f"HPC · 실행 {running} · 대기 {pending}"
+    title = f"HPC · Running {running} · Pending {pending}"
     if warnings:
         title += f" · ⚠ {warnings}"
     lines = [title, "---"]
@@ -79,26 +96,26 @@ def render(snapshots: list[dict[str, Any]], *, history_limit: int = 5,
         unavailable = snapshot.get("connection", "ok") != "ok"
         old = stale(snapshot, now)
         status = "⚠ " if unavailable or old else ""
-        checked = (f"{age(snapshot['polled_at'], now)} 확인"
-                   if snapshot.get("polled_at") else "확인 기록 없음")
+        checked = (f"{age(snapshot['polled_at'], now)}"
+                   if snapshot.get("polled_at") else "Not checked yet")
         lines.append(f"{status}{clean(snapshot['machine'])} · {checked}")
         if unavailable:
-            lines.append(f"--연결 확인 필요: {clean(snapshot.get('detail', '?'))}")
+            lines.append(f"--Connection unavailable: {clean(snapshot.get('detail', '?'))}")
         elif old:
-            lines.append("--갱신 지연 · 마지막 확인 상태")
+            lines.append("--Update overdue · last known state")
         if snapshot.get("note"):
             lines.append(f"--{clean(snapshot['note'])}")
         jobs = sorted(snapshot.get("jobs", {}).values(),
                       key=lambda j: (j.get("state") != sched.RUNNING, str(j.get("job_id"))))
-        lines.append("--마지막 확인 큐" if unavailable or old else "--현재 큐")
+        lines.append("--Last known queue" if unavailable or old else "--Current queue")
         if not jobs:
-            lines.append("--잡 없음" if snapshot.get("polled_at") else "--조회 기록 없음")
+            lines.append("--No jobs" if snapshot.get("polled_at") else "--No cached data")
         for job in jobs:
             lines.extend(job_lines(job))
         recent = snapshot.get("recent_finished", [])[:history_limit]
-        lines.append(f"--최근 종료 / 확인 중 ({len(recent)})")
+        lines.append(f"--Recent departures / unconfirmed ({len(recent)})")
         for job in recent:
             lines.extend(job_lines(job, finished=True))
-    lines.extend(["---", "상태 조회: 별도 타이머 · 화면 갱신: 30초",
-                  "저장된 화면 새로고침 | refresh=true"])
+    lines.extend(["---", "Polling: separate timer · menu refresh: 30s",
+                  "Refresh cached view | refresh=true"])
     return "\n".join(lines)

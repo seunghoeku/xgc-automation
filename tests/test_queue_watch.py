@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import io
+import json
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -79,8 +80,10 @@ class SlurmUserQueueTests(unittest.TestCase):
 
     def test_argv_asks_only_about_this_user(self) -> None:
         argv = self.adapter.user_queue_argv("sku")
-        self.assertEqual(argv[:3], ["squeue", "-u", "sku"])
+        self.assertEqual(argv[:4], ["env", "TZ=UTC", "LC_ALL=C", "SLURM_TIME_FORMAT=standard"])
+        self.assertEqual(argv[4:7], ["squeue", "-u", "sku"])
         self.assertIn("-h", argv)
+        self.assertTrue(argv[-1].endswith("|%S"))
 
     def test_parse_normalizes_state_and_keeps_raw(self) -> None:
         jobs = self.adapter.parse_user_queue(SQUEUE_LINES)
@@ -93,6 +96,19 @@ class SlurmUserQueueTests(unittest.TestCase):
 
     def test_parse_skips_malformed_lines(self) -> None:
         self.assertEqual(self.adapter.parse_user_queue("garbage\n\n"), [])
+
+    def test_expected_start_is_utc_and_only_for_pending_jobs(self) -> None:
+        lines = SQUEUE_LINES.splitlines()
+        jobs = self.adapter.parse_user_queue("\n".join(
+            line + "|2026-09-17T18:00:00" for line in lines))
+        self.assertEqual(jobs[0]["estimated_start"], "2026-09-17T18:00:00+00:00")
+        self.assertIsNone(jobs[1]["estimated_start"])
+
+    def test_unknown_start_never_becomes_a_date(self) -> None:
+        for value in ("N/A", "Unknown", "None", "", "0", "garbage"):
+            with self.subTest(value=value):
+                jobs = self.adapter.parse_user_queue(SQUEUE_LINES.splitlines()[0] + "|" + value)
+                self.assertIsNone(jobs[0]["estimated_start"])
 
 
 
@@ -236,6 +252,16 @@ class WatchTests(unittest.TestCase):
         self.assertIn("128 nodes", out.getvalue())
         self.assertEqual(before, self.state.read_bytes())
 
+    def test_estimate_updates_are_saved_and_removed_when_scheduler_withdraws_them(self) -> None:
+        self._watch({"1": job("1", sched.PENDING,
+                              estimated_start="2026-09-17T18:00:00+00:00")})
+        self.assertEqual(queue_watch.load_state(self.state)["jobs"]["1"]["estimated_start"],
+                         "2026-09-17T18:00:00+00:00")
+        self._watch({"1": job("1", sched.PENDING, estimated_start=None)})
+        saved = queue_watch.load_state(self.state)["jobs"]["1"]
+        self.assertIsNone(saved["estimated_start"])
+        self.assertIn("est. start unavailable", queue_watch._describe(saved))
+
 
 class PBSUserQueueTests(unittest.TestCase):
     """The PBS path listing a whole user queue, against captured real output."""
@@ -268,7 +294,30 @@ class PBSUserQueueTests(unittest.TestCase):
 
     def test_detail_pass_requests_structured_output_for_named_ids(self) -> None:
         argv = self.adapter.user_queue_detail_argv(["7600026", "7600027"])
-        self.assertEqual(argv[:5], ["qstat", "-f", "-F", "json", "7600026"])
+        self.assertEqual(argv[:3], ["env", "TZ=UTC", "LC_ALL=C"])
+        self.assertEqual(argv[3:8], ["qstat", "-f", "-F", "json", "7600026"])
+
+    def test_estimated_start_accepts_pbs_resource_timestamp_shapes(self) -> None:
+        stamp = datetime.fromisoformat("2026-09-17T18:00:00+00:00")
+        for fields in (
+            {"estimated": {"start_time": int(stamp.timestamp())}},
+            {"estimated": {"start_time": str(int(stamp.timestamp()))}},
+            {"estimated": {"start_time": "Thu Sep 17 18:00:00 2026"}},
+            {"estimated.start_time": int(stamp.timestamp())},
+        ):
+            with self.subTest(fields=fields):
+                detail = self.adapter.parse_user_queue_detail(json.dumps(
+                    {"Jobs": {"1.srv": {"job_state": "Q", **fields}}}))
+                self.assertEqual(detail["1.srv"]["estimated_start"], stamp.isoformat())
+
+    def test_missing_or_invalid_estimates_do_not_break_queue_or_leak_into_running(self) -> None:
+        for state, estimate in (("Q", None), ("Q", "--"), ("Q", 0),
+                                ("Q", -1), ("Q", 10**30), ("Q", True),
+                                ("R", 1789668000)):
+            detail = self.adapter.parse_user_queue_detail(json.dumps(
+                {"Jobs": {"1.srv": {"job_state": state,
+                                     "estimated": {"start_time": estimate}}}}))
+            self.assertIsNone(detail["1.srv"]["estimated_start"])
 
     def test_detail_pass_fills_state_nodes_and_walltime(self) -> None:
         running = self._jobs()["7600026.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov"]
@@ -508,16 +557,16 @@ class MenuTests(unittest.TestCase):
              "jobs": {"3": job("3", sched.PENDING)}},
         ]
         rendered = queue_menu.render(snapshots, now=self.NOW)
-        self.assertEqual(rendered.splitlines()[0], "HPC · 실행 1 · 대기 0 · ⚠ 2")
-        self.assertIn("연결 확인 필요: expired", rendered)
-        self.assertIn("마지막 확인 큐", rendered)
+        self.assertEqual(rendered.splitlines()[0], "HPC · Running 1 · Pending 0 · ⚠ 2")
+        self.assertIn("Connection unavailable: expired", rendered)
+        self.assertIn("Last known queue", rendered)
 
     def test_finished_job_has_name_nodes_requested_time_and_observed_date(self) -> None:
         finished = job("4", sched.TIMEOUT, name="test-run", nodes="32",
                        time_limit="06:00:00", left_queue_at=self.NOW.isoformat())
         rendered = queue_menu.render([{"machine": "pbs", "recent_finished": [finished]}])
-        self.assertIn("시간 제한 종료 · test-run · #4 · 32 nodes · 요청 06:00:00", rendered)
-        self.assertIn("큐 이탈 확인:", rendered)
+        self.assertIn("Time limit reached · test-run · #4 · 32 nodes · requested 06:00:00", rendered)
+        self.assertIn("Left queue (observed):", rendered)
 
     def test_scheduler_text_cannot_inject_menu_actions(self) -> None:
         unsafe = job("1", sched.RUNNING, name="name\n---\nattack | bash=/bin/rm")
@@ -527,8 +576,21 @@ class MenuTests(unittest.TestCase):
 
     def test_missing_cache_is_unknown_instead_of_empty_live_queue(self) -> None:
         rendered = queue_menu.render([{"machine": "new"}], now=self.NOW)
-        self.assertIn("확인 기록 없음", rendered)
-        self.assertIn("조회 기록 없음", rendered)
+        self.assertIn("Not checked yet", rendered)
+        self.assertIn("No cached data", rendered)
+
+    def test_pending_estimate_is_localized_with_zone_and_absent_on_finished_jobs(self) -> None:
+        stamp = datetime.fromisoformat("2099-09-17T18:00:00+00:00")
+        pending = job("1", sched.PENDING, estimated_start=stamp.isoformat())
+        rendered = "\n".join(queue_menu.job_lines(pending))
+        self.assertIn("Est. start: " + stamp.astimezone().strftime("%Y-%m-%d %H:%M %Z"), rendered)
+        self.assertNotIn("Est. start", "\n".join(queue_menu.job_lines(pending, finished=True)))
+        pending["estimated_start"] = None
+        self.assertIn("Est. start: unavailable", "\n".join(queue_menu.job_lines(pending)))
+
+    def test_expired_estimate_is_explicitly_marked(self) -> None:
+        pending = job("1", sched.PENDING, estimated_start="2000-01-01T00:00:00+00:00")
+        self.assertIn("estimate passed", "\n".join(queue_menu.job_lines(pending)))
 
 
 class RotateLogTests(unittest.TestCase):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 # Normalized job states. Scheduler-specific codes map onto these.
@@ -26,6 +27,32 @@ TIMEOUT = "timeout"
 UNKNOWN = "unknown"
 
 TERMINAL_STATES = frozenset({COMPLETED, FAILED, CANCELLED, TIMEOUT})
+
+
+def _start_time(value: Any) -> str | None:
+    """Normalize scheduler timestamps to ISO UTC. Query commands force UTC/C.
+
+    PBS JSON may encode resource timestamps as epoch numbers or ctime strings;
+    Slurm %S uses an ISO timestamp. Unset/invalid values are not estimates.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    try:
+        if text.isdigit():
+            if int(text) <= 0:
+                return None
+            parsed = datetime.fromtimestamp(int(text), timezone.utc)
+        else:
+            try:
+                parsed = datetime.fromisoformat(text)
+            except ValueError:
+                parsed = datetime.strptime(text, "%a %b %d %H:%M:%S %Y")
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError, OSError):
+        return None
 
 # squeue/sacct state codes -> normalized. Slurm reports both long names and
 # 2-letter codes depending on format, so both are listed.
@@ -225,11 +252,12 @@ class SlurmScheduler(Scheduler):
         return states
 
     # Fields a watcher needs to describe a job without a second round trip:
-    # id, name, state, elapsed, limit, nodes, queue reason, working directory.
-    _USER_QUEUE_FORMAT = "%i|%j|%T|%M|%l|%D|%R|%Z"
+    # id, name, state, elapsed, limit, nodes, reason, directory, start time.
+    _USER_QUEUE_FORMAT = "%i|%j|%T|%M|%l|%D|%R|%Z|%S"
 
     def user_queue_argv(self, user: str) -> list[str]:
-        return ["squeue", "-u", user, "-h", "-o", self._USER_QUEUE_FORMAT]
+        return ["env", "TZ=UTC", "LC_ALL=C", "SLURM_TIME_FORMAT=standard",
+                "squeue", "-u", user, "-h", "-o", self._USER_QUEUE_FORMAT]
 
     def parse_user_queue(self, stdout: str) -> list[dict[str, Any]]:
         fields = ("job_id", "name", "state", "elapsed", "time_limit",
@@ -248,6 +276,10 @@ class SlurmScheduler(Scheduler):
             # Slurm ids are already short; the field exists so that reporting
             # code can shorten a PBS id without knowing which scheduler it is.
             job["display_id"] = job["job_id"]
+            job["estimated_start"] = (
+                _start_time(parts[8])
+                if job["state"] == PENDING and len(parts) > 8 else None
+            )
             jobs.append(job)
         return jobs
 
@@ -423,7 +455,7 @@ class PBSScheduler(Scheduler):
         """
         if not job_ids:
             return None
-        return ["qstat", "-f", "-F", "json", *job_ids]
+        return ["env", "TZ=UTC", "LC_ALL=C", "qstat", "-f", "-F", "json", *job_ids]
 
     def parse_user_queue_detail(self, stdout: str) -> dict[str, dict[str, Any]]:
         """Map full job id -> normalized fields from ``qstat -f -F json``."""
@@ -444,6 +476,11 @@ class PBSScheduler(Scheduler):
             resources = record.get("Resource_List") or {}
             used = record.get("resources_used") or {}
             raw_state = str(record.get("job_state") or "").strip()
+            estimated = record.get("estimated") or {}
+            start = (estimated.get("start_time") if isinstance(estimated, dict)
+                     else None)
+            if start is None:
+                start = record.get("estimated.start_time")
             detail[job_id] = {
                 "name": str(record.get("Job_Name") or "?"),
                 "raw_state": raw_state,
@@ -454,6 +491,9 @@ class PBSScheduler(Scheduler):
                 "queue": str(record.get("queue") or ""),
                 "work_dir": self._work_dir(record),
                 "reason": self._queue_reason(record),
+                "estimated_start": (_start_time(start)
+                                    if _PBS_STATES.get(raw_state.upper()) == PENDING
+                                    else None),
             }
         return detail
 
