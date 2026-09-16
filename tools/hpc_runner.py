@@ -415,14 +415,25 @@ _INPUT_FILE_DIR_RE = re.compile(
 )
 
 
-def _daos_input_dir_problem(plan: SubmissionPlan, case_dir: str) -> str | None:
-    """Why the input cannot run from inside the container, if it cannot.
+# XGC declares sml_input_file_dir as character(len=65) (module.F90), so a
+# longer value is silently truncated and the run dies much later with a Fortran
+# "Cannot open file" on a path that ends mid-directory. `xgc --dryrun` returns
+# before the equilibrium profiles are read and accepts it, so this is the only
+# gate that catches it (d3dqh dt=0 check, 2026-09-15: an 87-character $PSCRATCH
+# path cut to .../sangjun_turb_QH_newgrid_Frontier_emphase/resta).
+INPUT_FILE_DIR_MAX_CHARS = 65
 
-    XGC resolves ``sml_input_file_dir`` relative to its working directory,
-    which under DAOS is the container mount, not the case directory on the
-    parallel filesystem. A relative path therefore fails only once the job is
-    running, after the allocation has been charged. XGC also truncates the
-    value at 65 characters (``character(len=65)`` in module.F90).
+
+def _input_file_dir_problem(
+    plan: SubmissionPlan, case_dir: str, *, require_absolute: bool
+) -> str | None:
+    """Why ``sml_input_file_dir`` would fail at run time, if it would.
+
+    The length limit is XGC's own and applies on every machine. Absoluteness is
+    required only under DAOS: XGC resolves the value against its working
+    directory, which there is the container mount rather than the case
+    directory on the parallel filesystem, so a relative path fails once the job
+    is running and the allocation has been charged.
     """
     cfg = m.get_machine(plan.machine)
     host = ssh.host_for(cfg)
@@ -431,15 +442,20 @@ def _daos_input_dir_problem(plan: SubmissionPlan, case_dir: str) -> str | None:
         return f"cannot read {case_dir}/input to check sml_input_file_dir"
     match = _INPUT_FILE_DIR_RE.search(result.stdout)
     value = match.group(1) if match else "./"
-    if not value.startswith("/"):
+    if require_absolute and not value.startswith("/"):
         return (
             f"sml_input_file_dir={value!r} is relative; under DAOS XGC runs in "
             f"{plan.resources['daos']['work_dir']} where it cannot resolve. Use "
-            f"an absolute path on the parallel filesystem (at most 65 characters)"
+            f"an absolute path on the parallel filesystem "
+            f"(at most {INPUT_FILE_DIR_MAX_CHARS} characters)"
         )
-    if len(value) > 65:
+    if len(value) > INPUT_FILE_DIR_MAX_CHARS:
         return (
-            f"sml_input_file_dir is {len(value)} characters; XGC truncates it at 65"
+            f"sml_input_file_dir is {len(value)} characters; XGC truncates it "
+            f"at {INPUT_FILE_DIR_MAX_CHARS} and the job fails at run time "
+            f"reading the equilibrium profiles (xgc --dryrun does not catch "
+            f"this). Shorten it, e.g. a relative '../XGC_inputs/' beside the "
+            f"run directory. Value: {value!r}"
         )
     return None
 
@@ -982,6 +998,7 @@ def _start_parallel_dryrun(
             scheduler.submit_argv(dry_plan.remote_script_path),
             cwd=case_dir,
             check=True,
+            timeout=SUBMIT_TIMEOUT_SECONDS,
         )
         dry_job = scheduler.parse_job_id(submitted.stdout)
     except (SubmissionError, sched.SchedulerError, ssh.SSHError) as exc:
@@ -1096,6 +1113,14 @@ def _store_provenance_field(run_id: str, key: str, value: Any) -> None:
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
 
+# Aurora's PBS server has taken over two minutes to answer a single qsub
+# (n660au, 2026-09-15): the job was accepted but ssh.run's 120 s default had
+# already expired, so the submission returned an error and no provenance was
+# written for a job that was really in the queue. Submission is the one call
+# where a timeout costs a real, untracked job, so give it its own budget.
+SUBMIT_TIMEOUT_SECONDS = 300.0
+
+
 def submit(
     machine: str,
     *,
@@ -1161,12 +1186,14 @@ def submit(
                 "plan": plan.to_dict(),
             }
 
-    if case_dir and plan.resources.get("daos"):
-        problem = _daos_input_dir_problem(plan, case_dir)
+    if case_dir:
+        problem = _input_file_dir_problem(
+            plan, case_dir, require_absolute=bool(plan.resources.get("daos"))
+        )
         if problem:
             return {
                 "submitted": False,
-                "reason": f"DAOS input check failed: {problem}",
+                "reason": f"input file dir check failed: {problem}",
                 "plan": plan.to_dict(),
             }
 
@@ -1182,6 +1209,7 @@ def submit(
         scheduler.submit_argv(plan.remote_script_path),
         cwd=plan.remote_run_dir,
         check=True,
+        timeout=SUBMIT_TIMEOUT_SECONDS,
     )
     job_id = scheduler.parse_job_id(result.stdout)
 

@@ -105,6 +105,18 @@ converted internally: `sml_dt` is in main-ion toroidal transit times (not
 seconds), and the `psi` inputs are in normalized poloidal flux. Read the
 description rather than assuming SI.
 
+**`sml_input_file_dir` is truncated at 65 characters** on every machine --
+`character(len=65)` in `XGC_core/module.F90`, nothing to do with DAOS, where
+the limit happens to be documented (`docs/aurora-operations.md`). A longer
+value is silently cut and the run dies much later with a Fortran
+`Cannot open file` naming a path that ends mid-directory. **`xgc --dryrun`
+does not catch it**: the dryrun returns before the equilibrium profiles are
+read, so an over-long path is ACCEPTED and then fails a minute into the real
+job (d3dqh dt=0 check, 2026-09-15: an 87-character `$PSCRATCH` path cut to
+`.../sangjun_turb_QH_newgrid_Frontier_emphase/resta`). Keep the value short --
+a relative `'../XGC_inputs/'` next to the run directory, or a symlink -- and
+count the characters when it must be absolute.
+
 ## Why validate before submitting
 
 `xgc --dryrun` runs the real XGC binary, so it rejects exactly what a real run

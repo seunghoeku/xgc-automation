@@ -1307,3 +1307,48 @@ class ParallelDryrunTests(unittest.TestCase):
                     verdict = hr.maybe_capture_parallel_dryrun("polaris", "n662po", "run-1")
                 self.assertFalse(verdict["captured"])
                 self.assertTrue(verdict["retry"])
+
+
+class InputFileDirTests(unittest.TestCase):
+    """sml_input_file_dir is character(len=65) in XGC, on every machine."""
+
+    class _Plan:
+        machine = "perlmutter"
+        resources: dict = {}
+
+        def to_dict(self) -> dict:
+            return {}
+
+    def _problem(self, value: str, *, require_absolute: bool = False) -> str | None:
+        plan = self._Plan()
+        plan.resources = {"daos": {"work_dir": "/tmp/pool/container/case"}}
+        text = f"&sml_param\nsml_input_file_dir='{value}'\n/\n"
+        with patch.object(hr.m, "get_machine", return_value={}), \
+             patch.object(hr.ssh, "host_for", return_value="host"), \
+             patch.object(hr.ssh, "run", return_value=CommandResult(0, text, "", "cat")):
+            return hr._input_file_dir_problem(
+                plan, "/case", require_absolute=require_absolute
+            )
+
+    def test_short_relative_path_is_fine_without_daos(self) -> None:
+        self.assertIsNone(self._problem("../XGC_inputs/"))
+
+    def test_relative_path_is_refused_under_daos(self) -> None:
+        problem = self._problem("../XGC_inputs/", require_absolute=True)
+        self.assertIsNotNone(problem)
+        self.assertIn("relative", problem)
+
+    def test_over_long_path_is_refused_on_any_machine(self) -> None:
+        # The d3dqh dt=0 failure: 87 characters, truncated at 65, accepted by
+        # xgc --dryrun and only caught once the job read the profiles.
+        value = ("/pscratch/sd/s/sku/sangjun_turb_QH_newgrid_Frontier_emphase/"
+                 "restart_07000_em/input_dir/")
+        self.assertEqual(len(value), 87)
+        problem = self._problem(value)
+        self.assertIsNotNone(problem)
+        self.assertIn("87 characters", problem)
+        self.assertIn("65", problem)
+
+    def test_exactly_at_the_limit_passes(self) -> None:
+        self.assertIsNone(self._problem("/" + "a" * 63 + "/"))
+        self.assertIsNotNone(self._problem("/" + "a" * 64 + "/"))

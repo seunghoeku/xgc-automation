@@ -38,7 +38,24 @@ again. Nothing in the queue is affected by a dropped session.
 | `debug` | 1-2 | <= 1 h | smoke tests; one job per user at a time |
 | `debug-scaling` | 2-256 | <= 1 h | scaling checks |
 | `capacity` | 1-16 | <= 7 days | production below 256 nodes (the dAdt 8-node run) |
-| `prod` | >= 256 | <= 24 h | large production only; smaller requests are rejected |
+| `prod` | >= 256 | see below | routing queue; the destination fixes the wall-time limit |
+
+`prod` is a *routing* queue. PBS forwards the job to the execution queue whose
+node range contains the request, and each destination has its own wall-time
+cap (`qstat -Qf small medium large`, 2026-09-15):
+
+| Destination | Nodes | Max wall time |
+|---|---:|---:|
+| `small` / `backfill-small` | 256-1024 | 12 h |
+| `medium` / `backfill-medium` | 1025-1999 | 18 h |
+| `large` / `backfill-large` | 2000-10624 | 24 h |
+
+A request that fits no destination (512 nodes with `walltime=24:00:00`, job
+8828873 on 2026-09-15) is **accepted by `qsub`, then silently discarded**: it
+never appears in `qstat`, not even in `qstat -x` history, and no mail is sent.
+Check `qstat -u $USER` right after every prod submission. Runs longer than the
+cap are restart chains; size `sml_restart_write_period` so that a job
+boundary loses little.
 
 One Aurora node runs 12 XGC ranks (one per GPU tile) with 16 threads each.
 XGC needs the total rank count divisible by `sml_nphi_total`; with 16 planes
@@ -136,10 +153,13 @@ What the rendered script does for you:
 
 What you must do:
 
-- **`sml_input_file_dir` must be absolute** and at most 65 characters, e.g.
-  `'/lus/flare/projects/TokamakProfile/shku/XGC_inputs/'`. Relative paths
-  point into the container and fail. `submit_job(daos=True)` checks this and
-  refuses to submit; a hand-submitted job only fails after it starts.
+- **`sml_input_file_dir` must be absolute** here, e.g.
+  `'/lus/flare/projects/TokamakProfile/shku/XGC_inputs/'` (51 characters).
+  Relative paths point into the container and fail. `submit_job(daos=True)`
+  checks this and refuses to submit; a hand-submitted job only fails after it
+  starts. The **65-character limit** on that value is XGC's own
+  (`character(len=65)`), not a DAOS rule: it applies on every machine and
+  `xgc --dryrun` does not catch it. See `docs/workflow.md`.
 - Edit `input` on flare, not in the container. Each job copies the flare
   copy in, so a restart with a changed `input` works the usual way.
 - Treat the container as scratch. ALCF still calls DAOS a test
