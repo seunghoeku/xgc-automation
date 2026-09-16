@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import io
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from tools import queue_watch
+from tools import queue_menu
 from tools import scheduler as sched
 from tools import ssh
 
@@ -171,6 +174,67 @@ class WatchTests(unittest.TestCase):
         self.state.write_text("{not json", encoding="utf-8")
         payload = self._watch({"1": job("1", sched.PENDING)})
         self.assertTrue(payload["changes"])
+
+    def test_finished_history_survives_quiet_polls_with_request_metadata(self) -> None:
+        self._watch({"1": job("1", sched.RUNNING, name="physics", nodes="32",
+                              time_limit="06:00:00")})
+        with patch.object(queue_watch, "_final_states",
+                          return_value={"1": (sched.TIMEOUT, "0:0")}) as final:
+            ended = self._watch({})
+            quiet = self._watch({})
+        final.assert_called_once_with("perlmutter", ["1"])
+        self.assertEqual(ended["recent_finished"], quiet["recent_finished"])
+        self.assertEqual(quiet["changes"], [])
+        recent = quiet["recent_finished"][0]
+        self.assertEqual((recent["state"], recent["name"], recent["nodes"],
+                          recent["time_limit"]),
+                         (sched.TIMEOUT, "physics", "32", "06:00:00"))
+        self.assertNotIn("raw_state", recent)
+
+    def test_unknown_accounting_retries_without_losing_departure_time(self) -> None:
+        self._watch({"1": job("1", sched.RUNNING)})
+        with patch.object(queue_watch, "_final_states", side_effect=ssh.SSHError("offline")):
+            unknown = self._watch({})["recent_finished"][0]
+        self.assertEqual(unknown["state"], sched.UNKNOWN)
+        with patch.object(queue_watch, "_final_states",
+                          return_value={"1": (sched.COMPLETED, "0")}) as final:
+            resolved = self._watch({})
+        final.assert_called_once_with("perlmutter", ["1"])
+        self.assertEqual(resolved["recent_finished"][0]["left_queue_at"],
+                         unknown["left_queue_at"])
+        self.assertEqual(resolved["recent_finished"][0]["state"], sched.COMPLETED)
+        self.assertIn("RESOLVED", resolved["changes"][0])
+
+    def test_first_empty_poll_does_not_search_past_jobs(self) -> None:
+        with patch.object(queue_watch, "_final_states") as final:
+            self.assertEqual(self._watch({})["recent_finished"], [])
+        final.assert_not_called()
+
+    def test_history_is_bounded_and_newest_departures_first(self) -> None:
+        for i in range(7):
+            self._watch({str(i): job(str(i), sched.RUNNING)})
+            with patch.object(queue_watch, "_final_states",
+                              return_value={str(i): (sched.COMPLETED, "0")}):
+                latest = self._watch({})
+        self.assertEqual([j["job_id"] for j in latest["recent_finished"]],
+                         ["6", "5", "4", "3", "2"])
+
+    def test_requeued_job_is_removed_from_finished_history(self) -> None:
+        self._watch({"1": job("1", sched.RUNNING)})
+        with patch.object(queue_watch, "_final_states", return_value={}):
+            self._watch({})
+        self.assertEqual(self._watch({"1": job("1", sched.PENDING)})["recent_finished"], [])
+
+    def test_swiftbar_cli_does_not_poll_or_write(self) -> None:
+        self._watch({"1": job("1", sched.RUNNING)})
+        before = self.state.read_bytes()
+        with patch.object(queue_watch, "watch_many") as poll, redirect_stdout(io.StringIO()) as out:
+            code = queue_watch.main(["--swiftbar", "--machine", "perlmutter",
+                                     "--state-file", str(self.state)])
+        poll.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertIn("128 nodes", out.getvalue())
+        self.assertEqual(before, self.state.read_bytes())
 
 
 class PBSUserQueueTests(unittest.TestCase):
@@ -419,6 +483,52 @@ class WatchManyTests(unittest.TestCase):
         self._run(probes, jobs)
         _, notified = self._run(probes, jobs)
         notified.assert_not_called()
+
+    def test_unreachable_machine_keeps_last_successful_queue(self) -> None:
+        self._run({"polaris": True}, {"1": job("1", sched.RUNNING)})
+        path = Path(self.tmp.name) / "polaris.json"
+        previous = queue_watch.load_state(path)
+        self._run({"polaris": False})
+        saved = queue_watch.load_state(path)
+        self.assertEqual(saved["jobs"], previous["jobs"])
+        self.assertEqual(saved["polled_at"], previous["polled_at"])
+        self.assertEqual(saved["connection"], "skipped")
+
+
+class MenuTests(unittest.TestCase):
+    NOW = datetime.fromisoformat("2026-09-16T12:00:00-04:00")
+
+    def test_offline_and_stale_queues_are_not_counted_as_live(self) -> None:
+        snapshots = [
+            {"machine": "online", "polled_at": self.NOW.isoformat(),
+             "jobs": {"1": job("1", sched.RUNNING)}},
+            {"machine": "offline", "polled_at": self.NOW.isoformat(),
+             "connection": "skipped", "detail": "expired", "jobs": {"2": job("2", sched.RUNNING)}},
+            {"machine": "old", "polled_at": (self.NOW - timedelta(hours=1)).isoformat(),
+             "jobs": {"3": job("3", sched.PENDING)}},
+        ]
+        rendered = queue_menu.render(snapshots, now=self.NOW)
+        self.assertEqual(rendered.splitlines()[0], "HPC · 실행 1 · 대기 0 · ⚠ 2")
+        self.assertIn("연결 확인 필요: expired", rendered)
+        self.assertIn("마지막 확인 큐", rendered)
+
+    def test_finished_job_has_name_nodes_requested_time_and_observed_date(self) -> None:
+        finished = job("4", sched.TIMEOUT, name="test-run", nodes="32",
+                       time_limit="06:00:00", left_queue_at=self.NOW.isoformat())
+        rendered = queue_menu.render([{"machine": "pbs", "recent_finished": [finished]}])
+        self.assertIn("시간 제한 종료 · test-run · #4 · 32 nodes · 요청 06:00:00", rendered)
+        self.assertIn("큐 이탈 확인:", rendered)
+
+    def test_scheduler_text_cannot_inject_menu_actions(self) -> None:
+        unsafe = job("1", sched.RUNNING, name="name\n---\nattack | bash=/bin/rm")
+        lines = queue_menu.job_lines(unsafe)
+        self.assertNotIn("|", "\n".join(lines))
+        self.assertNotIn("\n", lines[0])
+
+    def test_missing_cache_is_unknown_instead_of_empty_live_queue(self) -> None:
+        rendered = queue_menu.render([{"machine": "new"}], now=self.NOW)
+        self.assertIn("확인 기록 없음", rendered)
+        self.assertIn("조회 기록 없음", rendered)
 
 
 class RotateLogTests(unittest.TestCase):

@@ -18,6 +18,8 @@ xgc-queue-watch                          # every reachable machine, full list
 xgc-queue-watch --machine polaris        # narrow to one; repeatable
 xgc-queue-watch --changes-only           # log transitions, not the whole queue
 xgc-queue-watch --json --no-notify       # for scripts
+xgc-queue-watch --history-limit 5        # retain recent departures per machine
+xgc-queue-watch --swiftbar              # display local cache only; no SSH
 xgc-queue-watch --rotate-log ~/Library/Logs/xgc-queue-watch.log  # archive weekly
 ```
 
@@ -93,6 +95,53 @@ launchctl bootout gui/$UID/gov.pppl.xgc.queue-watch        # stop watching
 
 `StartInterval` is the cadence in seconds; the default is 600. On Linux the
 same command belongs in a crontab line.
+
+## SwiftBar menu on macOS
+
+Install SwiftBar, then choose this repository's `templates/swiftbar` directory
+as its **Plugin Folder**. It contains the executable `xgc.30s.sh`; the plugin
+finds the repository relative to its own location and uses `.venv/bin/python`.
+If copying it to an existing plugin folder instead, set `XGC_AUTOMATION_ROOT`
+to the repository in the plugin's environment. No personal path is committed.
+
+Use a SwiftBar release containing the submenu refresh fix (available in
+2.1.2 beta 1 and later betas). SwiftBar 2.1.0/2.1.1 can disable server submenus
+when their titles or children change; restarting the app only temporarily
+restores them. See [upstream issue #515](https://github.com/swiftbar/SwiftBar/issues/515)
+and [fix #518](https://github.com/swiftbar/SwiftBar/pull/518).
+
+Keep the launchd timer above running: it queries the servers every ten minutes.
+SwiftBar reads those local snapshots every thirty seconds, so opening the menu
+does not wait for SSH, authenticate, or start another poll. The menu's refresh
+action also only rereads the cache. Each server submenu shows current jobs and
+the latest five observed departures, with job name, job ID, node count, and
+requested wall time on the same line. Each job has a detail submenu for elapsed
+time / queue reason or the time its departure was observed and its exit code.
+`completed` means the scheduler job completed, not that an entire simulation
+and its restart chain finished; `timeout` remains a separate outcome.
+
+The watcher's `--history-limit N` controls the per-machine retained history
+(default five); change the timer arguments and the plugin's display limit if
+you want more. The normal text and JSON outputs also include the recent history
+(`recent_finished`). History persists across application restarts and empty
+queue polls. It contains only jobs previously seen in the watcher's queue
+snapshots: there is no search for jobs that ended before monitoring, and a job
+that starts and ends entirely between polls cannot be observed. Existing
+snapshots are compatible and provide the starting queue.
+
+Departures are ordered by **when the watcher observed them**, newest first;
+departures first seen in the same poll have no known relative finish order.
+`left_queue_at` is that observation time, not an exact scheduler end time.
+Queue disappearance alone does not prove success. Unavailable or delayed
+accounting is shown as an unconfirmed outcome and retried on subsequent polls
+while the entry remains in the bounded history. Jobs that reappear in the queue
+are removed from this history.
+
+Connection failures retain the last successful queue and its timestamp, while
+recording the failed attempt separately. The menu labels those queues as cached;
+snapshots older than twenty minutes are also marked stale. Neither is counted
+in the menu bar's live running/pending totals. Snapshot writes are atomic so a
+menu refresh cannot read a half-written JSON file.
 
 ## Log rotation
 

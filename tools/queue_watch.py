@@ -37,6 +37,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
@@ -47,6 +48,7 @@ from tools import ssh
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = PROJECT_ROOT / ".cache" / "queue-watch"
+HISTORY_LIMIT = 5
 
 # How far ahead to warn about an expiring credential. Enough lead time for the
 # user to run sshproxy before the watch goes blind, independent of how often
@@ -95,7 +97,16 @@ def load_state(path: Path) -> dict[str, Any]:
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    # The menu bar can read while the timer writes. Publish a complete snapshot.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                     dir=path.parent, delete=False) as out:
+        temporary = Path(out.name)
+        try:
+            json.dump(state, out, indent=2, sort_keys=True)
+            out.close()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _user_for(machine: str, cfg: dict[str, Any]) -> str:
@@ -187,6 +198,8 @@ def diff_queues(
     machine: str,
     previous: dict[str, Any],
     current: dict[str, Any],
+    *,
+    finals: dict[str, tuple[str, str | None]] | None = None,
 ) -> list[str]:
     """Human-readable lines for everything that changed since the last poll."""
     changes: list[str] = []
@@ -206,14 +219,15 @@ def diff_queues(
             )
 
     departed = sorted(set(previous) - set(current))
-    finals = _final_states(machine, departed) if departed else {}
+    if finals is None:
+        finals = _final_states(machine, departed) if departed else {}
     for job_id in departed:
         job = previous[job_id]
         state, exit_code = finals.get(job_id, (sched.UNKNOWN, None))
         suffix = f", exit {exit_code}" if exit_code else ""
         changes.append(
             f"FINISHED {_ident(job)} {job.get('name', '?')} [{state}{suffix}] "
-            f"in {job.get('work_dir', '?')}"
+            f"{_describe(job)}, in {job.get('work_dir', '?')}"
         )
 
     return changes
@@ -391,12 +405,41 @@ def watch(
     state_file: Path | None = None,
     send_notification: bool = True,
     always_report: bool = False,
+    history_limit: int = HISTORY_LIMIT,
 ) -> dict[str, Any]:
     """Poll once, diff against the stored snapshot, and record the new one."""
     path = state_file or state_path(machine)
-    previous = load_state(path).get("jobs", {})
+    if history_limit < 1:
+        raise ValueError("history_limit must be positive")
+    saved = load_state(path)
+    previous = saved.get("jobs", {})
     current = poll(machine)
-    changes = diff_queues(machine, previous, current)
+    moment = _now().isoformat()
+    history = {j["job_id"]: j for j in saved.get("recent_finished", [])
+               if j["job_id"] not in current}
+    departed = sorted(set(previous) - set(current))
+    unresolved = [key for key, j in history.items()
+                  if j.get("state") not in sched.TERMINAL_STATES]
+    query_ids = sorted(set(departed + unresolved))
+    # Accounting may lag behind the queue. Preserve and retry unknown outcomes.
+    try:
+        finals = _final_states(machine, query_ids) if query_ids else {}
+    except (ssh.SSHError, sched.SchedulerError):
+        finals = {}
+    changes = diff_queues(machine, previous, current, finals=finals)
+    for key in departed:
+        history[key] = {**previous[key], "left_queue_at": moment,
+                        "state": sched.UNKNOWN, "exit_code": None}
+        history[key].pop("raw_state", None)
+    for key in query_ids:
+        state, code = finals.get(key, (sched.UNKNOWN, None))
+        if state in sched.TERMINAL_STATES:
+            history[key].update(state=state, exit_code=code)
+            if key not in departed:
+                changes.append(f"RESOLVED {_ident(history[key])} "
+                               f"{history[key].get('name', '?')} [{state}]")
+    recent = sorted(history.values(), key=lambda j: j["left_queue_at"], reverse=True)
+    recent = recent[:history_limit]
 
     note = _certificate_note(machine)
     if note:
@@ -404,7 +447,9 @@ def watch(
 
     save_state(
         path,
-        {"machine": machine, "polled_at": _now().isoformat(), "jobs": current},
+        {"machine": machine, "polled_at": moment, "jobs": current,
+         "recent_finished": recent, "checked_at": moment, "connection": "ok",
+         "note": note},
     )
 
     if changes and send_notification:
@@ -416,6 +461,7 @@ def watch(
         "queued": len(current),
         "changes": changes,
         "jobs": current,
+        "recent_finished": recent,
         "reported": bool(changes) or always_report,
     }
 
@@ -426,6 +472,7 @@ def watch_many(
     state_files: dict[str, Path] | None = None,
     send_notification: bool = True,
     always_report: bool = True,
+    history_limit: int = HISTORY_LIMIT,
 ) -> dict[str, Any]:
     """Poll every machine that can be reached, skip the rest, notify once.
 
@@ -438,23 +485,31 @@ def watch_many(
     changes: list[str] = []
 
     for machine in machines:
+        state_file = (state_files or {}).get(machine)
+        path = state_file or state_path(machine)
         status = probe(machine)
         if not status["pollable"]:
+            save_state(path, {**load_state(path), "machine": machine,
+                             "checked_at": _now().isoformat(),
+                             "connection": "skipped", "detail": status["detail"]})
             results.append(
                 {"machine": machine, "polled_at": _now().isoformat(),
                  "skipped": status["detail"]}
             )
             continue
 
-        state_file = (state_files or {}).get(machine)
         try:
             payload = watch(
                 machine,
                 state_file=state_file,
                 send_notification=False,
                 always_report=always_report,
+                history_limit=history_limit,
             )
         except (ssh.SSHError, QueueWatchError, sched.SchedulerError, KeyError) as error:
+            save_state(path, {**load_state(path), "machine": machine,
+                             "checked_at": _now().isoformat(),
+                             "connection": "error", "detail": str(error)})
             results.append(
                 {"machine": machine, "polled_at": _now().isoformat(),
                  "error": str(error)}
@@ -521,6 +576,11 @@ def _print_machine(payload: dict[str, Any], *, always_report: bool) -> None:
             f"  now      {_ident(job)} {job.get('name', '?')} "
             f"[{job.get('state', '?')}] {_describe(job)}"
         )
+    for job in payload.get("recent_finished", []):
+        print(f"  recent   {_ident(job)} {job.get('name', '?')} "
+              f"[{job['state']}] {job.get('nodes', '?')} node(s), "
+              f"limit {job.get('time_limit', '?')}, left queue observed "
+              f"{job['left_queue_at']}")
 
 
 def _print_report(payload: dict[str, Any], *, always_report: bool) -> None:
@@ -589,11 +649,18 @@ def main(argv: list[str] | None = None) -> int:
             f"(default: {LOG_ROTATION_INTERVAL.days})"
         ),
     )
-    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="machine-readable output")
+    output.add_argument("--swiftbar", action="store_true",
+                        help="render cached state for SwiftBar without SSH or writes")
+    parser.add_argument("--history-limit", type=int, default=HISTORY_LIMIT,
+                        help="recent departed jobs per machine (default: 5)")
     args = parser.parse_args(argv)
 
     if args.log_rotation_days < 1:
         parser.error("--log-rotation-days must be at least 1")
+    if args.history_limit < 1:
+        parser.error("--history-limit must be at least 1")
 
     machines = args.machine or machine_config.machine_names()
     if args.state_file and len(machines) != 1:
@@ -604,6 +671,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.state_file
         else None
     )
+    if args.swiftbar:
+        from tools.queue_menu import render
+        print(render([load_state((state_files or {}).get(m, state_path(m)))
+                      | {"machine": m} for m in machines],
+                     history_limit=args.history_limit))
+        return EXIT_OK
     always_report = not args.changes_only
 
     payload = watch_many(
@@ -611,6 +684,7 @@ def main(argv: list[str] | None = None) -> int:
         state_files=state_files,
         send_notification=not args.no_notify,
         always_report=always_report,
+        history_limit=args.history_limit,
     )
 
     if args.json:
