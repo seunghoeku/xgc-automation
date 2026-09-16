@@ -82,6 +82,10 @@ _RUN_STATE_TO_STATUS = {
     "timeout": "interrupted",
 }
 
+# Scheduler states of a run that has been handed to the scheduler but has not
+# produced an outcome yet.
+_IN_FLIGHT_RUN_STATES = {"pending", "submitted", "queued"}
+
 # Statuses that represent a human's conclusion about the science. A later
 # scheduler result must never overwrite one of these.
 _HUMAN_JUDGEMENT_STATUSES = {"analyzed", "archived", "abandoned"}
@@ -655,6 +659,12 @@ def derive_status(record: dict[str, Any]) -> str:
     ordered = sorted(runs, key=_run_order_key)
     if any(run.get("state") == "running" for run in ordered):
         return "running"
+
+    # A newer run that is queued but has no outcome yet -- a resubmission after
+    # a failure, or a restart after a wall-clock timeout -- means the effort is
+    # in flight again; the earlier outcome is history, not the current state.
+    if str(ordered[-1].get("state") or "") in _IN_FLIGHT_RUN_STATES:
+        return "submitted"
 
     for run in reversed(ordered):
         status = _RUN_STATE_TO_STATUS.get(str(run.get("state") or ""))

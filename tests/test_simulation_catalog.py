@@ -400,3 +400,43 @@ class SearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeriveStatusResubmissionTest(unittest.TestCase):
+    def test_pending_resubmission_after_failure_is_in_flight(self):
+        record = {
+            "status": "failed",
+            "runs": [
+                {"run_id": "run-20260915T025441Z", "state": "failed", "exit_code": 15,
+                 "submitted_at": "2026-09-15T02:55:39+00:00"},
+                {"run_id": "run-20260916T011916Z", "state": "pending",
+                 "submitted_at": "2026-09-16T01:20:16+00:00"},
+            ],
+        }
+        self.assertEqual(sc.derive_status(record), "submitted")
+
+    def test_pending_restart_after_timeout_is_in_flight(self):
+        record = {
+            "status": "interrupted",
+            "runs": [
+                {"run_id": "run-1", "state": "timeout", "submitted_at": "2026-09-10T00:00:00+00:00"},
+                {"run_id": "run-2", "state": "pending", "submitted_at": "2026-09-11T00:00:00+00:00"},
+            ],
+        }
+        self.assertEqual(sc.derive_status(record), "submitted")
+
+    def test_outcome_after_pending_history_still_wins(self):
+        record = {
+            "status": "submitted",
+            "runs": [
+                {"run_id": "run-1", "state": "pending", "submitted_at": "2026-09-10T00:00:00+00:00"},
+                {"run_id": "run-2", "state": "failed", "exit_code": 1,
+                 "submitted_at": "2026-09-11T00:00:00+00:00"},
+            ],
+        }
+        self.assertEqual(sc.derive_status(record), "failed")
+
+    def test_human_judgement_is_not_overridden_by_pending_run(self):
+        record = {"status": "abandoned",
+                  "runs": [{"run_id": "run-1", "state": "pending", "submitted_at": "2026-09-11T00:00:00+00:00"}]}
+        self.assertEqual(sc.derive_status(record), "abandoned")

@@ -148,7 +148,9 @@ was polled last.** One scientific effort routinely spans several scheduler
 jobs: run out of wall clock, restart from the checkpoint, repeat. The status
 comes from the newest run that reported an outcome, so a failure early in a
 chain that was later restarted and finished is history rather than the current
-state.
+state. A newer run that is still queued (resubmission after a failure, restart
+after a timeout) puts the simulation back to `submitted`: an effort with a job
+in the queue is in flight, not failed.
 
 `interrupted` means the last job hit the wall clock. That is not a failure:
 XGC runs are routinely sized to be stopped by the scheduler and resumed from a
