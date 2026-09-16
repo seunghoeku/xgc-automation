@@ -17,14 +17,14 @@ to another node when one misbehaves, by editing one line in
 
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar flux polaris1 aurora frontier
+Host stellar stellar.princeton.edu flux polaris1 aurora frontier
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
     ServerAliveInterval 60
     ServerAliveCountMax 3
 
-Host stellar
+Host stellar stellar.princeton.edu
     HostName stellar.princeton.edu
     User <princeton_netid>
 
@@ -68,6 +68,9 @@ limit (~104 characters). Keeping it directly under `~/.ssh/` as shown is safe.
 
 ```bash
 ssh stellar        # Duo/password prompt. The master persists 8h even after you exit.
+# Type the alias, or list the full hostname in the multiplexing Host line as above.
+# `ssh user@stellar.princeton.edu` matches a Host block only if that name is listed;
+# otherwise ControlMaster is off for that command and Duo is asked every time.
 ssh frontier       # Frontier PASSCODE is entered by the human here
 ```
 
