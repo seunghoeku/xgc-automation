@@ -52,11 +52,19 @@ for d in */; do
   [ -d "$d" ] || continue
   inp=0; [ -f "$d/input" ] && inp=1
   f0=$(ls -d "$d"/xgc.f0.[0-9]*.bp 2>/dev/null | sed -n 's/.*xgc\.f0\.\([0-9]*\)\.bp$/\1/p' | sort -n | tail -1)
+  dsrc=xgc.2d
   d2=$(ls -d "$d"/xgc.2d.[0-9]*.bp 2>/dev/null | sed -n 's/.*xgc\.2d\.\([0-9]*\)\.bp$/\1/p' | sort -n | tr '\n' ' ')
+  # XGC1 writes xgc.3d and no xgc.2d; both carry iden, so a case whose stage A
+  # is a turbulence run is read from 3d instead. A turbulence run can hold
+  # thousands of them, so only the last 50 steps go into this summary line.
+  if [ -z "$d2" ]; then
+    d2=$(ls -d "$d"/xgc.3d.[0-9]*.bp 2>/dev/null | sed -n 's/.*xgc\.3d\.\([0-9]*\)\.bp$/\1/p' | sort -n | tail -50 | tr '\n' ' ')
+    [ -n "$d2" ] && dsrc=xgc.3d
+  fi
   fin=$(ls -d "$d"/xgc.f_init*.bp 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
   done_n=$(grep -ls "XGC finished" "$d"/slurm-*.out 2>/dev/null | wc -l | tr -d ' ')
   out_n=$(ls "$d"/slurm-*.out 2>/dev/null | wc -l | tr -d ' ')
-  echo "$d|$inp|$f0|$d2|$fin|$done_n|$out_n"
+  echo "$d|$inp|$f0|$d2|$fin|$done_n|$out_n|$dsrc"
 done
 """
 
@@ -67,14 +75,17 @@ def parse_inventory(stdout: str) -> list[dict[str, Any]]:
         if line.strip() == "NOROOT":
             raise ProcedureError("case root does not exist on the machine")
         parts = line.rstrip("\n").split("|")
-        if len(parts) != 7:
+        if len(parts) == 7:
+            parts.append("xgc.2d")   # inventory written before the 3d fallback
+        if len(parts) != 8:
             continue
-        name, inp, f0, d2, fin, done_n, out_n = parts
+        name, inp, f0, d2, fin, done_n, out_n, dsrc = parts
         dirs.append({
             "name": name,
             "has_input": inp == "1",
             "last_f0_step": int(f0) if f0 else None,
             "twod_steps": [int(s) for s in d2.split()],
+            "density_source": dsrc or "xgc.2d",
             "f_init_files": fin.split(),
             "finished_jobs": int(done_n or 0),
             "job_outputs": int(out_n or 0),
@@ -139,12 +150,13 @@ def make_finit(
     step: int | None = None,
     overwrite: bool = False,
     out_dir: str | None = None,
+    species_name: str | None = None,
 ) -> dict[str, Any]:
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     sigma = float(case.smooth["sigma_theta"] if sigma_theta is None else sigma_theta)
     width = float(case.smooth["v_width"] if v_width is None else v_width)
-    species = case.species
+    species, species_tag = case.species_for(species_name)
 
     script = _push_helper(case, target, "make_f_init.py")
     argv = [
@@ -156,10 +168,10 @@ def make_finit(
         "--charge-num", str(species.get("charge_num", 1.0)),
         "--sigma-theta", str(sigma),
         "--v-width", str(width),
-        "--no-smooth-name", cfg.NO_SMOOTH_FILE,
+        "--no-smooth-name", cfg.no_smooth_file(species_tag),
     ]
     if sigma > 0 or width > 0:
-        argv += ["--smooth-name", cfg.smooth_file(sigma, width)]
+        argv += ["--smooth-name", cfg.smooth_file(sigma, width, species_tag)]
     if species.get("has_electron"):
         argv.append("--has-electron")
     step = case.f0_step if step is None else step
@@ -174,25 +186,112 @@ def make_finit(
     cfg.append_log(
         case, "make-finit",
         f0_step=payload.get("f0_step"), sigma_theta=sigma, v_width=width,
+        species=species_tag or species["var_string"],
         outputs=[o["path"] for o in payload.get("outputs", [])],
         f_g_stats=payload.get("f_g_stats"),
     )
     return payload
 
 
+# --- case 2: f_init -> turbulence mesh ------------------------------------------
+
+def convert_finit(
+    case: Case,
+    finit_file: str,
+    *,
+    target_dir: str | None = None,
+    out_name: str | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Interpolate an f_init of stage A onto the turbulence mesh (login node)."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    target_dir = target_dir or case.extra.get("turb_mesh_dir")
+    if not target_dir:
+        raise ProcedureError("no target mesh directory: pass --target-dir or set turb_mesh_dir in the case file")
+    finit_name = Path(finit_file).name
+    finit_path = f"{case.maxwell_path}/{finit_name}"
+    if not ssh.exists(target, finit_path):
+        raise ProcedureError(f"{finit_path} does not exist")
+    out_file = out_name or cfg.turb_file(finit_name)
+    script = _push_helper(case, target, "convert_f_init.py")
+    png_remote = f"{case.helper_dir}/{Path(out_file).stem}.png"
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--target-dir", str(target_dir), "--finit", finit_path,
+            "--out", f"{case.maxwell_path}/{out_file}", "--png-out", png_remote]
+    if overwrite:
+        argv.append("--overwrite")
+    payload = _run_json(target, argv, timeout=7200)
+    case.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    if payload.get("png"):
+        local_png = case.artifacts_dir / f"convert__{Path(out_file).stem}.png"
+        try:
+            ssh.pull(target, payload["png"], str(local_png))
+            payload["local_png"] = str(local_png)
+        except Exception as exc:  # noqa: BLE001
+            payload["local_png_error"] = str(exc)
+    cfg.append_log(
+        case, "convert", finit=finit_path, target_dir=str(target_dir), output=payload["output"],
+        nnodes_source=payload["nnodes_source"], nnodes_target=payload["nnodes_target"],
+        target_nodes_outside_source_mesh=payload["target_nodes_outside_source_mesh"],
+        density_range_source=payload["density_range_source"], density_range_target=payload["density_range_target"],
+        nan_nodes_target=payload["nan_nodes_target"], local_png=payload.get("local_png"),
+    )
+    return payload
+
+
 # --- stage 3: dt=0 directory -----------------------------------------------
 
-def plan_dt0(case: Case, finit_file: str, *, dir_name: str | None = None) -> dict[str, Any]:
-    """Everything a dt=0 directory would contain, without writing any of it."""
-    finit_name = Path(finit_file).name
+def plan_dt0(
+    case: Case,
+    finit_file: str | dict[str | None, str],
+    *,
+    dir_name: str | None = None,
+) -> dict[str, Any]:
+    """Everything a dt=0 directory would contain, without writing any of it.
+
+    ``finit_file`` is one file name, or ``{species name: file name}`` for a
+    case that initialises several species at once (d3dqh: e, D and C).
+    """
     overrides = {
         "sml_dt": str(case.dt0["sml_dt"]),
         "sml_mstep": str(case.dt0["sml_mstep"]),
         # A fresh start even if the source run was restarted several times.
         "sml_restart": ".false.",
     }
-    return _plan_from_maxwell(case, finit_name, dir_name or cfg.dt0_dirname(finit_name),
+    finits = _finit_map(finit_file)
+    return _plan_from_maxwell(case, finits, dir_name or _dt0_dirname(case, finits),
                               overrides, kind="dt0")
+
+
+def _finit_map(finit_file: str | dict[str | None, str]) -> dict[str | None, str]:
+    if isinstance(finit_file, str):
+        return {None: Path(finit_file).name}
+    if not finit_file:
+        raise ProcedureError("no f_init file given")
+    return {k: Path(v).name for k, v in finit_file.items()}
+
+
+def _dt0_dirname(case: Case, finits: dict[str | None, str]) -> str:
+    """One directory for the whole set, named after the shared smoothing tag.
+
+    With several species the per-species prefix is dropped, so e/D/C of the
+    same smoothing land in one ``dt0_smooth_<sigma>_<width>`` run -- they have
+    to, since XGC loads all three in a single job.
+    """
+    names = list(finits.items())
+    if len(names) == 1 and names[0][0] is None:
+        return cfg.dt0_dirname(names[0][1])
+    tags = set()
+    for species_name, filename in names:
+        tag = cfg.finit_tag(filename)
+        prefix = f"{species_name}_"
+        tags.add(tag[len(prefix):] if species_name and tag.startswith(prefix) else tag)
+    if len(tags) != 1:
+        raise ProcedureError(
+            f"the f_init files do not share one tag ({sorted(tags)}); pass --dir"
+        )
+    return f"dt0_{tags.pop()}"
 
 
 def plan_run(case: Case, finit_file: str, *, dir_name: str | None = None) -> dict[str, Any]:
@@ -204,7 +303,7 @@ def plan_run(case: Case, finit_file: str, *, dir_name: str | None = None) -> dic
     run_cfg = case.run or {}
     overrides = {str(k): _fortran(v) for k, v in (run_cfg.get("overrides") or {}).items()}
     dir_name = dir_name or cfg.run_dirname(finit_name, str(run_cfg.get("dir_prefix", "finit_")))
-    return _plan_from_maxwell(case, finit_name, dir_name, overrides, kind="run")
+    return _plan_from_maxwell(case, {None: finit_name}, dir_name, overrides, kind="run")
 
 
 def _fortran(value: Any) -> str:
@@ -221,7 +320,7 @@ def _fortran(value: Any) -> str:
     return str(value)
 
 
-def _plan_from_maxwell(case: Case, finit_name: str, dir_name: str,
+def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
                        overrides: dict[str, str], *, kind: str) -> dict[str, Any]:
     _cfg, target = _machine(case)
     target_dir = case.subdir(dir_name)
@@ -229,7 +328,7 @@ def _plan_from_maxwell(case: Case, finit_name: str, dir_name: str,
     copy_files = list(case.job.get("copy_files", []))
 
     missing = [
-        name for name in copy_files + ["input", script_name, finit_name]
+        name for name in copy_files + ["input", script_name] + list(finits.values())
         if not ssh.exists(target, f"{case.maxwell_path}/{name}")
     ]
     if missing:
@@ -239,18 +338,23 @@ def _plan_from_maxwell(case: Case, finit_name: str, dir_name: str,
         )
 
     old_input = ssh.read_file(target, f"{case.maxwell_path}/input")
-    slot = int(case.species["slot"])
+    slots = {
+        name: int(case.species_for(name)[0]["slot"]) for name in finits
+    }
     overrides = dict(overrides)
     overrides["ptl_input_file_dir"] = f"'../{case.maxwell_dir}/'"
-    for name, token in (("ptl_f_init_file", f"'{finit_name}'"),
-                        ("ptl_maxwellian_init", ".false.")):
+    for name, token_for in (("ptl_f_init_file", lambda f: f"'{f}'"),
+                            ("ptl_maxwellian_init", lambda _f: ".false.")):
         current = nle.read_value(old_input, name)
         if current is None:
             raise ProcedureError(
                 f"{name} is not set in {case.maxwell_path}/input; the procedure "
                 "needs the per-species array present to edit one slot"
             )
-        overrides[name] = nle.set_slot(current, slot, token)
+        # Every species is written into the one array: XGC loads them together.
+        for species_name, filename in finits.items():
+            current = nle.set_slot(current, slots[species_name], token_for(filename))
+        overrides[name] = current
     new_input, notes = nle.apply(old_input, overrides)
     diff = "".join(difflib.unified_diff(
         old_input.splitlines(keepends=True), new_input.splitlines(keepends=True),
@@ -265,8 +369,10 @@ def _plan_from_maxwell(case: Case, finit_name: str, dir_name: str,
         "dir_name": dir_name,
         "target_dir": target_dir,
         "exists": ssh.exists(target, target_dir),
-        "finit_file": finit_name,
-        "species_slot": slot,
+        "finit_file": ", ".join(sorted(finits.values())),
+        "finit_files": dict(sorted(finits.items(), key=lambda kv: slots[kv[0]])),
+        "species_slot": slots[next(iter(finits))] if len(finits) == 1 else None,
+        "species_slots": {str(k): v for k, v in sorted(slots.items(), key=lambda kv: kv[1])},
         "copy_files": copy_files,
         "input_text": new_input,
         "input_notes": notes,
@@ -403,9 +509,15 @@ def job_states(case: Case) -> list[dict[str, Any]]:
 
 # --- stage 4: density comparison and adjustment -----------------------------
 
-def resolve_dt0_finit(case: Case, dt0_dir: str, input_text: str) -> tuple[str, str]:
-    """(f_init path, its directory) that a dt=0 input actually points at."""
-    slot = int(case.species["slot"])
+def resolve_dt0_finit(
+    case: Case, dt0_dir: str, input_text: str, species_name: str | None = None
+) -> tuple[str, str]:
+    """(f_init path, its directory) that a dt=0 input actually points at.
+
+    A dt=0 run may load several species at once; ``species_name`` says which
+    slot is being checked.
+    """
+    slot = int(case.species_for(species_name)[0]["slot"])
     finit = nle.array_slot(input_text, "ptl_f_init_file", slot)
     if not finit:
         raise ProcedureError(f"ptl_f_init_file slot {slot} is not set in {dt0_dir}/input")
@@ -425,12 +537,20 @@ def adjust(
     cmp_step: int | None = None,
     overwrite: bool = False,
     out_name: str | None = None,
+    species_name: str | None = None,
+    density_var: str | None = None,
 ) -> dict[str, Any]:
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     directory = case.subdir(dt0_dir)
     input_text = ssh.read_file(target, f"{directory}/input")
-    finit_path, finit_dir = resolve_dt0_finit(case, dt0_dir, input_text)
+    species, _tag = case.species_for(species_name)
+    # Each species is scored against its own density output; the f0-grid
+    # densities XGC writes are iden (main ion) and eden (electrons), so a
+    # species with neither can be transferred but not checked this way.
+    if density_var is None:
+        density_var = str(species.get("density_var") or "iden")
+    finit_path, finit_dir = resolve_dt0_finit(case, dt0_dir, input_text, species_name)
     finit_name = Path(finit_path).name
     out_file = out_name or cfg.adjusted_file(finit_name)
     tag = cfg.finit_tag(finit_name)
@@ -452,6 +572,7 @@ def adjust(
         "--png-out", png_remote,
     ]
     argv += ["--region-max", str(int(case.extra.get("adjust_region_max", 1)))]
+    argv += ["--density-var", density_var]
     if check_only:
         argv.append("--check-only")
     else:

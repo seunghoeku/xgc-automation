@@ -4,6 +4,7 @@
     xgc-finit CASE make-finit [--sigma-theta S] [--v-width W] [--step N] [--overwrite]
     xgc-finit CASE stage-dt0 --finit FILE [--dir NAME] [--confirm] [--overwrite]
     xgc-finit CASE stage-run --finit FILE [--dir NAME] [--confirm] [--overwrite]
+    xgc-finit CASE convert --finit FILE [--target-dir DIR] [--out NAME] [--overwrite]
     xgc-finit CASE dryrun DIR
     xgc-finit CASE submit DIR [--confirm] [--skip-dryrun]
     xgc-finit CASE jobs
@@ -42,7 +43,7 @@ def cmd_status(case: cfg.Case, args: argparse.Namespace) -> int:
         _print(inv, True)
         return 0
     print(f"{case.name}: {case.root} on {case.machine}")
-    header = f"{'directory':<28} {'input':<5} {'f0 last':>7} {'2d steps':<22} {'jobs':<9} f_init files"
+    header = f"{'directory':<28} {'input':<5} {'f0 last':>7} {'2d/3d steps':<22} {'jobs':<9} f_init files"
     print(header)
     print("-" * len(header))
     for d in inv["dirs"]:
@@ -69,7 +70,7 @@ def cmd_status(case: cfg.Case, args: argparse.Namespace) -> int:
 def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.make_finit(
         case, sigma_theta=args.sigma_theta, v_width=args.v_width, step=args.step,
-        overwrite=args.overwrite, out_dir=args.out_dir,
+        overwrite=args.overwrite, out_dir=args.out_dir, species_name=args.species,
     )
     if args.json:
         _print(payload, True)
@@ -89,15 +90,58 @@ def _print_resources(res: dict[str, Any]) -> None:
           f"account={res['account']} -> up to {res['node_hours']} node-hours")
 
 
+def cmd_convert(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.convert_finit(case, args.finit, target_dir=args.target_dir,
+                                 out_name=args.out, overwrite=args.overwrite)
+    if args.json:
+        _print(payload, True)
+        return 0
+    print(f"source {payload['nnodes_source']} nodes -> target {payload['nnodes_target']} nodes "
+          f"(v-grid {payload['vgrid']['nvperp']}x{payload['vgrid']['nvpara_data']}), {payload['seconds']} s")
+    print(f"  target nodes outside the source mesh (nearest-node filled): "
+          f"{payload['target_nodes_outside_source_mesh']}  psi_n {payload.get('outside_nodes_psin_range')}")
+    print(f"  density range source {payload['density_range_source']}  target {payload['density_range_target']}")
+    print(f"  nodes with non-finite f_g on target: {payload['nan_nodes_target']}")
+    print(f"  wrote {payload['output']}")
+    if payload.get("local_png"):
+        print(f"  png: {payload['local_png']}")
+    return 0
+
+
+def _finit_arg(values: list[str] | str) -> str | dict[str | None, str]:
+    """``--finit FILE`` stays a plain name; ``--finit NAME=FILE`` builds a map."""
+    if isinstance(values, str):
+        return values
+    if len(values) == 1 and "=" not in values[0]:
+        return values[0]
+    out: dict[str | None, str] = {}
+    for item in values:
+        name, sep, filename = item.partition("=")
+        if not sep:
+            raise SystemExit(
+                f"--finit {item!r}: with several species every value must be "
+                "NAME=FILE, e.g. --finit D=xgc.f_init_D_smooth_0.5_0.5.bp"
+            )
+        out[name] = filename
+    return out
+
+
 def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace, *, run: bool = False) -> int:
     planner = proc.plan_run if run else proc.plan_dt0
-    plan = planner(case, args.finit, dir_name=args.dir)
+    finit = _finit_arg(args.finit)
+    if run and not isinstance(finit, str):
+        raise SystemExit("stage-run takes a single --finit file")
+    plan = planner(case, finit, dir_name=args.dir)
     if args.json and not args.confirm:
         _print(plan, True)
         return 0
     label = "production-run" if run else "dt=0"
     print(f"{label} directory: {plan['target_dir']}" + ("  (EXISTS)" if plan["exists"] else ""))
     print(f"copy from {case.maxwell_dir}/: {', '.join(plan['copy_files'])}")
+    if plan.get("species_slots"):
+        for name, slot in plan["species_slots"].items():
+            if name != "None":
+                print(f"  slot {slot} ({name}): {plan['finit_files'][name]}")
     print("input changes:")
     for note in plan["input_notes"]:
         print(f"  {note}")
@@ -166,13 +210,19 @@ def cmd_adjust(case: cfg.Case, args: argparse.Namespace, *, check_only: bool = F
         check_only=check_only or getattr(args, "check_only", False),
         ref_step=args.ref_step, cmp_step=args.cmp_step,
         overwrite=getattr(args, "overwrite", False),
+        species_name=getattr(args, "species", None),
+        density_var=getattr(args, "density_var", None),
     )
     if args.json:
         _print(payload, True)
         return 0
     m = payload["metrics"]
     print(f"{args.dir}: f_init {payload['finit']}")
-    print(f"  reference {case.maxwell_dir}/xgc.2d.{payload['ref_step']:05d}.bp vs dt0 xgc.2d.{payload['cmp_step']:05d}.bp")
+    ref_src = payload.get("ref_source", "xgc.2d")
+    cmp_src = payload.get("cmp_source", "xgc.2d")
+    print(f"  density variable {payload.get('density_var', 'iden')}")
+    print(f"  reference {case.maxwell_dir}/{ref_src}.{payload['ref_step']:05d}.bp "
+          f"vs dt0 {cmp_src}.{payload['cmp_step']:05d}.bp")
     raw, fsa = m["raw_dn_over_n"], m["fsa_dn_over_n"]
     print(f"  (n_ref - n_dt0)/n  node-wise: rms {raw['rms']:.3e}, max {raw['abs_max']:.3e}")
     print(f"  (n_ref - n_dt0)/n  flux-avg : rms {fsa['rms']:.3e}, max {fsa['abs_max']:.3e}, mean {fsa['mean']:.3e}")
@@ -295,14 +345,26 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="what exists in the case root")
 
     p = sub.add_parser("make-finit", help="f0 snapshot -> f_init files (login node)")
+    p.add_argument("--species", default=None,
+                   help="named entry of the case's species_set; tags the output "
+                        "files so several species can share one stage A directory")
     p.add_argument("--sigma-theta", type=float, default=None, help="poloidal width [rad]")
     p.add_argument("--v-width", type=float, default=None, help="velocity-space width [cells]")
     p.add_argument("--step", type=int, default=None, help="f0 step; default last")
     p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
     p.add_argument("--overwrite", action="store_true")
 
+    p = sub.add_parser("convert", help="case 2: interpolate an f_init onto the turbulence mesh (login node)")
+    p.add_argument("--finit", required=True, help="f_init file name in the stage A directory, usually an adjusted one")
+    p.add_argument("--target-dir", default=None, help="directory with xgc.mesh.bp of the turbulence mesh; default turb_mesh_dir of the case")
+    p.add_argument("--out", default=None, help="output name; default xgc.f_init_<tag>_turb.bp")
+    p.add_argument("--overwrite", action="store_true")
+
     p = sub.add_parser("stage-dt0", help="plan/write a dt=0 directory for one f_init file")
-    p.add_argument("--finit", required=True, help="f_init file name in the stage A directory")
+    p.add_argument("--finit", required=True, action="append",
+                   help="f_init file name in the stage A directory. Repeat as "
+                        "NAME=FILE (NAME from the case's species_set) to load "
+                        "several species in one dt=0 run")
     p.add_argument("--dir", default=None, help="directory name; default dt0_<tag>")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--overwrite", action="store_true")
@@ -329,12 +391,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--check-only", action="store_true")
     p.add_argument("--ref-step", type=int, default=None)
     p.add_argument("--cmp-step", type=int, default=None)
+    p.add_argument("--species", default=None,
+                   help="named entry of the case's species_set; picks the slot "
+                        "and the density variable to score")
+    p.add_argument("--density-var", default=None,
+                   help="override the density variable (iden / eden)")
     p.add_argument("--overwrite", action="store_true")
 
     p = sub.add_parser("check", help="density mismatch metrics only (no file written)")
     p.add_argument("dir")
     p.add_argument("--ref-step", type=int, default=None)
     p.add_argument("--cmp-step", type=int, default=None)
+    p.add_argument("--species", default=None,
+                   help="named entry of the case's species_set; picks the slot "
+                        "and the density variable to score")
+    p.add_argument("--density-var", default=None,
+                   help="override the density variable (iden / eden)")
 
     p = sub.add_parser("compare", help="initial-transient figures: Maxwellian vs f_init production runs (login node)")
     p.add_argument("dirs", nargs="*", help="production-run directories; default every finit_* directory")
@@ -382,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         handlers = {
             "status": cmd_status,
             "make-finit": cmd_make_finit,
+            "convert": cmd_convert,
             "stage-dt0": cmd_stage_dt0,
             "stage-run": lambda c, a: cmd_stage_dt0(c, a, run=True),
             "dryrun": cmd_dryrun,

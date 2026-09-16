@@ -21,7 +21,77 @@ smoothing setting.
 |---|---|---|
 | 0 | XGCa on the XGCa mesh, f_init, dt=0 check, density adjustment. The adjusted file is consumed by an XGCa run on the same mesh. | **implemented** |
 | 1 | Build the XGCa input from a turbulence input (same mesh), then case 0, then use the adjusted f_init in the turbulence run. | not yet |
-| 2 | Case 1 with a dedicated XGCa mesh in the middle; the f_init is interpolated onto the turbulence mesh (`convert_distribution`). | not yet |
+| 2 | Case 1 with a dedicated XGCa mesh in the middle; the f_init is interpolated onto the turbulence mesh (`convert_distribution`). | interpolation step (`convert`) implemented; the turbulence input is still prepared by hand |
+| 3 | No XGCa run at all: an existing **turbulence** run's own f0 is the relaxed distribution, already on the target mesh. | `average_f0` + `make-finit` implemented (d3dqh); the dt=0 check reads `xgc.3d` |
+
+## Case 3: starting from a turbulence run's own f0
+
+Sometimes the relaxed distribution to start from is not an XGCa run but a
+turbulence run that has already been going for thousands of steps -- the
+f_init files it was itself started from being long gone (d3dqh: they lived in
+another centre's scratch). Two things separate that f0 from what stage B
+expects, and `remote/average_f0.py` removes both:
+
+* the XGC1 array carries a toroidal dimension, `(nphi, nmu+1, nnode, nvp)`;
+* one snapshot of a production mesh is ~100 GB, so neither the toroidal
+  average nor a time average fits in a login node's memory in one piece.
+
+It streams each snapshot one toroidal plane at a time, accumulates the sum
+over planes and over the requested snapshots, and writes `xgc.f0.<step>.bp`
+with `nphi=1` -- the shape XGCa writes, so `from_xgc_output` reads it
+unchanged. Peak memory is one plane of one species (about 1 GB on a 137k-node
+mesh). Averaging over a handful of snapshots is the point: a single turbulent
+snapshot carries the instantaneous fluctuation, and the f_init is meant to be
+the relaxed background.
+
+```bash
+python3 f_init/remote/average_f0.py \
+    --run-dir <turbulence run> --out-dir <case root>/maxwell \
+    --steps 7500 8000 8500 9000 --out-step 9000
+```
+
+`maxwell/` then holds that one file plus symlinks to the turbulence run's
+`xgc.f0.mesh.bp`, `xgc.mesh.bp`, `xgc.units.bp`, `units.m` and
+`xgc.bfield.bp`. There is no stage A job to submit, `status`/`extend-maxwell`
+have nothing to report, and because the mesh is already the turbulence mesh
+the case-2 `convert` step is not needed either. Start at `make-finit`.
+
+Keep `sml_input_file_dir` short in the stage A template: XGC truncates it at
+65 characters and `xgc --dryrun` accepts the over-long value anyway, so the
+dt=0 job dies a minute in with a `Cannot open file` on a path cut mid-directory
+(d3dqh, 2026-09-15). A relative `'../XGC_inputs/'` beside a symlink in the case
+root is the safe form.
+
+Two consequences for the later stages:
+
+* **XGC1 writes `xgc.3d` and no `xgc.2d`.** Both carry `iden` on the mesh
+  nodes -- 3d with a leading toroidal dimension that is averaged away -- so
+  `adjust`/`check` resolve the density output per directory and fall back to
+  `xgc.3d`. The payload records which was used (`ref_source`, `cmp_source`)
+  and the CLI prints it.
+* **The dt=0 run is an XGC1 run**, not XGCa, so `job.script` must point at a
+  turbulence job script.
+
+### More than one species
+
+A case that initialises several kinetic species lists them under
+`species_set`, each entry overlaying the shared `species` block, and
+`make-finit --species <name>` selects one:
+
+```yaml
+species:            # shared
+  has_electron: true
+species_set:
+  e: {var_string: e_f,  mass_au: 5.454e-4, charge_num: -1.0, slot: 1}
+  D: {var_string: i_f,  mass_au: 2.0,      charge_num:  1.0, slot: 2}
+  C: {var_string: i2f,  mass_au: 12.0,     charge_num:  6.0, slot: 3}
+```
+
+The name is prepended to the file tag, so the three runs share one stage A
+directory without colliding and the species stays visible in every derived
+name: `xgc.f_init_D_smooth_0.5_0.5.bp` ->
+`xgc.f_init_adjusted_D_smooth_0.5_0.5.bp`, `dt0_D_smooth_0.5_0.5/`. A case
+without `species_set` keeps the untagged names it always had.
 
 ## Case 0, stage by stage
 
@@ -86,7 +156,9 @@ timer (`docs/queue-watch.md`) notices these jobs too.
 
 **D.** `adjust <dt0_dir>` runs `remote/adjust_f_init.py`. It reads `iden`
 from `maxwell/xgc.2d.<ref>.bp` (default: the f0 step the f_init came from) and
-from `dt0_<tag>/xgc.2d.<cmp>.bp` (default: the first output), forms
+from `dt0_<tag>/xgc.2d.<cmp>.bp` (default: the first output) -- or from
+`xgc.3d` in whichever of the two directories has no 2d output, see case 3 --
+forms
 `dn = n_ref - n_dt0`, flux-surface averages it, and scales the full
 distribution node by node:
 
@@ -117,6 +189,21 @@ beyond psi_n 1.16 a private-region `<dn>`, which divided by the tiny far-SOL
 density looked like a 50% mismatch. The notebook
 interpolated through the 1-D diagnostic psi grid instead; on cbc6 both grids
 have 68 points and coincide, and the library route does not depend on that.
+
+**G. Turbulence mesh (case 2).** `convert --finit xgc.f_init_adjusted_<tag>.bp`
+runs `remote/convert_f_init.py` on the login node: it reproduces the
+`xd.convert_distribution(dist, x_source, x_target)` cell of
+`cbc5_f_init_turb_prepare.ipynb`, linearly interpolating every velocity-space
+slice of the (Maxwellian-restored) distribution and its moments from the XGCa
+mesh triangulation onto the nodes of the turbulence mesh, recomputing the
+Maxwellian moments there and removing the Maxwellian again. Target nodes
+outside the XGCa mesh take the nearest source node. The target is a directory
+holding `xgc.mesh.bp`/`xgc.units.bp` written by XGC on the turbulence mesh
+(`turb_mesh_dir` in the case file or `--target-dir`); only its mesh is read.
+The result, `xgc.f_init_<tag>_turb.bp` in `maxwell/`, is consumed by a
+turbulence input whose `f0_nmu/f0_nvp/f0_smu_max/f0_vp_max` equal the f_init's
+velocity grid. A PNG comparing the density and temperature moments on both
+meshes lands in `f_init/cases/<case>/`.
 
 **F. Production run.** `stage-run --finit xgc.f_init_adjusted_<tag>.bp`
 writes `finit_sm_<sigma>_<width>/` (cbc3's convention; the `adjusted` prefix

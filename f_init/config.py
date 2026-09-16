@@ -34,6 +34,12 @@ DEFAULTS: dict[str, Any] = {
         "has_electron": False,   # adiabatic electrons -> no e_f in the f0 file
         "slot": 2,               # 1-based position in ptl_f_init_file etc.
     },
+    # Optional: a case with more than one kinetic species to initialise names
+    # them here, each entry overlaying `species`. `make-finit --species <name>`
+    # selects one and tags its output files with that name, so the three runs
+    # do not collide on xgc.f_init_smooth_<sigma>_<width>.bp. Absent (the
+    # common single-species case) nothing changes.
+    "species_set": {},
     "smooth": {"sigma_theta": 0.0, "v_width": 0.0},
     "dt0": {
         "sml_dt": "2.0D-13",
@@ -44,6 +50,9 @@ DEFAULTS: dict[str, Any] = {
     # Mesh regions whose nodes are scored and rescaled by `adjust`: 1 = closed
     # flux surfaces only (SOL and private region left untouched), 2 = also SOL.
     "adjust_region_max": 1,
+    # Case 2: directory on the same machine holding xgc.mesh.bp/xgc.units.bp
+    # written by XGC on the turbulence mesh; target of `convert`.
+    "turb_mesh_dir": None,
     "f0_step": None,             # f0 snapshot the f_init came from; None = last one in stage A
     "run": {
         # Production run started from an (adjusted) f_init: same input as
@@ -70,6 +79,7 @@ class Case:
     machine: str
     maxwell_dir: str
     species: dict[str, Any]
+    species_set: dict[str, Any]
     smooth: dict[str, Any]
     dt0: dict[str, Any]
     adjust_factor: float
@@ -84,6 +94,21 @@ class Case:
     @property
     def maxwell_path(self) -> str:
         return f"{self.root.rstrip('/')}/{self.maxwell_dir}"
+
+    def species_for(self, name: str | None) -> tuple[dict[str, Any], str | None]:
+        """(species settings, file tag) for one named species.
+
+        ``None`` keeps the case's single `species` block and untagged file
+        names, which is every case written before d3dqh.
+        """
+        if name is None:
+            return dict(self.species), None
+        if name not in self.species_set:
+            raise CaseError(
+                f"{self.name}: no species {name!r} in species_set "
+                f"(have: {sorted(self.species_set)})"
+            )
+        return _merge(self.species, dict(self.species_set[name])), name
 
     def subdir(self, name: str) -> str:
         return f"{self.root.rstrip('/')}/{name}"
@@ -139,13 +164,15 @@ def load_case(name_or_path: str) -> Case:
     if not root or machines.is_placeholder(root):
         raise CaseError(f"{path}: 'root' (remote case directory) is not set")
     known = {"name", "root", "machine", "maxwell_dir", "species", "smooth", "dt0",
-             "adjust_factor", "job", "remote", "note", "run", "f0_step"}
+             "adjust_factor", "job", "remote", "note", "run", "f0_step",
+             "species_set"}
     return Case(
         name=str(data.get("name") or path.stem),
         root=str(root),
         machine=str(data["machine"]),
         maxwell_dir=str(data["maxwell_dir"]),
         species=dict(data["species"]),
+        species_set=dict(data.get("species_set") or {}),
         smooth=dict(data["smooth"]),
         dt0=dict(data["dt0"]),
         adjust_factor=float(data["adjust_factor"]),
@@ -204,8 +231,26 @@ def smooth_tag(sigma_theta: float, v_width: float) -> str:
 NO_SMOOTH_FILE = "xgc.f_init_no_smooth.bp"
 
 
-def smooth_file(sigma_theta: float, v_width: float) -> str:
-    return f"xgc.f_init_smooth_{smooth_tag(sigma_theta, v_width)}.bp"
+def _species_prefix(species_tag: str | None) -> str:
+    """``'D' -> 'D_'``; nothing for a single-species case.
+
+    It goes in front of the tag, so adjusted_file's ``adjusted``/``adjusted2``
+    prefix still parses and the species stays visible in every derived name.
+    """
+    return f"{species_tag}_" if species_tag else ""
+
+
+def no_smooth_file(species_tag: str | None = None) -> str:
+    return f"xgc.f_init_{_species_prefix(species_tag)}no_smooth.bp"
+
+
+def smooth_file(
+    sigma_theta: float, v_width: float, species_tag: str | None = None
+) -> str:
+    return (
+        f"xgc.f_init_{_species_prefix(species_tag)}"
+        f"smooth_{smooth_tag(sigma_theta, v_width)}.bp"
+    )
 
 
 def finit_tag(filename: str) -> str:
@@ -238,6 +283,11 @@ def run_dirname(finit_filename: str, prefix: str = "finit_") -> str:
     elif tag.startswith("smooth_"):
         tag = "sm_" + tag[len("smooth_"):]
     return f"{prefix}{tag}"
+
+
+def turb_file(finit_filename: str) -> str:
+    """``xgc.f_init_adjusted_smooth_0.5_0.5.bp -> xgc.f_init_adjusted_smooth_0.5_0.5_turb.bp``."""
+    return f"xgc.f_init_{finit_tag(finit_filename)}_turb.bp"
 
 
 def adjusted_file(finit_filename: str) -> str:

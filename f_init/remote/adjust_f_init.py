@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Login-node step: dt=0 charge-density check and f_init density correction.
 
-Compares the ion density XGCa produced at the end of the Maxwellian-start run
-(``xgc.2d.<ref>.bp`` in the run directory) with the density the dt=0 run
-reconstructs from the ``f_init`` file (``xgc.2d.<cmp>.bp`` in the dt0
-directory). The difference is flux-surface averaged, scattered back to the
+Compares the ion density the stage-A run produced (``xgc.2d.<ref>.bp`` in the
+run directory) with the density the dt=0 run reconstructs from the ``f_init``
+file (``xgc.2d.<cmp>.bp`` in the dt0 directory). A directory that has no
+``xgc.2d`` output falls back to ``xgc.3d``, which carries the same ``iden``
+with a leading toroidal dimension that is averaged away: XGC1 writes 3d and no
+2d, so a case whose stage A is a turbulence run (d3dqh) is read this way. The difference is flux-surface averaged, scattered back to the
 mesh, and the full distribution is scaled node by node::
 
     f_adjusted = f_init_total * (1 + factor * <n_ref - n_dt0>_fsa / n_local)
@@ -34,6 +36,19 @@ def steps_in(directory: str, prefix: str) -> list[int]:
     return sorted(steps)
 
 
+def density_prefix(directory: str) -> str | None:
+    """Which per-step output carries ``iden`` in this directory.
+
+    XGCa writes ``xgc.2d``; XGC1 writes ``xgc.3d`` and no 2d at all. Both hold
+    ``iden`` on the mesh nodes -- 3d with a leading toroidal dimension that
+    ``read_iden`` averages away -- so the only question is which one exists.
+    """
+    for prefix in ("xgc.2d", "xgc.3d"):
+        if steps_in(directory, prefix):
+            return prefix
+    return None
+
+
 def emit(payload: dict) -> None:
     print("FINIT_JSON " + json.dumps(payload), flush=True)
 
@@ -45,14 +60,17 @@ def main() -> int:
     parser.add_argument("--dt0-dir", required=True, help="dt=0 run started from f_init")
     parser.add_argument("--finit", required=True, help="f_init file the dt0 run used")
     parser.add_argument("--ref-step", type=int, default=None,
-                        help="xgc.2d step in run dir; default: the last f0 step")
+                        help="density-output step in run dir; default: the last f0 step")
     parser.add_argument("--cmp-step", type=int, default=None,
-                        help="xgc.2d step in dt0 dir; default: first available")
+                        help="density-output step in dt0 dir; default: first available")
     parser.add_argument("--factor", type=float, default=1.0)
     parser.add_argument("--out", default=None, help="adjusted f_init path")
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--png-out", default=None)
+    parser.add_argument("--density-var", default="iden",
+                        help="density variable compared in the 2d/3d output; "
+                             "iden for the main ion, eden for electrons")
     parser.add_argument("--region-max", type=int, default=1,
                         help="mesh regions <= this are scored and rescaled "
                              "(1 = closed flux surfaces only, SOL untouched; 2 = also SOL)")
@@ -74,21 +92,29 @@ def main() -> int:
         emit({"error": "missing", "paths": [finit]})
         return 2
 
-    ref_steps = steps_in(run_dir, "xgc.2d")
-    cmp_steps = steps_in(dt0_dir, "xgc.2d")
-    if not ref_steps or not cmp_steps:
+    # Each directory is resolved on its own: stage A and the dt=0 run need not
+    # have been produced by the same executable.
+    ref_prefix = density_prefix(run_dir)
+    cmp_prefix = density_prefix(dt0_dir)
+    if ref_prefix is None or cmp_prefix is None:
+        missing_dir = run_dir if ref_prefix is None else dt0_dir
         emit({"error": "missing", "paths": [
-            f"{run_dir}/xgc.2d.*.bp" if not ref_steps else f"{dt0_dir}/xgc.2d.*.bp"]})
+            f"{missing_dir}/xgc.2d.*.bp", f"{missing_dir}/xgc.3d.*.bp"]})
         return 2
+    ref_steps = steps_in(run_dir, ref_prefix)
+    cmp_steps = steps_in(dt0_dir, cmp_prefix)
     if args.ref_step is None:
         f0_steps = steps_in(run_dir, "xgc.f0")
         ref_step = max(f0_steps) if f0_steps and max(f0_steps) in ref_steps else ref_steps[-1]
     else:
         ref_step = args.ref_step
     cmp_step = args.cmp_step if args.cmp_step is not None else cmp_steps[0]
-    for directory, step in ((run_dir, ref_step), (dt0_dir, cmp_step)):
-        if not os.path.exists(os.path.join(directory, f"xgc.2d.{step:05d}.bp")):
-            emit({"error": "missing", "paths": [os.path.join(directory, f"xgc.2d.{step:05d}.bp")]})
+    for directory, prefix, step in (
+        (run_dir, ref_prefix, ref_step), (dt0_dir, cmp_prefix, cmp_step)
+    ):
+        path = os.path.join(directory, f"{prefix}.{step:05d}.bp")
+        if not os.path.exists(path):
+            emit({"error": "missing", "paths": [path]})
             return 2
 
     sys.path.insert(0, args.xgc_reader)
@@ -99,12 +125,16 @@ def main() -> int:
 
     def read_iden(path: str) -> np.ndarray:
         with adios2.FileReader(path) as fh:
-            iden = np.asarray(fh.read("iden"))
+            if args.density_var not in fh.available_variables():
+                emit({"error": "no_density_variable",
+                      "paths": [path], "variable": args.density_var})
+                raise SystemExit(2)
+            iden = np.asarray(fh.read(args.density_var))
         # (nphi, nnodes) for XGC1-style output; XGCa writes one plane.
         return np.mean(np.atleast_2d(iden), axis=0)
 
-    iden_ref = read_iden(os.path.join(run_dir, f"xgc.2d.{ref_step:05d}.bp"))
-    iden_cmp = read_iden(os.path.join(dt0_dir, f"xgc.2d.{cmp_step:05d}.bp"))
+    iden_ref = read_iden(os.path.join(run_dir, f"{ref_prefix}.{ref_step:05d}.bp"))
+    iden_cmp = read_iden(os.path.join(dt0_dir, f"{cmp_prefix}.{cmp_step:05d}.bp"))
 
     x1 = xgc_reader.xgc1(path=run_dir)   # note: chdir into run_dir
     x1.load_unitsm()
@@ -135,7 +165,7 @@ def main() -> int:
         x1, do_flux_average=False, no_update=True
     )   # adds the Maxwellian back: dist.f now holds the full distribution
 
-    # `iden` in xgc.2d is the perturbed gyrocenter density (order 1e17 m^-3 on
+    # `iden` in the 2d/3d output is the perturbed gyrocenter density (order 1e17 m^-3 on
     # cbc6, crossing zero), so every relative measure is taken against the
     # total density of f_init itself, not against iden.
     region = getattr(x1.mesh, "region", None)
@@ -179,6 +209,9 @@ def main() -> int:
         "finit": finit,
         "ref_step": ref_step,
         "cmp_step": cmp_step,
+        "ref_source": ref_prefix,
+        "cmp_source": cmp_prefix,
+        "density_var": args.density_var,
         "factor": args.factor,
         "check_only": bool(args.check_only),
         "nnodes": int(dist.nnodes),

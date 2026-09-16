@@ -122,6 +122,49 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(case.species["slot"], 2)
         self.assertEqual(case.job["script"], "xgcs.cpu")
 
+    def test_single_species_names_are_untagged(self) -> None:
+        self.assertEqual(cfg.no_smooth_file(), cfg.NO_SMOOTH_FILE)
+        self.assertEqual(cfg.smooth_file(0.5, 0.5), "xgc.f_init_smooth_0.5_0.5.bp")
+
+    def test_species_tag_survives_the_adjusted_prefix(self) -> None:
+        # The tag goes in front, so adjusted/adjusted2 still parse and the
+        # species stays visible in every derived name.
+        tagged = cfg.smooth_file(0.5, 0.5, "D")
+        self.assertEqual(tagged, "xgc.f_init_D_smooth_0.5_0.5.bp")
+        self.assertEqual(cfg.adjusted_file(tagged), "xgc.f_init_adjusted_D_smooth_0.5_0.5.bp")
+        self.assertEqual(cfg.adjusted_file(cfg.adjusted_file(tagged)),
+                         "xgc.f_init_adjusted2_D_smooth_0.5_0.5.bp")
+        self.assertEqual(cfg.dt0_dirname(tagged), "dt0_D_smooth_0.5_0.5")
+
+
+class SpeciesSetTests(unittest.TestCase):
+    def test_d3dqh_resolves_three_species(self) -> None:
+        case = cfg.load_case("d3dqh")
+        expected = {
+            "e": ("e_f", -1.0, 1),
+            "D": ("i_f", 1.0, 2),
+            "C": ("i2f", 6.0, 3),
+        }
+        for name, (var, charge, slot) in expected.items():
+            species, tag = case.species_for(name)
+            self.assertEqual(tag, name)
+            self.assertEqual(species["var_string"], var)
+            self.assertEqual(species["charge_num"], charge)
+            self.assertEqual(species["slot"], slot)
+            # shared keys come from the `species` block
+            self.assertTrue(species["has_electron"])
+
+    def test_no_name_keeps_the_single_species_block(self) -> None:
+        case = cfg.load_case("cbc6")
+        species, tag = case.species_for(None)
+        self.assertIsNone(tag)
+        self.assertEqual(species, case.species)
+
+    def test_unknown_species_is_refused(self) -> None:
+        case = cfg.load_case("d3dqh")
+        with self.assertRaises(cfg.CaseError):
+            case.species_for("W")
+
 
 def _fake_case(tmp: str) -> cfg.Case:
     path = Path(tmp) / "t.yaml"
@@ -180,6 +223,18 @@ class InventoryTests(unittest.TestCase):
         self.assertIsNone(dirs[1]["last_f0_step"])
         self.assertEqual(dirs[1]["finished_jobs"], 1)
         self.assertEqual(dirs[2]["twod_steps"], [])
+        # a line written before the 3d fallback has no source column
+        self.assertEqual(dirs[0]["density_source"], "xgc.2d")
+
+    def test_parse_inventory_reports_the_density_source(self) -> None:
+        stdout = (
+            "maxwell|1|9000|7002 7022 |xgc.f_init_D_smooth_0.5_0.5.bp |0|0|xgc.3d\n"
+            "dt0_D_smooth_0.5_0.5|1||10 20 ||1|1|xgc.2d\n"
+        )
+        dirs = proc.parse_inventory(stdout)
+        self.assertEqual(dirs[0]["density_source"], "xgc.3d")
+        self.assertEqual(dirs[0]["twod_steps"], [7002, 7022])
+        self.assertEqual(dirs[1]["density_source"], "xgc.2d")
 
 
 class LogTests(unittest.TestCase):
