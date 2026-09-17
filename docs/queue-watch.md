@@ -133,6 +133,10 @@ action also only rereads the cache. Each server submenu shows current jobs and
 the latest five observed departures, with job name, job ID, node count, and
 requested wall time on the same line. Each job has a detail submenu for elapsed
 time / queue reason or the time its departure was observed and its exit code.
+The server row summarizes its jobs with the priority running, pending,
+completed, then failed. It omits the state icon when none of those states is
+present. A stale or unavailable connection adds a separate warning icon before
+the state icon.
 `completed` means the scheduler job completed, not that an entire simulation
 and its restart chain finished; `timeout` remains a separate outcome.
 

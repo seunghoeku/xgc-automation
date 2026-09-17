@@ -5,11 +5,20 @@ from typing import Any
 
 from tools import scheduler as sched
 
+ICONS = {
+    sched.RUNNING: "🟢", sched.PENDING: "🟡", sched.COMPLETED: "✅",
+    sched.FAILED: "🔴", sched.CANCELLED: "⚪", sched.TIMEOUT: "🟠",
+    sched.UNKNOWN: "❔",
+}
+
 LABELS = {
-    sched.RUNNING: "🟢 Running", sched.PENDING: "🟡 Pending",
-    sched.COMPLETED: "✅ Completed", sched.FAILED: "🔴 Failed",
-    sched.CANCELLED: "⚪ Cancelled", sched.TIMEOUT: "🟠 Time limit reached",
-    sched.UNKNOWN: "❔ Outcome unconfirmed",
+    state: f"{ICONS[state]} {label}"
+    for state, label in {
+        sched.RUNNING: "Running", sched.PENDING: "Pending",
+        sched.COMPLETED: "Completed", sched.FAILED: "Failed",
+        sched.CANCELLED: "Cancelled", sched.TIMEOUT: "Time limit reached",
+        sched.UNKNOWN: "Outcome unconfirmed",
+    }.items()
 }
 
 
@@ -57,6 +66,16 @@ def estimated_start_label(job: dict[str, Any]) -> str:
         return "unavailable"
 
 
+def machine_state_icon(snapshot: dict[str, Any]) -> str:
+    """Summarize jobs with the menu's explicit state priority."""
+    jobs = [*snapshot.get("jobs", {}).values(),
+            *snapshot.get("recent_finished", [])]
+    for state in (sched.RUNNING, sched.PENDING, sched.COMPLETED, sched.FAILED):
+        if any(job.get("state") == state for job in jobs):
+            return ICONS[state]
+    return ""
+
+
 def job_lines(job: dict[str, Any], *, finished: bool = False) -> list[str]:
     state = LABELS.get(job.get("state"), "❔ Unknown")
     ident = job.get("display_id") or job.get("job_id", "?")
@@ -95,10 +114,14 @@ def render(snapshots: list[dict[str, Any]], *, history_limit: int = 5,
     for snapshot in snapshots:
         unavailable = snapshot.get("connection", "ok") != "ok"
         old = stale(snapshot, now)
-        status = "⚠ " if unavailable or old else ""
+        connection_icon = "⚠ " if unavailable or old else ""
+        state_icon = machine_state_icon(snapshot)
+        state_prefix = f"{state_icon} " if state_icon else ""
         checked = (f"{age(snapshot['polled_at'], now)}"
                    if snapshot.get("polled_at") else "Not checked yet")
-        lines.append(f"{status}{clean(snapshot['machine'])} · {checked}")
+        lines.append(
+            f"{connection_icon}{state_prefix}{clean(snapshot['machine'])} · {checked}"
+        )
         if unavailable:
             lines.append(f"--Connection unavailable: {clean(snapshot.get('detail', '?'))}")
         elif old:

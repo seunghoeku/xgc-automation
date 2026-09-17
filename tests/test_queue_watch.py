@@ -561,6 +561,37 @@ class MenuTests(unittest.TestCase):
         self.assertIn("Connection unavailable: expired", rendered)
         self.assertIn("Last known queue", rendered)
 
+    def test_machine_icon_uses_display_priority_and_keeps_connection_separate(self) -> None:
+        completed = job("3", sched.COMPLETED, left_queue_at=self.NOW.isoformat())
+        failed = job("4", sched.FAILED, left_queue_at=self.NOW.isoformat())
+        cases = [
+            ({"1": job("1", sched.PENDING), "2": job("2", sched.RUNNING)},
+             [completed, failed], "🟢 "),
+            ({"1": job("1", sched.PENDING)}, [completed, failed], "🟡 "),
+            ({}, [failed, completed], "✅ "),
+            ({}, [failed], "🔴 "),
+            ({}, [], ""),
+        ]
+        for jobs, recent, prefix in cases:
+            with self.subTest(prefix=prefix):
+                snapshot = {
+                    "machine": "perlmutter",
+                    "polled_at": self.NOW.isoformat(),
+                    "jobs": jobs,
+                    "recent_finished": recent,
+                }
+                line = queue_menu.render([snapshot], now=self.NOW).splitlines()[2]
+                self.assertEqual(line, f"{prefix}perlmutter · just now")
+
+        offline = {
+            "machine": "perlmutter",
+            "polled_at": self.NOW.isoformat(),
+            "connection": "skipped",
+            "jobs": {"2": job("2", sched.RUNNING)},
+        }
+        line = queue_menu.render([offline], now=self.NOW).splitlines()[2]
+        self.assertEqual(line, "⚠ 🟢 perlmutter · just now")
+
     def test_finished_job_has_name_nodes_requested_time_and_observed_date(self) -> None:
         finished = job("4", sched.TIMEOUT, name="test-run", nodes="32",
                        time_limit="06:00:00", left_queue_at=self.NOW.isoformat())
