@@ -117,6 +117,28 @@ job (d3dqh dt=0 check, 2026-09-15: an 87-character `$PSCRATCH` path cut to
 a relative `'../XGC_inputs/'` next to the run directory, or a symlink -- and
 count the characters when it must be absolute.
 
+## Spare nodes and the GPU gate (Polaris)
+
+Polaris sometimes hands out a node whose GPUs are dead or invisible; XGC then
+aborts in Kokkos initialisation with `cudaErrorNoDevice` and the whole
+allocation is lost (n661po job 7628452 and n655po job 7602216, both on
+x3003c0s25b0n0). `plan_job` / `submit_job` take `spare_nodes=N` to guard
+against this:
+
+- the PBS request grows to `nodes + N`, and so does the node-hour estimate;
+- the job script probes every allocated node with `nvidia-smi -L` (one rank
+  per node, 5-minute cap) and launches XGC with `mpiexec --hostfile` on the
+  first `nodes` nodes that expose all `gpus_per_node` devices; unhealthy nodes
+  are listed in `gpu_gate.<jobid>.bad_hosts` and in the `.out` log for an
+  ALCF report;
+- if fewer than `nodes` healthy nodes exist the job exits with rc=3 before
+  starting XGC;
+- if XGC dies within 5 minutes and the `.err` log names dead ranks, the nodes
+  they ran on are dropped, the rest is probed again, and XGC relaunches once.
+
+The rank count stays `nodes * ntasks_per_node`; spares idle. Only the Polaris
+template renders the gate, so `spare_nodes` is refused elsewhere.
+
 ## Why validate before submitting
 
 `xgc --dryrun` runs the real XGC binary, so it rejects exactly what a real run

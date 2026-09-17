@@ -45,7 +45,111 @@ echo "host=$(hostname) job=${PBS_JOBID:-none} nodes={{ nodes }} start=$(date -Is
 echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_rank=${OMP_NUM_THREADS}"
 
 {% if xgc_exe %}
-{% if gpus_per_node %}
+{% if gpus_per_node and spare_nodes %}
+# GPU gate: {{ nodes }} nodes allocated = {{ compute_nodes }} compute + {{ spare_nodes }} spare.
+# Polaris hands out nodes whose GPUs are dead or invisible (n661po job 7628452,
+# n655po job 7602216: x3003c0s25b0n0), so probe every node first and give the
+# launcher a hostfile of the first {{ compute_nodes }} nodes that expose all
+# {{ gpus_per_node }} GPUs. An early crash drops the nodes that reported dead
+# ranks and relaunches once on the remaining healthy ones.
+ERR_LOG="{{ run_dir }}/pbs-${PBS_JOBID}.err"
+GOOD_HOSTS="{{ run_dir }}/gpu_gate.${PBS_JOBID}.good_hosts"
+BAD_HOSTS="{{ run_dir }}/gpu_gate.${PBS_JOBID}.bad_hosts"
+PROBE_OUT="{{ run_dir }}/gpu_gate.${PBS_JOBID}.probe"
+EARLY_FAILURE_SECONDS=300
+
+short_name() { printf '%s\n' "${1%%.*}"; }
+
+probe_gpus() {
+  # $1: hostfile (one node per line, as in $PBS_NODEFILE).
+  # Writes GOOD_HOSTS (first {{ compute_nodes }} nodes with {{ gpus_per_node }} GPUs) and BAD_HOSTS.
+  local hostfile="$1" n_hosts
+  n_hosts=$(wc -l <"$hostfile")
+  : >"$PROBE_OUT"
+  # `|| true`: a node that hangs or refuses the launch simply never answers.
+  timeout 300 mpiexec --hostfile "$hostfile" --np "$n_hosts" --ppn 1 \
+    /bin/bash -c 'n=$(timeout 60 nvidia-smi -L 2>/dev/null | grep -c "^GPU"); echo "$(hostname) ${n:-0}"' \
+    >"$PROBE_OUT" 2>>"$ERR_LOG" || true
+  : >"$GOOD_HOSTS"
+  : >"$BAD_HOSTS"
+  local host key count
+  while read -r host; do
+    [ -n "$host" ] || continue
+    key=$(short_name "$host")
+    count=$(awk -v k="$key" '{ split($1, a, "."); if (a[1] == k) { print $2; exit } }' "$PROBE_OUT")
+    if [ -z "$count" ]; then
+      echo "$host no-answer" >>"$BAD_HOSTS"
+    elif [ "$count" -lt {{ gpus_per_node }} ]; then
+      echo "$host ${count}-gpus" >>"$BAD_HOSTS"
+    elif [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
+      echo "$host" >>"$GOOD_HOSTS"
+    fi
+  done <"$hostfile"
+}
+
+report_gate() {
+  echo "GPU gate: $(wc -l <"$GOOD_HOSTS") of {{ compute_nodes }} compute nodes selected from $(wc -l <"$1") allocated; $(wc -l <"$BAD_HOSTS") unhealthy"
+  if [ -s "$BAD_HOSTS" ]; then
+    echo "GPU gate: unhealthy nodes (report to support@alcf.anl.gov):"
+    sed 's/^/  /' "$BAD_HOSTS"
+  fi
+}
+
+launch_xgc() {
+  # Match Polaris NUMA domains to GPUs: local ranks 0,1,2,3 use GPUs 3,2,1,0.
+  # Keep the binding inline so the simulation directory needs no helper script.
+  mpiexec --hostfile "$GOOD_HOSTS" --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \
+    --cpu-bind depth -d {{ cpus_per_task or 1 }} -genvall \
+    /bin/bash -c 'local_rank=${PMI_LOCAL_RANK:-0}; gpu=$(({{ gpus_per_node }} - 1 - local_rank % {{ gpus_per_node }})); export CUDA_VISIBLE_DEVICES=${gpu}; exec "$@"' \
+    xgc-rank "{{ xgc_exe }}"{{ xgc_args | default('') }}
+}
+
+probe_gpus "$PBS_NODEFILE"
+report_gate "$PBS_NODEFILE"
+if [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
+  echo "GPU gate: not enough healthy nodes; giving the allocation back without starting XGC"
+  echo "end=$(date -Is) rc=3"
+  exit 3
+fi
+
+set +e
+launch_start=$(date +%s)
+launch_xgc
+rc=$?
+launch_elapsed=$(( $(date +%s) - launch_start ))
+set -e
+echo "GPU gate: first launch rc=${rc} after ${launch_elapsed}s"
+
+if [ "$rc" -ne 0 ] && [ "$launch_elapsed" -lt "$EARLY_FAILURE_SECONDS" ] \
+   && grep -q -E "rank [0-9]+ died|cuda" "$ERR_LOG"; then
+  # Nodes named in "<host>: rank N died ..." lines are dropped; whatever is
+  # left (including the spares) is probed again and used for one relaunch.
+  CRASHED="{{ run_dir }}/gpu_gate.${PBS_JOBID}.crashed_hosts"
+  REMAINING="{{ run_dir }}/gpu_gate.${PBS_JOBID}.remaining_hosts"
+  grep -o -E "^[^ :]+: rank [0-9]+ died" "$ERR_LOG" | cut -d: -f1 | sort -u >"$CRASHED" || true
+  : >"$REMAINING"
+  while read -r host; do
+    [ -n "$host" ] || continue
+    if ! grep -q -x -F "$(short_name "$host")" <(while read -r c; do short_name "$c"; done <"$CRASHED"); then
+      echo "$host" >>"$REMAINING"
+    fi
+  done <"$PBS_NODEFILE"
+  echo "GPU gate: early failure; dropping $(wc -l <"$CRASHED") node(s) that reported dead ranks: $(tr '\n' ' ' <"$CRASHED")"
+  probe_gpus "$REMAINING"
+  report_gate "$REMAINING"
+  if [ "$(wc -l <"$GOOD_HOSTS")" -ge {{ compute_nodes }} ]; then
+    set +e
+    launch_xgc
+    rc=$?
+    set -e
+    echo "GPU gate: relaunch rc=${rc}"
+  else
+    echo "GPU gate: not enough healthy nodes left for a relaunch"
+  fi
+fi
+echo "end=$(date -Is) rc=${rc}"
+exit "$rc"
+{% elif gpus_per_node %}
 # Match Polaris NUMA domains to GPUs: local ranks 0,1,2,3 use GPUs 3,2,1,0.
 # Keep the binding inline so the simulation directory needs no helper script.
 mpiexec --np {{ total_ranks }} -ppn {{ ntasks_per_node }} \

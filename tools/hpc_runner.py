@@ -148,6 +148,7 @@ def prepare_submission(
     run_dir: str | None = None,
     daos: bool = False,
     xgc_args: str | None = None,
+    spare_nodes: int = 0,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -170,6 +171,14 @@ def prepare_submission(
             ``<mount_root>/<pool>/<container>/<case basename>``, which persists
             across jobs so restart chains keep working. Needs a ``daos``
             section with ``pool`` and ``container`` in the machine definition.
+        spare_nodes: request this many nodes beyond ``nodes`` and let the job
+            script pick the healthy ones. Before launching XGC every allocated
+            node is probed for its GPUs and the launcher gets a hostfile of the
+            first ``nodes`` nodes that expose all of them; a crash within the
+            first minutes drops the nodes that reported dead ranks and relaunches
+            once on the remaining healthy ones. Rank count stays ``nodes *
+            ntasks_per_node``; the spare nodes idle. Only templates that render
+            the GPU gate accept it (Polaris).
 
     Unspecified resource arguments fall back to the machine's `defaults`.
     """
@@ -297,6 +306,16 @@ def prepare_submission(
     except sched.SchedulerError as exc:
         raise SubmissionError(str(exc)) from exc
     total_ranks = nodes * ntasks_per_node
+    if spare_nodes < 0:
+        raise SubmissionError("spare_nodes must be >= 0")
+    if spare_nodes and hello_world:
+        raise SubmissionError("spare_nodes has no effect on a hello-world job")
+    if spare_nodes and not gpus_per_node:
+        raise SubmissionError(
+            "spare_nodes needs gpus_per_node: the GPU gate probes each node for "
+            "that many devices"
+        )
+    requested_nodes = nodes + spare_nodes
 
     if daos_cfg:
         # One directory per case inside the container; the basename is the
@@ -310,7 +329,9 @@ def prepare_submission(
     script = _jinja_env().get_template(template_name).render(
         job_name=job_name,
         run_dir=remote_run_dir,
-        nodes=nodes,
+        nodes=requested_nodes,
+        compute_nodes=nodes,
+        spare_nodes=spare_nodes,
         walltime=walltime,
         account=account,
         partition=partition,
@@ -335,15 +356,23 @@ def prepare_submission(
         provenance_id=run_id,
     )
 
+    if spare_nodes and "GPU gate" not in script:
+        raise SubmissionError(
+            f"spare_nodes is not supported by the {template_name} template "
+            "(no GPU gate); only the Polaris template implements it"
+        )
+
     hours = _walltime_to_hours(walltime)
     resources = {
-        "nodes": nodes,
+        "nodes": requested_nodes,
+        "compute_nodes": nodes,
+        "spare_nodes": spare_nodes,
         "ntasks_per_node": ntasks_per_node,
         "cpus_per_task": cpus_per_task,
         "gpus_per_node": gpus_per_node,
         "total_ranks": total_ranks,
         "walltime": walltime,
-        "node_hours_max": round(nodes * hours, 2),
+        "node_hours_max": round(requested_nodes * hours, 2),
         "account": account,
         "partition": partition,
         "filesystems": filesystems,

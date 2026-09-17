@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -239,6 +240,54 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertEqual(plan.resources["gpus_per_node"], 4)
         self.assertEqual(plan.resources["filesystems"], "home:grand")
         self.assertEqual(plan.resources["node_hours_max"], 4.0)
+
+    def test_polaris_spare_nodes_add_a_gpu_gate_and_grow_the_allocation(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "polaris",
+                run_id="run-polaris-spare",
+                nodes=32,
+                spare_nodes=2,
+                walltime="06:00:00",
+            )
+
+        directives = {
+            line for line in plan.script.splitlines() if line.startswith("#PBS")
+        }
+        # The allocation grows by the spares; the rank count does not.
+        self.assertIn("#PBS -l select=34:system=polaris", directives)
+        self.assertEqual(plan.resources["nodes"], 34)
+        self.assertEqual(plan.resources["compute_nodes"], 32)
+        self.assertEqual(plan.resources["spare_nodes"], 2)
+        self.assertEqual(plan.resources["total_ranks"], 128)
+        self.assertEqual(plan.resources["node_hours_max"], 204.0)
+        # XGC launches from a probed hostfile, never from $PBS_NODEFILE directly.
+        self.assertIn('mpiexec --hostfile "$GOOD_HOSTS" --np 128 -ppn 4', plan.script)
+        self.assertIn("nvidia-smi -L", plan.script)
+        self.assertIn("GPU gate", plan.script)
+        self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
+        self.assertNotIn("mpiexec --np 128 -ppn 4 \\", plan.script)
+        # The rendered script must be valid bash.
+        check = subprocess.run(
+            ["bash", "-n"], input=plan.script, text=True, capture_output=True
+        )
+        self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_polaris_without_spare_nodes_keeps_the_plain_launcher(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("polaris", run_id="run-polaris-plain")
+
+        self.assertNotIn("GPU gate", plan.script)
+        self.assertNotIn("--hostfile", plan.script)
+        self.assertEqual(plan.resources["spare_nodes"], 0)
+
+    def test_spare_nodes_need_gpus_and_a_supporting_template(self) -> None:
+        self.cfg["defaults"]["gpus_per_node"] = None
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            with self.assertRaises(hr.SubmissionError):
+                hr.prepare_submission(
+                    "polaris", run_id="run-polaris-spare-nogpu", spare_nodes=1
+                )
 
     def test_polaris_enables_gpu_aware_mpi_only_when_configured(self) -> None:
         self.cfg["xgc"]["gpu_aware_mpi"] = True
