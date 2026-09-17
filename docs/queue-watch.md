@@ -60,6 +60,9 @@ and without anything that can prompt:
 The channel probe is not redundant: `ssh -O check` only inspects the local
 master process, so a stale session can pass it while every command hangs until
 the 60 s SSH timeout.
+The separate command-channel probe allows **30 s** (including on Aurora), so
+a busy login node has time to open a channel. This does not change the 60 s SSH
+connection timeout.
 
 An unreachable machine is **skipped with its reason** and the others are still
 polled. That is normal operation on a laptop, not an error, so it does not

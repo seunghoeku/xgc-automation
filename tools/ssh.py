@@ -37,6 +37,8 @@ from typing import Any, Sequence
 
 
 SSH_CONNECT_TIMEOUT_SECONDS = 60.0
+# A live ControlMaster may need longer to open a channel on a busy login node.
+COMMAND_CHANNEL_TIMEOUT_SECONDS = 30.0
 
 # Where the tool-owned multiplexing sockets live. Separate from the user's own
 # ControlMaster sockets on purpose (see control_socket_path).
@@ -111,7 +113,7 @@ def control_socket_alive(ssh_host: str, timeout: float = 5.0) -> tuple[bool, str
 
 
 def command_channel_usable(
-    ssh_host: str, timeout: float = 10.0
+    ssh_host: str, timeout: float = COMMAND_CHANNEL_TIMEOUT_SECONDS
 ) -> tuple[bool, str]:
     """Check that a live master can actually open a non-interactive channel.
 

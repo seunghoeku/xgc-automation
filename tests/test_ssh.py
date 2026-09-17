@@ -20,17 +20,19 @@ class CommandChannelTests(unittest.TestCase):
         self.assertTrue(usable)
         self.assertEqual(detail, "command channel usable")
         self.assertIn("BatchMode=yes", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["timeout"], 30.0)
 
     def test_reports_master_that_cannot_open_another_channel(self) -> None:
         with patch.object(
             subprocess,
             "run",
-            side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10.0),
+            side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=30.0),
         ):
             usable, detail = ssh.command_channel_usable("frontier")
 
         self.assertFalse(usable)
         self.assertIn("timed out", detail)
+        self.assertIn("30.0s", detail)
 
 
 class CertificateStatusTests(unittest.TestCase):
