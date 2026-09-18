@@ -3,8 +3,20 @@
 The XGC automation tools **never perform interactive authentication on your
 behalf** (AGENTS.md, absolute rule 3). MFA-protected hosts reuse a session that
 the human opens through a ControlMaster socket. Perlmutter is different: after
-the human refreshes the NERSC sshproxy certificate, tools create independent
-public-key connections and explicitly bypass ControlMaster.
+the human refreshes the NERSC sshproxy certificate, tools use public-key
+connections through their own multiplexing socket under `~/.ssh/xgc-cm/`.
+They bypass the user's ControlMaster; only the direct authentication probe
+disables multiplexing altogether.
+
+The standalone [HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor)
+uses the same authentication modes. Its `servers.yaml` calls the alias field
+`ssh_host`; this repository uses `auth.ssh_config_host` in
+`machines.local.yaml`. `hpc-monitor ssh-config` prints suggested SSH entries
+for review. If an alias is supplied, its SSH configuration takes precedence
+over the server's `host` field, including port forwards and proxy settings.
+For generic public-key servers the package also accepts `auth: key`: it
+uses non-interactive public-key authentication without a ControlMaster or a
+mandatory NERSC certificate. The Perlmutter preset remains `auth: sshproxy`.
 
 ## 1. Add to `~/.ssh/config`
 
@@ -130,6 +142,11 @@ How to read its output:
 
 For Perlmutter, `control_master` is `null` by design and
 `direct_key_connection.usable` is the relevant result.
+
+For the standalone package, `hpc-monitor check` validates configuration only;
+`hpc-monitor poll --no-notify` tests access and queries queues. Its sshproxy
+probe checks the certificate locally, and the queue request tests the remote
+connection. An existing-master command-channel probe is bounded at 30 seconds.
 
 For Perlmutter, `ssh_certificate.valid: false` means the NERSC certificate must
 be refreshed through the user's `sshproxy` workflow before submission.

@@ -1,0 +1,57 @@
+# Run `hpc-monitor init`, enable your servers, and fill in your usernames.
+# Public host/scheduler facts are included; all accounts start disabled.
+# ssh_host selects ~/.ssh/config and takes precedence over host.
+version: 1
+poll_interval: 600        # seconds; scheduler polling, minimum 60
+history_limit: 5          # observed departures per server
+notify: true             # notify only when jobs change
+
+servers:
+  perlmutter:
+    enabled: false
+    host: perlmutter.nersc.gov
+    ssh_host: perlmutter
+    user: <nersc_username>
+    scheduler: slurm
+    auth: sshproxy
+
+  polaris:
+    enabled: false
+    host: polaris.alcf.anl.gov
+    ssh_host: polaris
+    user: <alcf_username>
+    scheduler: pbs
+    auth: controlmaster
+
+  aurora:
+    enabled: false
+    host: aurora.alcf.anl.gov
+    ssh_host: aurora
+    user: <alcf_username>
+    scheduler: pbs
+    auth: controlmaster
+
+  stellar:
+    enabled: false
+    host: stellar.princeton.edu
+    ssh_host: stellar
+    user: <princeton_username>
+    scheduler: slurm
+    auth: controlmaster
+
+  # Scheduler has not been confirmed for this host; choose before enabling.
+  flux:
+    enabled: false
+    host: flux.pppl.gov
+    ssh_host: flux
+    user: <pppl_username>
+    scheduler: <slurm-or-pbs>
+    auth: controlmaster
+
+  # another-cluster:
+  #   host: login.example.edu
+  #   ssh_host: another-alias
+  #   user: alice
+  #   scheduler: pbs
+  #   auth: controlmaster
+  #   enabled: true

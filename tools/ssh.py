@@ -355,6 +355,13 @@ def _connect_timeout_options() -> list[str]:
 def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
     """Validate the configured authentication and return SSH CLI options."""
     resolved = _normalize_target(target)
+    if resolved.auth_method == "key":
+        # Generic public-key hosts do not require an MFA master or certificate.
+        return resolved.host, [
+            *_direct_key_options(),
+            "-o", "ControlMaster=no", "-o", "ControlPath=none",
+            *_connect_timeout_options(),
+        ]
     if resolved.auth_method == "sshproxy":
         certificate = certificate_status(resolved.host)
         if certificate is None:
@@ -549,7 +556,7 @@ def host_for(machine_cfg: dict[str, Any]) -> SSHTarget:
     Prefers the ~/.ssh/config alias, which supplies either the ControlMaster
     settings or the NERSC IdentityFile/CertificateFile pair.
     """
-    from tools import machines as m
+    from . import machines as m
 
     auth = machine_cfg.get("auth", {})
     alias = auth.get("ssh_config_host")

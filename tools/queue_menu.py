@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from tools import scheduler as sched
+from . import scheduler as sched
 
 ICONS = {
     sched.RUNNING: "🟢", sched.PENDING: "🟡", sched.COMPLETED: "✅",
@@ -43,10 +43,10 @@ def age(stamp: str | None, now: datetime) -> str:
     return f"{int(seconds // 86400)}d ago"
 
 
-def stale(snapshot: dict[str, Any], now: datetime) -> bool:
+def stale(snapshot: dict[str, Any], now: datetime, *, after_seconds: int = 1200) -> bool:
     try:
         stamp = datetime.fromisoformat(snapshot.get("polled_at", ""))
-        return (now - stamp).total_seconds() > 1200
+        return (now - stamp).total_seconds() > after_seconds
     except (ValueError, TypeError):
         return True
 
@@ -97,11 +97,12 @@ def job_lines(job: dict[str, Any], *, finished: bool = False) -> list[str]:
 
 
 def render(snapshots: list[dict[str, Any]], *, history_limit: int = 5,
-           now: datetime | None = None) -> str:
+           now: datetime | None = None, stale_after_seconds: int = 1200) -> str:
     now = now or datetime.now().astimezone()
     running = pending = warnings = 0
     for snapshot in snapshots:
-        if snapshot.get("connection", "ok") != "ok" or stale(snapshot, now):
+        if (snapshot.get("connection", "ok") != "ok"
+                or stale(snapshot, now, after_seconds=stale_after_seconds)):
             warnings += 1
             continue
         for job in snapshot.get("jobs", {}).values():
@@ -113,7 +114,7 @@ def render(snapshots: list[dict[str, Any]], *, history_limit: int = 5,
     lines = [title, "---"]
     for snapshot in snapshots:
         unavailable = snapshot.get("connection", "ok") != "ok"
-        old = stale(snapshot, now)
+        old = stale(snapshot, now, after_seconds=stale_after_seconds)
         connection_icon = "⚠ " if unavailable or old else ""
         state_icon = machine_state_icon(snapshot)
         state_prefix = f"{state_icon} " if state_icon else ""

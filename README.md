@@ -4,14 +4,20 @@ Automation workflow for XGC (gyrokinetic code, xgc.pppl.gov) simulations and
 analysis.
 **Local brain + remote hands**: the LLM (ohmic.pppl.gov) runs locally
 (macOS/Linux), while jobs are submitted, monitored, and analyzed on
-Perlmutter/Polaris over SSH.
+Perlmutter/Polaris/Aurora over SSH.
 
 > `AGENTS.md` holds the governing rules and architecture, and is loaded
 > automatically into agent context at startup. Detail lives in `docs/` —
 > `docs/roadmap.md` for status, `docs/tool-layers.md` for the module map,
 > `docs/workflow.md` for a submission end to end.
 
-**New user?** Start with `docs/setup-new-user.md`: create your
+**Only need job monitoring and a menu bar display?** Install the standalone
+[HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor). It combines
+Slurm/PBS polling with SwiftBar and takes a `servers.yaml` file containing
+server addresses, scheduler types, usernames, and SSH aliases. Public site
+presets are included; no XGC checkout, executable, or LLM account is required.
+
+**Setting up the full XGC workflow?** Start with `docs/setup-new-user.md`: create your
 `machines.local.yaml` from the example, set up SSH authentication aliases,
 and run `preflight`. MFA hosts use ControlMaster, while Perlmutter uses its
 NERSC sshproxy key/certificate directly. Committed config holds only
@@ -23,6 +29,7 @@ builds) lives in gitignored overlays.
 | Path | Purpose |
 |---|---|
 | `tools/` | MCP tool layer (`preflight`, `hpc_runner`, ...) |
+| `packaging/hpc-monitor/` | Original standalone monitor packaging snapshot; ongoing package development is in [hpc-queue-monitor](https://github.com/seunghoeku/hpc-queue-monitor) |
 | `machines.yaml` | HPC machine facts (committed, machine-universal) |
 | `machines.local.yaml` | Your per-user bindings (gitignored; copy the `.example`) |
 | `templates/` | Jinja2 templates for job scripts and XGC input |
@@ -61,6 +68,11 @@ directory. It resolves recorded runs, validates the remote GUI environment,
 starts a loopback-only login-node server and SSH tunnel, and opens the local
 browser without submitting a scheduler job or transferring BP output.
 
+`xgc-queue-watch` polls user queues, including jobs submitted outside the
+catalog, and records recent observed departures. Its SwiftBar plugin reads the
+local cache without SSH. This checkout-based workflow remains available;
+the standalone `hpc-monitor` package has its own configuration and installer.
+
 ## Docs
 
 - `docs/ssh-setup.md` — ssh multiplexing setup for MFA-protected machines
@@ -69,5 +81,7 @@ browser without submitting a scheduler job or transferring BP output.
   plus the locally tested PBS resource profile
 - `docs/data-analysis.md` — remote reduction boundary and summary products
 - `docs/remote-gui.md` — launch the remote XGC_GUI Monitor through an SSH tunnel
+- [Queue monitoring](docs/queue-watch.md) — checkout and standalone package setup,
+  SwiftBar display, recent history, and connection handling
 - `docs/simulation-ids.md` — sequential IDs, machine codes, and directories
 - `docs/input-archive.md` — recent-first archive inspection and migration policy

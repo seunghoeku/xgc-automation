@@ -42,9 +42,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
 
-from tools import machines as machine_config
-from tools import scheduler as sched
-from tools import ssh
+from . import machines as machine_config
+from . import scheduler as sched
+from . import ssh
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = PROJECT_ROOT / ".cache" / "queue-watch"
@@ -355,7 +355,7 @@ def probe(machine: str) -> dict[str, Any]:
     except ssh.SSHError as error:
         return {"machine": machine, "pollable": False, "detail": str(error)}
 
-    if target.auth_method != "sshproxy":
+    if target.auth_method not in {"sshproxy", "key"}:
         # A live master can still be unable to open a command channel: the
         # socket check only inspects the local process. This bounded probe is
         # the difference between "skipped, session is stale" and a poll that
@@ -674,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     if args.swiftbar:
-        from tools.queue_menu import render
+        from .queue_menu import render
         print(render([load_state((state_files or {}).get(m, state_path(m)))
                       | {"machine": m} for m in machines],
                      history_limit=args.history_limit))

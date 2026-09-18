@@ -11,7 +11,36 @@ knows about, so a job submitted by hand -- no catalog record, no reserved
 number -- is invisible to it. The watcher asks the scheduler what the user has
 queued instead, which catches those too.
 
-## Use
+## Choose an installation mode
+
+For general users, use the standalone
+[HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor). It installs
+without this checkout or any XGC/LLM dependencies. Its default server file
+includes addresses, scheduler types, and authentication modes for Perlmutter,
+Polaris, Aurora, and Stellar; Flux stays disabled until its scheduler is
+confirmed. Users enable the servers they need and supply their own accounts
+and SSH aliases. SwiftBar is installed separately.
+
+The checkout-based workflow remains available for XGC Automation users:
+
+| Setting | This checkout | Standalone package on macOS |
+| --- | --- | --- |
+| Command | `xgc-queue-watch` | `hpc-monitor` |
+| Servers | `machines.yaml` + `machines.local.yaml` | `~/Library/Application Support/HPC Queue Monitor/servers.yaml` |
+| Poll selection | all configured machines or `--machine` | enabled entries in `servers.yaml` |
+| Cache | `.cache/queue-watch/<machine>.json` | application-support `cache/`, separated by config path and server/account definition |
+| Timer setup | copy and edit the launchd template below | `hpc-monitor install` |
+| launchd label | `gov.pppl.xgc.queue-watch` | `org.hpc-queue-monitor.poll` |
+| Plugin | `templates/swiftbar/xgc.30s.sh` | generated `hpc-monitor.30s.sh` |
+| Poll interval | plist `StartInterval` (default 600 s) | YAML `poll_interval` (default 600 s; reinstall timer after changing it) |
+| Stale threshold | 20 minutes | twice `poll_interval` |
+| Log | `~/Library/Logs/xgc-queue-watch.log` | `~/Library/Logs/hpc-queue-monitor.log` |
+
+The examples below use the checkout CLI unless explicitly marked otherwise.
+Standalone installation and CLI details are in its
+[README](https://github.com/seunghoeku/hpc-queue-monitor#readme).
+
+## Checkout CLI
 
 ```bash
 xgc-queue-watch                          # every reachable machine, full list
@@ -43,30 +72,34 @@ to post notifications (the launchd agent posts as **Script Editor**, so that
 is the entry to enable in System Settings -> Notifications), so treat the log
 as the record of truth.
 
-## Reachability is decided per poll, not configured
+## Server selection is configured; reachability is checked per poll
 
-Every machine in `machines.yaml` is polled by default. Which ones can actually
+The checkout polls every machine in `machines.yaml` by default; the standalone
+package selects enabled entries from `servers.yaml`. Which ones can actually
 be reached changes through the day: a NERSC sshproxy certificate lasts 24 h,
 and an MFA host is reachable only while the user's own ControlMaster session
-is alive. `probe()` establishes that before each poll, without authenticating
-and without anything that can prompt:
+is alive. `probe()` checks the required credentials/session before each poll,
+without interactive authentication or prompting:
 
 | Machine kind | What is checked | Cost |
 | --- | --- | --- |
 | sshproxy (Perlmutter) | certificate present and inside its validity window | local, no round trip |
-| ControlMaster / MFA (Polaris, Stellar, Flux) | `ssh -O check` for a live master, then a bounded `true` that proves a non-interactive channel can still be opened | one short round trip |
+| ControlMaster / MFA (Polaris, Aurora, Stellar, Flux) | `ssh -O check` for a live master, then a bounded `true` that proves a non-interactive channel can still be opened | one short round trip |
+| Explicit `key` authentication | no master/certificate requirement; the queue request tests public-key access with interactive authentication disabled | queue request only |
 | any | scheduler type and username are filled in, not `<placeholders>` | local |
 
 The channel probe is not redundant: `ssh -O check` only inspects the local
 master process, so a stale session can pass it while every command hangs until
-the 60 s SSH timeout.
+the remote-command timeout (120 s by default).
 The separate command-channel probe allows **30 s** (including on Aurora), so
 a busy login node has time to open a channel. This does not change the 60 s SSH
 connection timeout.
 
-An unreachable machine is **skipped with its reason** and the others are still
-polled. That is normal operation on a laptop, not an error, so it does not
-fail the run. Exit codes:
+A failed credential/session probe is **skipped with its reason** and the others
+are still polled. A connection or query failure during the queue request is
+recorded as an error. Both preserve the last successful snapshot. A skipped
+machine alone does not fail the run if another machine was polled. Exit codes
+for a poll (configuration errors in the standalone CLI return 1):
 
 | Code | Meaning |
 | --- | --- |
@@ -81,10 +114,13 @@ accounting for jobs that have just left the queue. It never submits, cancels,
 or writes remote files, and it does not touch the catalog -- adopting a run
 into `kb/simulations/` stays a deliberate act.
 
-Locally it keeps one snapshot per machine under `.cache/queue-watch/<machine>.json`.
+The checkout keeps one snapshot per machine under `.cache/queue-watch/<machine>.json`.
 Deleting it makes the next poll report that machine's whole queue as new.
+The standalone package keeps independent snapshots in its application-support
+cache. Changing the config path or a server/account definition starts a new
+history; it does not read or import this checkout's cache.
 
-## Scheduling it
+## Scheduling the checkout CLI
 
 `templates/launchd/xgc-queue-watch.plist.example` is the macOS timer. Copy it
 to `~/Library/LaunchAgents/`, substitute the two placeholders, and:
@@ -101,7 +137,16 @@ same command belongs in a crontab line.
 
 ## SwiftBar menu on macOS
 
-Install SwiftBar, then choose this repository's `templates/swiftbar` directory
+The standalone package's `hpc-monitor install` generates the plugin in
+SwiftBar's existing Plugin Folder, or a new application-support `plugins`
+directory if no folder is configured. Select the printed folder in SwiftBar
+and enable its Launch at Login option. A fresh package install starts a new
+monitoring history. To migrate an existing checkout setup, stop/unload its
+timer and disable `xgc.30s.sh` in SwiftBar before enabling the new plugin;
+the installer does not remove the old timer/plugin, so both would otherwise
+poll and display separately.
+
+For the checkout plugin, install SwiftBar and choose `templates/swiftbar`
 as its **Plugin Folder**. It contains the executable `xgc.30s.sh`; the plugin
 finds the repository relative to its own location and uses `.venv/bin/python`.
 If copying it to an existing plugin folder instead, set `XGC_AUTOMATION_ROOT`
@@ -126,7 +171,7 @@ that has passed is labeled `estimate passed`. These are scheduling estimates,
 not guaranteed start times; no estimate is inferred from queue position or
 dependencies. Running and finished jobs do not display a pending-start estimate.
 
-Keep the launchd timer above running: it queries the servers every ten minutes.
+Keep the selected polling timer running: the default interval is ten minutes.
 SwiftBar reads those local snapshots every thirty seconds, so opening the menu
 does not wait for SSH, authenticate, or start another poll. The menu's refresh
 action also only rereads the cache. Each server submenu shows current jobs and
@@ -142,7 +187,8 @@ and its restart chain finished; `timeout` remains a separate outcome.
 
 The watcher's `--history-limit N` controls the per-machine retained history
 (default five); change the timer arguments and the plugin's display limit if
-you want more. The normal text and JSON outputs also include the recent history
+you want more. The standalone package uses one YAML `history_limit` for both
+polling and display. The normal text and JSON outputs also include the recent history
 (`recent_finished`). History persists across application restarts and empty
 queue polls. It contains only jobs previously seen in the watcher's queue
 snapshots: there is no search for jobs that ended before monitoring, and a job
@@ -159,11 +205,12 @@ are removed from this history.
 
 Connection failures retain the last successful queue and its timestamp, while
 recording the failed attempt separately. The menu labels those queues as cached;
-snapshots older than twenty minutes are also marked stale. Neither is counted
+snapshots older than twenty minutes in the checkout, or twice `poll_interval`
+in the standalone package, are marked stale. Neither is counted
 in the menu bar's live running/pending totals. Snapshot writes are atomic so a
 menu refresh cannot read a half-written JSON file.
 
-## Log rotation
+## Checkout log rotation
 
 Logs land in `~/Library/Logs/xgc-queue-watch.log`, and at a ten-minute cadence
 listing every queue they would grow without limit. `--rotate-log` in the plist
@@ -172,6 +219,9 @@ the previous archive is discarded in the same atomic `os.replace`, and the next
 poll creates a fresh file at the original path. Two files exist at any time, so
 history spans one to two weeks depending on where in the cycle you look.
 `--log-rotation-days` changes the period; nothing else trims the files.
+The standalone installer sets up the same weekly rotation for
+`hpc-queue-monitor.log`, with its rotation marker in the package's cache.
+It does not expose a `--log-rotation-days` option.
 
 Rotation is what fits launchd, and two alternating log names would not:
 `StandardOutPath` is fixed in the plist, so writing to a different name each

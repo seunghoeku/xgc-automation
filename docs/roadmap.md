@@ -85,10 +85,24 @@ what was actually verified, and what is still open.
       local provenance, validate the remote GUI/Python environment, load an
       optional `.xgcg` preset, start a loopback-only login-node Monitor and SSH
       tunnel, open the local browser, and provide status/stop lifecycle tools.
-      Perlmutter uses independent sshproxy key connections; no scheduler job
+      Perlmutter uses sshproxy key connections with tool-owned multiplexing;
+      no scheduler job
       or BP transfer is involved. A live Perlmutter plan/open/status/stop round
       trip passed against the TCV reduced-adiabatic run on 2026-08-07.
       See `docs/remote-gui.md`.
+- [x] 12. Unattended queue monitoring and SwiftBar distribution —
+      `xgc-queue-watch` queries Slurm/PBS user queues, preserves recent observed
+      departures, displays scheduler start estimates, and renders a cache-only
+      menu with prioritized job state and separate connection warnings.
+      The standalone [HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor)
+      adds public server presets, `servers.yaml`, isolated history, and a
+      per-user timer/plugin installer. Its initial source is exported from
+      this repository; ongoing package development is in the independent
+      public repository. Local isolated installation, 31 standalone tests,
+      and wheel/source builds passed. GitHub Actions passed on macOS/Linux
+      with Python 3.10/3.12, including the distribution build. Open: verify
+      real SSH and SwiftBar on a second Mac;
+      no PyPI release has been published. See `docs/queue-watch.md`.
 
 ## Open questions
 

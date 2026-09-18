@@ -3,7 +3,18 @@
 This repository was built around one researcher's accounts and data. The
 committed configuration holds only machine-universal facts; everything tied
 to a person lives in gitignored overlay files that you create once. This
-page is the complete checklist.
+page is the checklist for the full XGC workflow.
+
+For queue monitoring alone, use the separate
+[HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor) package.
+Its `hpc-monitor init` command creates `servers.yaml` with public hostnames,
+scheduler types, and authentication modes for Perlmutter, Polaris, Aurora,
+and Stellar. Enable your servers, fill in your usernames and SSH aliases,
+then run `hpc-monitor check` and `hpc-monitor install`. Flux is listed but its
+scheduler must be confirmed before enabling it. This path requires SwiftBar,
+uv/Python, and SSH access, but no allocation for submission, XGC executable,
+ohmic key, or `machines.local.yaml`. See [queue-watch.md](queue-watch.md) for
+the two installation modes and their separate cache locations.
 
 ## 1. What you need before starting
 
@@ -36,7 +47,7 @@ Authenticate once yourself (`ssh mypolaris`); the tools then reuse the
 socket and fail fast with instructions when it has expired.
 
 Perlmutter uses a different contract. Its alias selects the NERSC sshproxy
-key and certificate and disables multiplexing:
+key and certificate and disables user-session multiplexing:
 
 ```
 Host perlmutter
@@ -51,7 +62,10 @@ Host perlmutter
 ```
 
 Refresh the sshproxy certificate yourself when needed. The tools validate it
-and use independent BatchMode public-key connections; they never prompt.
+and use BatchMode public-key connections through a tool-owned multiplexing
+socket under `~/.ssh/xgc-cm/`, separate from your interactive sessions. The
+preflight authentication probe disables multiplexing to test the certificate
+itself. Neither mode prompts.
 
 ## 3. machines.local.yaml (your bindings)
 

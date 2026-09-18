@@ -5,9 +5,12 @@ absolute rule 2 says deterministic actions go through these tools rather than
 improvised shell commands; this file is the list of what exists, so that rule
 is actionable.
 
-All MCP tools are exposed from `tools/server.py`. Two CLIs are installed as
-entry points: `xgc-sim` (`tools/simcat_cli.py`), `xgc-remote-gui`
-(`tools/remote_gui.py`), and `xgc-queue-watch` (`tools/queue_watch.py`).
+All MCP tools are exposed from `tools/server.py`. The repository installs
+`xgc-sim` (`tools/simcat_cli.py`), `xgc-remote-gui` (`tools/remote_gui.py`),
+`xgc-queue-watch` (`tools/queue_watch.py`), and the optional-workflow CLI
+`xgc-finit` (`f_init/cli.py`). The independently distributed
+[HPC Queue Monitor](https://github.com/seunghoeku/hpc-queue-monitor) installs
+`hpc-monitor`; it is not an entry point of the root `xgc-automation` package.
 
 ## Layers
 
@@ -24,13 +27,16 @@ entry points: `xgc-sim` (`tools/simcat_cli.py`), `xgc-remote-gui`
 | `simulation_catalog` | `tools/simulation_catalog.py`, `tools/simcat_cli.py`, `tools/refresh.py` | One durable record per simulation (`kb/simulations/<id>.yaml`) linking number, runs, status, archive location, and human note. Searchable without an LLM via `xgc-sim`. |
 | `f_init` (optional) | `f_init/` | The non-Maxwellian `f_init` procedure: f0 snapshot to `f_init` files, dt=0 check runs, density adjustment. Own CLI `xgc-finit` and skill `f-init`; deliberately outside `tools/` and outside the everyday context. See `f_init/README.md`. |
 | `queue_watch` | `tools/queue_watch.py` | Asks every reachable machine what the user currently has queued, lists it, and diffs against the last snapshot. Machines that cannot be reached without authenticating are skipped with a reason. Read-only, built for a local timer rather than a chat session. See `docs/queue-watch.md`. |
+| Standalone queue monitor | `hpc-queue-monitor` repository, `src/hpc_monitor/` | Public server presets, validated `servers.yaml`, isolated per-config history, polling lock, CLI, and macOS timer/SwiftBar installer. Initially extracted from this repository; developed and distributed separately. |
 
 ## Supporting modules
 
 | Module | Role |
 |---|---|
-| `tools/ssh.py` | Every remote call. argv-list subprocess, ControlMaster for MFA hosts, sshproxy key + tool-owned `~/.ssh/xgc-cm/` socket for Perlmutter. Holds `SSH_CONNECT_TIMEOUT_SECONDS`. |
-| `tools/machines.py` | Loads `machines.yaml` deep-merged under `machines.local.yaml`. `is_placeholder` is the single test for unfilled fields. |
+| `tools/ssh.py` | Every remote call. argv-list subprocess, ControlMaster for MFA hosts, sshproxy key + tool-owned `~/.ssh/xgc-cm/` socket for Perlmutter, and explicit `key` mode for generic public-key hosts. Connect timeout 60 s; existing-master channel probe 30 s. |
+| `tools/machines.py` | Loads `machines.yaml` deep-merged under `machines.local.yaml`. `using_machines` supplies scoped explicit definitions for standalone consumers without reading repository configuration. `is_placeholder` tests unfilled fields. |
+| `tools/queue_menu.py` | Cache-only SwiftBar rendering: jobs, recent departures, start estimates, prioritized server state icons, and separate connection warnings. |
+| `tools/monitor_dist.py` | Exports the original package snapshot with a five-module allowlist and source hashes. Public package development/builds now use the independent `hpc-queue-monitor` repository. |
 | `tools/simulation_registry.py` | Allocates the global sequential `simulation_id` from `kb/simulation_registry.yaml`. |
 | `tools/legacy_import.py` | Imports the historical xlsx notebook as `origin: notebook` evidence. |
 | `tools/run_adoption.py` | Folds pre-catalog `runs/` provenance into `origin: adopted` records. |

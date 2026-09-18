@@ -18,6 +18,8 @@ and path differences (see AGENTS.md).
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,22 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MACHINES_FILE = PROJECT_ROOT / "machines.yaml"
 LOCAL_MACHINES_FILE = PROJECT_ROOT / "machines.local.yaml"
+_definitions: ContextVar[dict[str, Any] | None] = ContextVar("machines", default=None)
+
+
+@contextmanager
+def using_machines(definitions: dict[str, Any]):
+    """Use explicit definitions without loading repository configuration."""
+    token = _definitions.set(definitions)
+    try:
+        yield
+    finally:
+        _definitions.reset(token)
+
+
+def _active_machines() -> dict[str, Any]:
+    configured = _definitions.get()
+    return load_machines() if configured is None else configured
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -76,12 +94,12 @@ def load_machines() -> dict[str, Any]:
 
 def machine_names() -> list[str]:
     """Names of the actual machines, excluding the `common` section."""
-    return [k for k in load_machines().keys() if k != "common"]
+    return [k for k in _active_machines().keys() if k != "common"]
 
 
 def get_machine(name: str) -> dict[str, Any]:
     """Return a machine definition by name. Raises KeyError if unknown."""
-    data = load_machines()
+    data = _active_machines()
     if name not in data or name == "common":
         raise KeyError(f"unknown machine: {name!r}. available: {machine_names()}")
     return data[name]
