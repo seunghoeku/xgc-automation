@@ -12,6 +12,9 @@
 {% if queue %}
 #PBS -q {{ queue }}
 {% endif %}
+{% if depend_on %}
+#PBS -W depend=afterany:{{ depend_on }}
+{% endif %}
 #PBS -k doe
 
 # PBS directives must remain above executable statements and ordinary comments.

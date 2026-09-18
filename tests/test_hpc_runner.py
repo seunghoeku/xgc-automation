@@ -273,6 +273,31 @@ class PolarisPlanTests(unittest.TestCase):
         )
         self.assertEqual(check.returncode, 0, check.stderr)
 
+    def test_depend_on_renders_an_afterany_pbs_directive(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission(
+                "polaris", run_id="run-polaris-chain", depend_on="7628761.polaris-pbs-01"
+            )
+        directives = [
+            line for line in plan.script.splitlines() if line.startswith("#PBS")
+        ]
+        self.assertIn("#PBS -W depend=afterany:7628761.polaris-pbs-01", directives)
+        # Directives stay contiguous at the top: the dependency comes before -k.
+        self.assertLess(
+            directives.index("#PBS -W depend=afterany:7628761.polaris-pbs-01"),
+            directives.index("#PBS -k doe"),
+        )
+        self.assertEqual(plan.resources["depend_on"], "7628761.polaris-pbs-01")
+
+    def test_depend_on_rejects_anything_but_one_job_id(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            for bad in ("afterany:123", "123 456", "abc"):
+                with self.assertRaises(hr.SubmissionError):
+                    hr.prepare_submission("polaris", run_id="run-bad-dep", depend_on=bad)
+            plan = hr.prepare_submission("polaris", run_id="run-no-dep", depend_on="  ")
+        self.assertIsNone(plan.resources["depend_on"])
+        self.assertNotIn("depend=", plan.script)
+
     def test_polaris_without_spare_nodes_keeps_the_plain_launcher(self) -> None:
         with patch.object(hr.m, "get_machine", return_value=self.cfg):
             plan = hr.prepare_submission("polaris", run_id="run-polaris-plain")

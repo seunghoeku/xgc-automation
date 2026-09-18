@@ -149,6 +149,7 @@ def prepare_submission(
     daos: bool = False,
     xgc_args: str | None = None,
     spare_nodes: int = 0,
+    depend_on: str | None = None,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -179,6 +180,12 @@ def prepare_submission(
             once on the remaining healthy ones. Rank count stays ``nodes *
             ntasks_per_node``; the spare nodes idle. Only templates that render
             the GPU gate accept it (Polaris).
+        depend_on: scheduler job id this job must wait for. Rendered as an
+            ``afterany`` dependency (PBS ``-W depend=afterany:<id>``, Slurm
+            ``--dependency=afterany:<id>``), so the new job starts once that
+            job has ended in any state. This is how a restart is chained
+            behind the job still running in the same case directory without
+            the two ever overlapping.
 
     Unspecified resource arguments fall back to the machine's `defaults`.
     """
@@ -316,6 +323,14 @@ def prepare_submission(
             "that many devices"
         )
     requested_nodes = nodes + spare_nodes
+    depend_on = (depend_on or "").strip() or None
+    if depend_on is not None and (
+        " " in depend_on or ":" in depend_on or not depend_on[0].isdigit()
+    ):
+        raise SubmissionError(
+            f"depend_on must be a single scheduler job id (got {depend_on!r}); "
+            "the afterany dependency type is added by the template"
+        )
 
     if daos_cfg:
         # One directory per case inside the container; the basename is the
@@ -352,9 +367,14 @@ def prepare_submission(
         xgc_exe=exe,
         xgc_args=f" {xgc_args.strip()}" if xgc_args else "",
         daos=daos_cfg,
+        depend_on=depend_on,
         generated_at=_now().isoformat(),
         provenance_id=run_id,
     )
+    if depend_on and f"afterany:{depend_on}" not in script:
+        raise SubmissionError(
+            f"depend_on is not supported by the {template_name} template"
+        )
 
     if spare_nodes and "GPU gate" not in script:
         raise SubmissionError(
@@ -385,6 +405,7 @@ def prepare_submission(
         "xgc_commit": resolved_xgc_commit,
         "daos": daos_cfg,
         "xgc_args": xgc_args,
+        "depend_on": depend_on,
     }
 
     return SubmissionPlan(

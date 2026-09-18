@@ -282,6 +282,7 @@ def plan_job(
     hello_world: bool = False,
     daos: bool = False,
     spare_nodes: int = 0,
+    depend_on: str | None = None,
 ) -> dict[str, Any]:
     """Render a job script and estimate its cost WITHOUT submitting anything.
 
@@ -297,6 +298,8 @@ def plan_job(
         spare_nodes: request extra nodes and run only on the ones whose GPUs
             answer a probe (Polaris). ``nodes`` stays the compute node count;
             the allocation and the cost estimate grow by ``spare_nodes``.
+        depend_on: scheduler job id to wait for (afterany). Use it to chain a
+            restart behind the job currently running in the same directory.
     Unspecified resources fall back to the machine's defaults.
     """
     plan = hr.prepare_submission(
@@ -313,6 +316,7 @@ def plan_job(
         hello_world=hello_world,
         daos=daos,
         spare_nodes=spare_nodes,
+        depend_on=depend_on,
     )
     return plan.to_dict()
 
@@ -735,6 +739,7 @@ def submit_job(
     skip_dryrun: bool = False,
     daos: bool = False,
     spare_nodes: int = 0,
+    depend_on: str | None = None,
 ) -> dict[str, Any]:
     """Submit a job to the scheduler. Requires explicit human confirmation.
 
@@ -756,6 +761,9 @@ def submit_job(
     ``runs/test/``. Registered simulations default to master; unregistered and
     hello-world jobs default to test. Pass ``provenance_class="master"`` for an
     intentional unregistered scientific run.
+
+    ``depend_on`` chains this job behind another job id (afterany), which is
+    how a restart follows the job still running in the same case directory.
     """
     return hr.submit(
         machine,
@@ -778,6 +786,7 @@ def submit_job(
         hello_world=hello_world,
         daos=daos,
         spare_nodes=spare_nodes,
+        depend_on=depend_on,
     )
 
 

@@ -336,6 +336,13 @@ class SlurmScheduler(Scheduler):
         return UNKNOWN, None
 
 
+# PBS Pro reports a job it killed for exceeding a limit with a negative
+# Exit_status (JOB_EXEC_KILL_*). -29 is JOB_EXEC_KILL_WALLTIME, the normal end
+# of an XGC job sized to run out of wall clock and restart from its
+# checkpoint; n661po job 7628761 (2026-09-17) ended this way.
+_PBS_TIMEOUT_EXIT_CODES = frozenset({-29})
+
+
 class PBSScheduler(Scheduler):
     type_name = "pbs"
 
@@ -379,9 +386,14 @@ class PBSScheduler(Scheduler):
             # absent instead of silently classifying a failed job as complete.
             return UNKNOWN
         try:
-            return COMPLETED if int(exit_code) == 0 else FAILED
+            code = int(exit_code)
         except ValueError:
             return UNKNOWN
+        if code == 0:
+            return COMPLETED
+        if code in _PBS_TIMEOUT_EXIT_CODES:
+            return TIMEOUT
+        return FAILED
 
     def parse_exit_code(self, stdout: str) -> str | None:
         """Extract PBS ``Exit_status`` from extended qstat output."""

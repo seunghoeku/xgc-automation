@@ -63,6 +63,18 @@ class PBSSchedulerTests(unittest.TestCase):
         )
         self.assertEqual(self.scheduler.parse_exit_code(output), "42")
 
+    def test_walltime_kill_is_timeout_not_failed(self) -> None:
+        output = (
+            "    job_state = F\n"
+            "    resources_used.walltime = 06:00:59\n"
+            "    Exit_status = -29\n"
+        )
+        self.assertEqual(
+            self.scheduler.parse_status(output, 0),
+            sched.TIMEOUT,
+        )
+        self.assertEqual(self.scheduler.parse_exit_code(output), "-29")
+
     def test_terminal_state_without_exit_status_is_unknown(self) -> None:
         self.assertEqual(
             self.scheduler.parse_status("    job_state = F\n", 0),

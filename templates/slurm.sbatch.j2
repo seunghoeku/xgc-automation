@@ -13,6 +13,9 @@
 {% if qos %}
 #SBATCH --qos={{ qos }}
 {% endif %}
+{% if depend_on %}
+#SBATCH --dependency=afterany:{{ depend_on }}
+{% endif %}
 {% if constraint %}
 #SBATCH --constraint={{ constraint }}
 {% endif %}
