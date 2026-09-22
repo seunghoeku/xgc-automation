@@ -54,8 +54,10 @@ The returned case and explicit overrides flow through `plan_input` for XGC
 metadata validation and a human-readable diff before anything can be written.
 
 New simulations receive a global sequential `simulation_id` such as `n645au`
-or `n647pe_po`. The ID prefixes the remote directory, while full machine names
-remain metadata rather than being repeated in the directory suffix. ID
+or `n647pe_po`; short test and debug runs use a separate `d0001pe` series so
+they do not consume physics numbers. The ID prefixes the remote directory,
+while full machine names remain metadata rather than being repeated in the
+directory suffix. ID
 reservation and remote case staging both require explicit human confirmation.
 
 `data_analyzer` keeps raw ADIOS2 output on the HPC machine. Its inventory

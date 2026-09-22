@@ -62,6 +62,7 @@ simulation_id: n645pe        # null for historical shots
 simulation_tag: n645pe       # grouping label; may be shared by several items
 sub_tag: n645pe_tcv_delta_f_linear  # defaults to the directory basename
 number: 645
+kind: production             # or dev: a d-numbered test/debug run
 short_name: tcv_delta_f_linear
 machines: [perlmutter]
 status: completed
@@ -129,6 +130,24 @@ are deliberately not equal:
 
 Only `automation` records carry a reserved sequence number. The other two have
 `number: null` unless their original name happened to contain one.
+
+### Kinds
+
+`kind` says what the simulation is for, independently of how trustworthy the
+record is:
+
+| `kind` | Id series | Meaning |
+|---|---|---|
+| `production` | `n645pe` | a physics simulation; its results are studied |
+| `dev` | `d0001pe` | a short test, debug, or algorithm-verification run |
+
+The two series number independently (`docs/simulation-ids.md`), so listings
+sort production first and dev after, never interleaved by number. A record
+without the field is production; every record predating the split was one.
+The exception is n662pe through n670pe, g2 verification runs that consumed
+production numbers before the dev series existed and are marked `kind: dev`
+by hand. `xgc-sim list --kind dev` and the `kind` argument of
+`search_simulations` filter on it.
 
 ### Status
 
@@ -361,7 +380,8 @@ to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
 
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept inside
 the repository: one row per simulation, the same columns as the Google Sheet
-(`tools/sheet_sync.COLUMNS`), the human `note` column last. It replaces the
+(`tools/sheet_sync.COLUMNS`, including `kind` to separate production runs from
+dev tests), the human `note` column last. It replaces the
 hand-kept `Other_data/simulation_note_XGC1.xlsx` going forward; that workbook
 stays as the historical notebook (rows through n656po) and is never written by
 automation, because openpyxl rewrites drop the cached values of its old

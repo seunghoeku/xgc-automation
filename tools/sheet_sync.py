@@ -53,6 +53,7 @@ COLUMNS = (
     "simulation_tag",
     "sub_tag",
     "number",
+    "kind",
     "short_name",
     "machine",
     "status",

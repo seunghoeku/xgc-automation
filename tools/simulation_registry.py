@@ -4,13 +4,17 @@
 restarts. It is distinct from ``run_id``, which identifies one submission
 attempt.
 
-Examples:
-    n645au
-    n646do
-    n647pe_po
+Two series share the machine-code suffix and the directory rules:
+
+    n645au, n646do, n647pe_po   production: physics simulations (``kind``
+                                ``production``, three or more digits)
+    d0001pe, d0002po            dev: short test and debug runs made while
+                                developing the code (``kind`` ``dev``, four
+                                or more digits, its own counter)
 
 The machine name is not repeated in the directory slug:
     n645au_em_kbm_linear
+    d0001pe_g2_marker_density
 """
 
 from __future__ import annotations
@@ -31,7 +35,18 @@ from tools import simulation_catalog as catalog
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
-_SIMULATION_ID_RE = re.compile(r"^n([0-9]{3,})([a-z]{2}(?:_[a-z]{2})*)$")
+_SIMULATION_ID_RE = re.compile(
+    r"^(?:n[0-9]{3,}|d[0-9]{4,})([a-z]{2}(?:_[a-z]{2})*)$"
+)
+
+# kind -> (id prefix, minimum digits, registry counter). Production numbers
+# are the researcher's historical sequence continued; dev numbers are a
+# separate sequence so algorithm tests stop consuming physics numbers.
+KINDS = ("production", "dev")
+_SERIES: dict[str, tuple[str, int, str]] = {
+    "production": ("n", 3, "next_number"),
+    "dev": ("d", 4, "next_dev_number"),
+}
 
 
 class SimulationRegistryError(RuntimeError):
@@ -47,6 +62,12 @@ def _load_registry() -> dict[str, Any]:
         raise SimulationRegistryError("simulation registry must be a mapping")
     if not isinstance(data.get("next_number"), int):
         raise SimulationRegistryError("simulation registry needs an integer next_number")
+    # The dev series was added later; a registry without the counter starts it.
+    data.setdefault("next_dev_number", 1)
+    if not isinstance(data["next_dev_number"], int):
+        raise SimulationRegistryError(
+            "simulation registry needs an integer next_dev_number"
+        )
     if not isinstance(data.get("machine_codes"), dict):
         raise SimulationRegistryError("simulation registry needs machine_codes")
     if not isinstance(data.get("reservations", []), list):
@@ -146,10 +167,30 @@ def _normalize_tags(
     return normalized
 
 
-def _format_id(number: int, codes: list[str]) -> str:
+def normalize_kind(kind: str | None) -> str:
+    value = str(kind or "production").strip().lower()
+    if value not in _SERIES:
+        raise SimulationRegistryError(
+            f"unknown simulation kind {kind!r}; expected one of {', '.join(KINDS)}"
+        )
+    return value
+
+
+def _format_id(number: int, codes: list[str], kind: str = "production") -> str:
     if number < 0:
         raise SimulationRegistryError("simulation number must be non-negative")
-    return f"n{number:03d}{'_'.join(codes)}"
+    prefix, digits, _ = _SERIES[normalize_kind(kind)]
+    return f"{prefix}{number:0{digits}d}{'_'.join(codes)}"
+
+
+def id_kind(simulation_id: str) -> str:
+    """The series a simulation id belongs to, read from its prefix."""
+    if not _SIMULATION_ID_RE.fullmatch(simulation_id):
+        raise SimulationRegistryError(f"invalid simulation_id {simulation_id!r}")
+    for kind, (prefix, _, _) in _SERIES.items():
+        if simulation_id.startswith(prefix):
+            return kind
+    raise SimulationRegistryError(f"invalid simulation_id {simulation_id!r}")
 
 
 def plan_simulation_id(
@@ -157,18 +198,26 @@ def plan_simulation_id(
     short_name: str = "",
     *,
     tags: Iterable[str] | None = None,
+    kind: str = "production",
 ) -> dict[str, Any]:
-    """Return the next ID and directory name without changing the registry."""
+    """Return the next ID and directory name without changing the registry.
+
+    ``kind`` selects the series: ``production`` (``n``-prefixed, the physics
+    sequence) or ``dev`` (``d``-prefixed, short test and debug runs).
+    """
     registry = _load_registry()
+    kind = normalize_kind(kind)
     normalized_machines = _normalize_machines(machines, registry)
     codes = [registry["machine_codes"][name] for name in normalized_machines]
-    number = registry["next_number"]
-    simulation_id = _format_id(number, codes)
+    _, _, counter = _SERIES[kind]
+    number = registry[counter]
+    simulation_id = _format_id(number, codes, kind)
     slug = _slugify(short_name, normalized_machines, registry)
     directory_name = simulation_id if not slug else f"{simulation_id}_{slug}"
     return {
         "simulation_id": simulation_id,
         "simulation_number": number,
+        "kind": kind,
         "machines": normalized_machines,
         "machine_codes": codes,
         "short_name": slug,
@@ -186,9 +235,11 @@ def reserve_simulation_id(
     tags: Iterable[str] | None = None,
     expected_number: int | None = None,
     confirm: bool = False,
+    kind: str = "production",
 ) -> dict[str, Any]:
-    """Reserve the next global number after explicit human confirmation."""
-    plan = plan_simulation_id(machines, short_name, tags=tags)
+    """Reserve the next number of one series after explicit human confirmation."""
+    kind = normalize_kind(kind)
+    plan = plan_simulation_id(machines, short_name, tags=tags, kind=kind)
     if not confirm:
         return {
             "reserved": False,
@@ -210,15 +261,22 @@ def reserve_simulation_id(
         )
 
     registry = _load_registry()
+    _, _, counter = _SERIES[kind]
+    # Numbers are unique within a series. The registry's own reservations
+    # predate the kind field, so a reservation without one is production.
     existing_numbers = {
         int(item["simulation_number"])
         for item in registry.get("reservations", [])
-        if isinstance(item, dict) and isinstance(item.get("simulation_number"), int)
+        if isinstance(item, dict)
+        and isinstance(item.get("simulation_number"), int)
+        and id_kind(str(item.get("simulation_id", ""))) == kind
     }
-    historical_through = int(registry.get("historical_through", -1))
+    historical_through = (
+        int(registry.get("historical_through", -1)) if kind == "production" else -1
+    )
     if expected_number <= historical_through or expected_number in existing_numbers:
         raise SimulationRegistryError(
-            f"simulation number {expected_number} has already been used"
+            f"{kind} simulation number {expected_number} has already been used"
         )
 
     record = {
@@ -226,6 +284,7 @@ def reserve_simulation_id(
         for key in (
             "simulation_id",
             "simulation_number",
+            "kind",
             "machines",
             "machine_codes",
             "short_name",
@@ -236,7 +295,7 @@ def reserve_simulation_id(
     record["status"] = "reserved"
     record["reserved_at"] = datetime.now(timezone.utc).isoformat()
     registry.setdefault("reservations", []).append(record)
-    registry["next_number"] = expected_number + 1
+    registry[counter] = expected_number + 1
     _write_registry(registry)
 
     # Open the simulation's catalog record at the moment the number exists, so
@@ -251,6 +310,7 @@ def reserve_simulation_id(
         tags=record["tags"],
         status="reserved",
         origin="automation",
+        kind=kind,
     )
     catalog_path = catalog.record_path(record["simulation_id"])
     try:
@@ -260,7 +320,7 @@ def reserve_simulation_id(
     return {
         "reserved": True,
         **record,
-        "next_number": registry["next_number"],
+        "next_number": registry[counter],
         "catalog_record": catalog_display,
         "catalog_status": catalog_record["status"],
     }

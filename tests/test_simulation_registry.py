@@ -97,6 +97,61 @@ class SimulationRegistryTests(unittest.TestCase):
         self.assertEqual(first["simulation_id"], "n645au")
         self.assertEqual(second_plan["simulation_id"], "n646do")
 
+    def test_dev_series_has_its_own_counter_and_prefix(self) -> None:
+        plan = sr.plan_simulation_id("perlmutter", "g2 marker density", kind="dev")
+        self.assertEqual(plan["simulation_id"], "d0001pe")
+        self.assertEqual(plan["kind"], "dev")
+        self.assertEqual(plan["directory_name"], "d0001pe_g2_marker_density")
+
+        reserved = sr.reserve_simulation_id(
+            "perlmutter", "g2 marker density", kind="dev", expected_number=1, confirm=True
+        )
+        data = yaml.safe_load(self.registry_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(reserved["simulation_id"], "d0001pe")
+        self.assertEqual(reserved["kind"], "dev")
+        self.assertEqual(data["next_dev_number"], 2)
+        # A dev reservation must not consume a physics number.
+        self.assertEqual(data["next_number"], 645)
+        self.assertEqual(sr.plan_simulation_id("aurora", "EM")["simulation_id"], "n645au")
+        self.assertEqual(
+            sr.plan_simulation_id("aurora", "EM", kind="dev")["simulation_id"], "d0002au"
+        )
+        record = sr.catalog.read_record("d0001pe", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["kind"], "dev")
+        self.assertEqual(record["number"], 1)
+
+    def test_production_reservations_default_to_production_kind(self) -> None:
+        reserved = sr.reserve_simulation_id(
+            "aurora", "EM test", expected_number=645, confirm=True
+        )
+        self.assertEqual(reserved["kind"], "production")
+        record = sr.catalog.read_record("n645au", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["kind"], "production")
+
+    def test_dev_numbers_are_not_checked_against_the_historical_range(self) -> None:
+        # historical_through is 644 in the fixture; dev numbering starts at 1.
+        reserved = sr.reserve_simulation_id(
+            "stellar", "smoke", kind="dev", expected_number=1, confirm=True
+        )
+        self.assertTrue(reserved["reserved"])
+
+    def test_unknown_kind_is_rejected(self) -> None:
+        with self.assertRaisesRegex(sr.SimulationRegistryError, "unknown simulation kind"):
+            sr.plan_simulation_id("aurora", "EM", kind="test")
+
+    def test_registry_without_dev_counter_starts_at_one(self) -> None:
+        data = yaml.safe_load(self.registry_path.read_text(encoding="utf-8"))
+        self.assertNotIn("next_dev_number", data)
+        self.assertEqual(sr.plan_simulation_id("aurora", kind="dev")["simulation_number"], 1)
+
+    def test_id_kind_reads_the_prefix(self) -> None:
+        self.assertEqual(sr.id_kind("n645au"), "production")
+        self.assertEqual(sr.id_kind("d0001pe"), "dev")
+        self.assertEqual(sr.id_kind("d0001pe_po"), "dev")
+        with self.assertRaises(sr.SimulationRegistryError):
+            sr.id_kind("d001pe")
+
     def test_stale_plan_is_rejected(self) -> None:
         sr.reserve_simulation_id(
             "aurora",

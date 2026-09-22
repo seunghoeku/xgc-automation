@@ -17,10 +17,13 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ARCHIVE_DIR = PROJECT_ROOT / "input_backup"
 CACHE_DIR = PROJECT_ROOT / ".cache"
+# Both id series: n645pe (production physics runs) and d0001pe (dev test
+# runs). The series letter is kept so the two number sequences never mix.
 _NUMBERED_NAME_RE = re.compile(
-    r"^n(?P<number>[0-9]{3,})(?P<codes>[a-z]{2}(?:_[a-z]{2})*)?(?:_|$)",
+    r"^(?P<series>[nd])(?P<number>[0-9]{3,})(?P<codes>[a-z]{2}(?:_[a-z]{2})*)?(?:_|$)",
     re.IGNORECASE,
 )
+_SERIES_KIND = {"n": "production", "d": "dev"}
 _NAMELIST_RE = re.compile(r"^\s*&([A-Za-z][A-Za-z0-9_]*)")
 _ASSIGNMENT_RE = re.compile(
     r"^\s*([A-Za-z][A-Za-z0-9_]*)(?:\s*\([^)]*\))?\s*=\s*(.*?)\s*$"
@@ -232,6 +235,7 @@ def _inspect_file(
         variant = _variant_kind(path.name)
     return {
         "simulation_number": int(match.group("number")),
+        "kind": _SERIES_KIND[match.group("series").lower()],
         "archive_name": display_name,
         "variant": variant,
         "relative_path": str(path.relative_to(ARCHIVE_DIR)),
@@ -262,8 +266,15 @@ def inspect_archive(
     min_number: int = 600,
     max_files: int = 100,
     metadata_path: Path | None = None,
+    include_dev: bool = False,
 ) -> dict[str, Any]:
-    """Inspect recent numbered inputs without modifying or validating them."""
+    """Inspect recent numbered inputs without modifying or validating them.
+
+    ``min_number`` applies to the production ``n`` series, whose numbers
+    continue the researcher's historical notebook. Dev ``d`` inputs number
+    from 1 in their own series and are left out unless ``include_dev`` is set,
+    because a dev number must never be matched against a notebook row.
+    """
     if min_number < 0:
         raise InputArchiveError("min_number must be non-negative")
     if max_files < 1 or max_files > 2_000:
@@ -294,11 +305,12 @@ def inspect_archive(
             if parent_match:
                 numbered.append((path, parent_match))
 
-    selected = [
-        (path, match)
-        for path, match in numbered
-        if int(match.group("number")) >= min_number
-    ]
+    def _selected(match: re.Match[str]) -> bool:
+        if match.group("series").lower() == "d":
+            return include_dev
+        return int(match.group("number")) >= min_number
+
+    selected = [(path, match) for path, match in numbered if _selected(match)]
     selected.sort(
         key=lambda item: (int(item[1].group("number")), item[0].name),
         reverse=True,
@@ -309,13 +321,16 @@ def inspect_archive(
         _inspect_file(path, match, current_parameters) for path, match in selected
     ]
 
-    by_number: dict[int, list[str]] = {}
+    # Keyed by number for production (the historical convention) and by the
+    # prefixed id for dev, so d0623 and n623 never count as one simulation.
+    by_number: dict[str, list[str]] = {}
     for record in records:
-        by_number.setdefault(record["simulation_number"], []).append(
-            record["archive_name"]
-        )
+        key = str(record["simulation_number"])
+        if record["kind"] == "dev":
+            key = f"d{record['simulation_number']:04d}"
+        by_number.setdefault(key, []).append(record["archive_name"])
     duplicates = {
-        str(number): names for number, names in by_number.items() if len(names) > 1
+        number: names for number, names in by_number.items() if len(names) > 1
     }
     alignments: dict[str, int] = {}
     for record in records:
@@ -327,13 +342,10 @@ def inspect_archive(
         "archive_root": str(ARCHIVE_DIR),
         "selection": {
             "min_number": min_number,
+            "include_dev": include_dev,
             "max_files": max_files,
             "selected_before_limit": len(
-                [
-                    1
-                    for _, match in numbered
-                    if int(match.group("number")) >= min_number
-                ]
+                [1 for _, match in numbered if _selected(match)]
             ),
             "returned": len(records),
             "truncated": truncated,

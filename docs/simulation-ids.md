@@ -13,22 +13,43 @@ not change global `simulation_id` allocation.
 ## Format
 
 ```text
-n<global sequential number><machine code>[_<secondary machine code>...]
+<series><sequential number><machine code>[_<secondary machine code>...]
 ```
+
+There are two series, told apart by the first letter and the number width:
+
+| `kind` | Prefix | Digits | Counter | Used for |
+|---|---|---|---|---|
+| `production` | `n` | 3 or more | `next_number` | physics simulations whose results will be studied |
+| `dev` | `d` | 4 or more | `next_dev_number` | short test, debug, and algorithm-verification runs made while developing the code |
 
 Examples:
 
 ```text
-n645au
-n646do
-n647pe_po
+n645au          production, Aurora
+n646do          production, Doudna
+n647pe_po       production, Perlmutter then Polaris
+d0001pe         dev, Perlmutter
+d0002po_pe      dev, Polaris then Perlmutter
 ```
 
-The number is global across machines. A failed, cancelled, or moved simulation
-still consumes its number; numbers are never reused. Historical records in
-`simulation_note_XGC1.xlsx` extend through `n644`, so the registry begins at
-645. Historical duplicate numbers are treated as record-keeping errors, not as
-precedent for machine-local number sequences.
+Within a series the number is global across machines. A failed, cancelled, or
+moved simulation still consumes its number; numbers are never reused.
+Historical records in `simulation_note_XGC1.xlsx` extend through `n644`, so
+the production registry begins at 645. Historical duplicate numbers are treated
+as record-keeping errors, not as precedent for machine-local number sequences.
+
+The dev series starts at `d0001` (September 2026). Before it existed, code
+tests consumed production numbers (n662pe through n670pe are g2 verification
+runs); those keep their numbers and are marked `kind: dev` in the catalog. The
+prefix is `d`, not `t`, because `t` was already the Titan-era prefix in the
+historical notebook (`ti204`).
+
+Choosing the series is a judgement about purpose, not size: a small run whose
+result enters a paper is production, a 4-node smoke test of a new binary is
+dev. A dev run that turns out to matter scientifically is not renumbered; it
+gets a new production number, with the dev id recorded in the new record's
+note or tags.
 
 Machine codes:
 
@@ -64,11 +85,12 @@ labels live in `tags`.
 ## Approval workflow
 
 ```text
-plan_simulation_id       preview n645au and directory; writes nothing
-        |
+plan_simulation_id       preview n645au (or d0001au with kind="dev") and
+        |                directory; writes nothing
   [human approves]
         |
-reserve_simulation_id    atomically reserves 645 and advances next_number
+reserve_simulation_id    atomically reserves 645 and advances the series
+        |                counter (next_number or next_dev_number)
         |
 stage_simulation_case    creates/copies the baseline to the canonical path
         |
@@ -78,8 +100,10 @@ plan_job                 retains timestamp run_id for this submission attempt
 ```
 
 When confirming a reservation, callers must pass the exact `expected_number`
-shown in the plan. If another reservation has advanced the sequence, the stale
-plan is rejected rather than silently assigning a different ID.
+shown in the plan and the same `kind`. If another reservation has advanced
+the sequence, the stale plan is rejected rather than silently assigning a
+different ID. Both tools default to `kind="production"`; the model should ask
+which series a run belongs to whenever the purpose is not obvious.
 
 Reserving a number also opens the simulation's catalog record at
 `kb/simulations/<simulation_id>.yaml`, which then accumulates its runs, status,
@@ -93,6 +117,7 @@ simulation_id: n645au
 run_id: run-20260729T...
 simulation:
   simulation_number: 645
+  kind: production
   machines: [aurora]
   machine_codes: [au]
   directory_name: n645au_em_kbm_linear

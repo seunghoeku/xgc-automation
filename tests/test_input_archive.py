@@ -54,6 +54,10 @@ col_mode=0
             "&sml_param\nsml_dt=1.0e-4\n/\n",
             encoding="utf-8",
         )
+        (self.archive_dir / "d0623pe_g2_test").write_text(
+            "&sml_param\nsml_dt=1.0e-4\n/\n",
+            encoding="utf-8",
+        )
 
         self.archive_patch = patch.object(archive, "ARCHIVE_DIR", self.archive_dir)
         self.cache_patch = patch.object(archive, "CACHE_DIR", self.cache_dir)
@@ -71,6 +75,22 @@ col_mode=0
         self.assertEqual(result["selection"]["returned"], 2)
         self.assertEqual(result["counts"]["distinct_selected_numbers"], 1)
         self.assertIn("623", result["duplicate_number_variants"])
+        self.assertTrue(all(item["kind"] == "production" for item in result["records"]))
+
+    def test_dev_inputs_are_a_separate_series(self) -> None:
+        # Left out by default: a dev number must never be joined to a notebook
+        # row, and d0623 is not the same simulation as n623.
+        default = archive.inspect_archive(min_number=600)
+        self.assertNotIn(
+            "d0623pe_g2_test", [item["archive_name"] for item in default["records"]]
+        )
+        result = archive.inspect_archive(min_number=600, include_dev=True)
+        dev = [item for item in result["records"] if item["kind"] == "dev"]
+        self.assertEqual([item["archive_name"] for item in dev], ["d0623pe_g2_test"])
+        self.assertEqual(dev[0]["simulation_number"], 623)
+        self.assertEqual(dev[0]["machines"], ["perlmutter"])
+        self.assertEqual(sorted(result["duplicate_number_variants"]), ["623"])
+        self.assertEqual(result["counts"]["distinct_selected_numbers"], 2)
         record = next(
             item
             for item in result["records"]

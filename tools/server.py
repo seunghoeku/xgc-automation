@@ -336,14 +336,22 @@ def plan_simulation_id(
     machines: list[str],
     short_name: str = "",
     tags: list[str] | None = None,
+    kind: str = "production",
 ) -> dict[str, Any]:
-    """Preview the next global simulation ID and canonical directory name.
+    """Preview the next simulation ID and canonical directory name.
 
-    Numbers are sequential across all machines and never reused. Machine names
-    are recorded as metadata but removed from the directory suffix because the
-    machine codes are already present in the ID. This writes nothing.
+    ``kind`` picks the series. ``production`` (the default) is the physics
+    sequence, ``n671pe``; use it for any run whose results will be studied.
+    ``dev`` is a separate sequence, ``d0001pe``, for short test, debug, and
+    algorithm-verification runs made while developing the code, so they stop
+    consuming physics numbers. When the purpose is unclear, ask the human.
+
+    Numbers are sequential across all machines within a series and never
+    reused. Machine names are recorded as metadata but removed from the
+    directory suffix because the machine codes are already present in the ID.
+    This writes nothing.
     """
-    return sr.plan_simulation_id(machines, short_name, tags=tags)
+    return sr.plan_simulation_id(machines, short_name, tags=tags, kind=kind)
 
 
 @mcp.tool()
@@ -353,12 +361,14 @@ def reserve_simulation_id(
     tags: list[str] | None = None,
     expected_number: int | None = None,
     confirm: bool = False,
+    kind: str = "production",
 ) -> dict[str, Any]:
     """Reserve the next simulation number. Requires explicit confirmation.
 
     First call plan_simulation_id and show its ID/directory to the human. After
-    approval, pass that exact number as expected_number with confirm=True. A
-    stale number is rejected rather than silently allocating a different ID.
+    approval, pass that exact number as expected_number with confirm=True and
+    the same ``kind`` (``production`` or ``dev``) as the plan. A stale number
+    is rejected rather than silently allocating a different ID.
     """
     return sr.reserve_simulation_id(
         machines,
@@ -366,6 +376,7 @@ def reserve_simulation_id(
         tags=tags,
         expected_number=expected_number,
         confirm=confirm,
+        kind=kind,
     )
 
 
@@ -398,12 +409,16 @@ def search_simulations(
     simulation_tag: str | None = None,
     sub_tag: str | None = None,
     origin: str | None = None,
+    kind: str | None = None,
     case: str | None = None,
     after: str | None = None,
     before: str | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
     """Search the simulation catalog: every past and current simulation.
+
+    ``kind`` separates ``production`` physics runs (``n``-numbered) from
+    ``dev`` test and debug runs (``d``-numbered); leave it unset for both.
 
     ``query`` matches any text field, including the human note and the original
     notebook description. Check ``origin`` before relying on a match, because
@@ -428,6 +443,7 @@ def search_simulations(
         simulation_tag=simulation_tag,
         sub_tag=sub_tag,
         origin=origin,
+        kind=kind,
         case=case,
         after=after,
         before=before,
@@ -534,16 +550,20 @@ def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dic
 def inspect_input_archive(
     min_number: int = 600,
     max_files: int = 100,
+    include_dev: bool = False,
 ) -> dict[str, Any]:
     """Inspect recent input backups without modifying or validating them.
 
     Compares parameter names with the newest local XGC metadata cache when
     available. High alignment means only that the schema looks current enough
     to prioritize; it does not make an input a validated baseline.
+    ``min_number`` applies to production ``n`` inputs; dev ``d`` inputs are
+    included only with ``include_dev``.
     """
     return input_archive.inspect_archive(
         min_number=min_number,
         max_files=max_files,
+        include_dev=include_dev,
     )
 
 

@@ -24,11 +24,28 @@ class RecordIdTests(unittest.TestCase):
     def test_modern_id_detection_separates_legacy_shots(self) -> None:
         self.assertTrue(sc.is_modern_id("n645pe"))
         self.assertTrue(sc.is_modern_id("n647pe_po"))
+        self.assertTrue(sc.is_modern_id("d0001pe"))
+        self.assertTrue(sc.is_modern_id("d0001pe_po"))
         self.assertFalse(sc.is_modern_id("ti204"))
+        # Dev ids are four digits or more; a three-digit d-id is not a series.
+        self.assertFalse(sc.is_modern_id("d001pe"))
 
     def test_number_extraction(self) -> None:
         self.assertEqual(sc.record_number("n645pe"), 645)
+        self.assertEqual(sc.record_number("d0001pe"), 1)
         self.assertEqual(sc.record_number("ti204"), 204)
+
+    def test_kind_comes_from_the_prefix_unless_the_record_says_otherwise(self) -> None:
+        self.assertEqual(sc.record_kind("n645pe"), "production")
+        self.assertEqual(sc.record_kind("d0001pe"), "dev")
+        self.assertEqual(sc.record_kind("ti204"), "production")
+        self.assertEqual(sc.record_kind({"record_id": "n662pe"}), "production")
+        # A production-numbered run reclassified as a test keeps its number.
+        self.assertEqual(sc.record_kind({"record_id": "n662pe", "kind": "dev"}), "dev")
+        self.assertEqual(sc.new_record("d0001pe")["kind"], "dev")
+        self.assertEqual(sc.new_record("n645pe")["kind"], "production")
+        with self.assertRaises(sc.SimulationCatalogError):
+            sc.new_record("n645pe", kind="test")
 
     def test_sub_tag_identity_preserves_directory_spelling(self) -> None:
         self.assertNotEqual(
@@ -280,6 +297,31 @@ class SearchTests(unittest.TestCase):
     def test_empty_query_returns_everything_sorted_by_number(self) -> None:
         rows = sc.search(catalog_dir=self.dir)
         self.assertEqual([row["record_id"] for row in rows], ["ti204", "n645pe", "n646po"])
+
+    def test_dev_runs_sort_after_production_and_filter_by_kind(self) -> None:
+        sc.create_record(
+            "d0001pe",
+            catalog_dir=self.dir,
+            machines=["perlmutter"],
+            short_name="g2 marker density",
+            tags=["g2"],
+        )
+        rows = sc.search(catalog_dir=self.dir)
+        # Number 1 would sort first if the two series were interleaved.
+        self.assertEqual(
+            [row["record_id"] for row in rows], ["ti204", "n645pe", "n646po", "d0001pe"]
+        )
+        self.assertEqual(
+            [row["record_id"] for row in sc.search(kind="dev", catalog_dir=self.dir)],
+            ["d0001pe"],
+        )
+        self.assertEqual(
+            [row["record_id"] for row in sc.search(kind="production", catalog_dir=self.dir)],
+            ["ti204", "n645pe", "n646po"],
+        )
+        self.assertEqual(rows[-1]["kind"], "dev")
+        self.assertEqual(rows[0]["kind"], "production")
+        self.assertEqual(sc.stats(catalog_dir=self.dir)["by_kind"], {"dev": 1, "production": 3})
 
     def test_free_text_matches_the_imported_description(self) -> None:
         rows = sc.search("neoclassical", catalog_dir=self.dir)

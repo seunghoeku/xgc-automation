@@ -68,10 +68,14 @@ Do not renumber them.
 ## Data Principles
 - XGC output is ADIOS2 (`.bp`) and can reach several TB. **Never download it
   all.** Reduce remotely to summary products, then pull only small amounts.
-- Every new scientific simulation gets one **globally sequential
-  `simulation_id`** from `kb/simulation_registry.yaml`. Numbers are never
-  reused across machines. Scheduler attempts keep separate timestamp-based
-  `run_id` values. (`docs/simulation-ids.md`)
+- Every new simulation gets one **globally sequential `simulation_id`** from
+  `kb/simulation_registry.yaml`, in one of two series: **production** physics
+  runs are `n671pe`; **dev** test, debug, and algorithm-verification runs are
+  `d0001pe`, on their own counter, so code tests stop consuming physics
+  numbers. Pass `kind="dev"` to `plan_simulation_id`/`reserve_simulation_id`
+  for a test run and ask when the purpose is unclear. Numbers are never reused
+  across machines. Scheduler attempts keep separate timestamp-based `run_id`
+  values. (`docs/simulation-ids.md`)
 - Each simulation owns one catalog record, `kb/simulations/<id>.yaml`,
   maintained automatically by reservation, staging, submission, and status
   checks, and searched with `xgc-sim`. A record's `origin` bounds what it may

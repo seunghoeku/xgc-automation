@@ -99,13 +99,20 @@ LEGACY_OUTCOMES = ("success", "failed", "inconclusive", "unknown")
 # records are the researcher's evidence with no provenance at all.
 ORIGINS = ("automation", "adopted", "notebook")
 
+# What the simulation is for. `production` runs are physics studies and carry
+# the researcher's historical `n` numbering; `dev` runs are short test and
+# debug simulations made while developing the code, numbered `d0001pe`... in
+# their own series so they never consume a physics number. A record without
+# the field is production: every record predating the split was one.
+KINDS = ("production", "dev")
+
 # A catalog key: lowercase alphanumerics and underscores, starting with a
 # letter. Deliberately broader than the numbered schemes, because adopted runs
 # are keyed by their working-directory name (see tools/run_adoption.py), which
 # never had a number. The pattern's real job is to reject anything that could
 # escape the catalog directory: no dots, slashes, or separators of any kind.
 _RECORD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_MODERN_ID_RE = re.compile(r"^n([0-9]{3,})([a-z]{2}(?:_[a-z]{2})*)$")
+_MODERN_ID_RE = re.compile(r"^(?:n[0-9]{3,}|d[0-9]{4,})([a-z]{2}(?:_[a-z]{2})*)$")
 _KNOWN_MACHINE_CODE_RE = r"(?:pe|po|au|do|fr|su|st|fl)"
 
 # Fields the human owns. Automated writers must leave them alone unless the
@@ -271,8 +278,39 @@ def record_number(record_id: str) -> int | None:
 
 
 def is_modern_id(record_id: str) -> bool:
-    """True when the id follows the current n<NUMBER><MACHINE CODE> scheme."""
+    """True when the id follows the current <SERIES><NUMBER><MACHINE CODE> scheme.
+
+    Two series exist: ``n645pe`` (production) and ``d0001pe`` (dev).
+    """
     return bool(_MODERN_ID_RE.fullmatch(str(record_id).strip().lower()))
+
+
+def validate_kind(kind: str) -> str:
+    value = str(kind).strip().lower()
+    if value not in KINDS:
+        raise SimulationCatalogError(
+            f"unknown kind {kind!r}; expected one of {', '.join(KINDS)}"
+        )
+    return value
+
+
+def record_kind(record: dict[str, Any] | str) -> str:
+    """The kind of a record, or of a bare id when the record has no field.
+
+    Only a ``d``-prefixed modern id implies ``dev``; everything else, including
+    adopted and notebook records, is production unless the record says so.
+    """
+    if isinstance(record, dict):
+        stored = record.get("kind")
+        if stored:
+            return validate_kind(str(stored))
+        record_id = str(record.get("record_id") or "")
+    else:
+        record_id = str(record)
+    record_id = record_id.strip().lower()
+    if is_modern_id(record_id) and record_id.startswith("d"):
+        return "dev"
+    return "production"
 
 
 def record_path(record_id: str, *, catalog_dir: Path | None = None) -> Path:
@@ -329,6 +367,7 @@ def new_record(
     status: str = "reserved",
     case: str | None = None,
     origin: str = "automation",
+    kind: str | None = None,
     note: str = "",
     **extra: Any,
 ) -> dict[str, Any]:
@@ -336,7 +375,8 @@ def new_record(
 
     ``origin`` bounds what the record may claim: only ``automation`` records
     were run through this toolchain and carry verified provenance. See
-    ``ORIGINS``.
+    ``ORIGINS``. ``kind`` (``production`` or ``dev``) defaults to what the id
+    prefix implies; see ``KINDS``.
     """
     record_id = validate_record_id(record_id)
     resolved_directory = str(directory_name or record_id)
@@ -359,6 +399,7 @@ def new_record(
         "simulation_tag": resolved_simulation_tag,
         "sub_tag": resolved_sub_tag,
         "number": record_number(resolved_simulation_tag),
+        "kind": validate_kind(kind) if kind else record_kind(record_id),
         "short_name": slugify(short_name),
         "machines": _normalize_list(machines),
         "status": validate_status(status),
@@ -506,6 +547,9 @@ def update_record(
     if "status" in updates:
         updates = dict(updates)
         updates["status"] = validate_status(updates["status"])
+    if "kind" in updates:
+        updates = dict(updates)
+        updates["kind"] = validate_kind(updates["kind"])
     if "tags" in updates:
         updates = dict(updates)
         updates["tags"] = _normalize_tags(updates["tags"])
@@ -769,7 +813,11 @@ def set_run_build(
 
 
 def iter_records(*, catalog_dir: Path | None = None) -> Iterator[dict[str, Any]]:
-    """Yield every catalog record, sorted by number then id."""
+    """Yield every catalog record: production first, then dev, by number then id.
+
+    The two series number independently, so ``d0001pe`` must not interleave
+    with the historical ``n001``.
+    """
     directory = catalog_dir or CATALOG_DIR
     if not directory.is_dir():
         return
@@ -781,7 +829,13 @@ def iter_records(*, catalog_dir: Path | None = None) -> Iterator[dict[str, Any]]
             continue
         if isinstance(data, dict) and data.get("record_id"):
             records.append(data)
-    records.sort(key=lambda item: (item.get("number") or 0, str(item.get("record_id"))))
+    records.sort(
+        key=lambda item: (
+            record_kind(item) == "dev",
+            item.get("number") or 0,
+            str(item.get("record_id")),
+        )
+    )
     yield from records
 
 
@@ -800,6 +854,7 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
         "sub_tag": record.get("sub_tag")
         or directory_sub_tag(record.get("directory_name"), normalized_sub_tag),
         "number": record.get("number"),
+        "kind": record_kind(record),
         "short_name": record.get("short_name"),
         "machines": machines,
         "machine": machines[0] if machines else None,
@@ -834,6 +889,7 @@ def _haystack(record: dict[str, Any]) -> str:
         record.get("simulation_tag"),
         record.get("sub_tag"),
         record.get("number"),
+        record_kind(record),
         record.get("short_name"),
         record.get("status"),
         record.get("origin"),
@@ -900,6 +956,7 @@ def search(
     simulation_tag: str | None = None,
     sub_tag: str | None = None,
     origin: str | None = None,
+    kind: str | None = None,
     case: str | None = None,
     after: str | None = None,
     before: str | None = None,
@@ -907,6 +964,8 @@ def search(
     catalog_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Filter and free-text search the catalog. No LLM, no network.
+
+    ``kind`` narrows to ``production`` physics runs or ``dev`` test runs.
 
     ``query`` matches every text field, including the human note and the
     imported notebook description. All terms must match, but separators do not
@@ -926,6 +985,8 @@ def search(
         if status and record.get("status") != status:
             continue
         if origin and record.get("origin") != origin:
+            continue
+        if kind and record_kind(record) != validate_kind(kind):
             continue
         if case and record.get("case") != case:
             continue
@@ -956,15 +1017,17 @@ def show(record_id: str, *, catalog_dir: Path | None = None) -> dict[str, Any]:
 
 
 def stats(*, catalog_dir: Path | None = None) -> dict[str, Any]:
-    """Counts by status, machine, and origin. Useful as a catalog health check."""
+    """Counts by status, machine, origin, and kind. A catalog health check."""
     by_status: dict[str, int] = {}
     by_machine: dict[str, int] = {}
     by_origin: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
     total = 0
     for record in iter_records(catalog_dir=catalog_dir):
         total += 1
         by_status[str(record.get("status"))] = by_status.get(str(record.get("status")), 0) + 1
         by_origin[str(record.get("origin"))] = by_origin.get(str(record.get("origin")), 0) + 1
+        by_kind[record_kind(record)] = by_kind.get(record_kind(record), 0) + 1
         for machine in record.get("machines") or ["(unknown)"]:
             by_machine[str(machine)] = by_machine.get(str(machine), 0) + 1
     return {
@@ -972,5 +1035,6 @@ def stats(*, catalog_dir: Path | None = None) -> dict[str, Any]:
         "by_status": dict(sorted(by_status.items())),
         "by_machine": dict(sorted(by_machine.items())),
         "by_origin": dict(sorted(by_origin.items())),
+        "by_kind": dict(sorted(by_kind.items())),
         "catalog_dir": str(catalog_dir or CATALOG_DIR),
     }

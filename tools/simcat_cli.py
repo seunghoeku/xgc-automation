@@ -42,6 +42,7 @@ _TABLE_COLUMNS = (
     ("machine", 11),
     ("status", 10),
     ("origin", 10),
+    ("kind", 10),
     ("short_name", 28),
 )
 
@@ -76,7 +77,10 @@ def _print_table(rows: Sequence[dict[str, Any]]) -> None:
 def _print_show(payload: dict[str, Any]) -> None:
     record = payload["record"]
     summary = payload["summary"]
-    print(f"{record.get('record_id')}  [{record.get('status')}]  origin={record.get('origin')}")
+    print(
+        f"{record.get('record_id')}  [{record.get('status')}]  "
+        f"origin={record.get('origin')}  kind={summary.get('kind')}"
+    )
     for label, key in (
         ("simulation tag", "simulation_tag"),
         ("sub tag", "sub_tag"),
@@ -252,6 +256,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
         simulation_tag=args.simulation_tag,
         sub_tag=args.sub_tag,
         origin=args.origin,
+        kind=args.kind,
         case=args.case,
         after=args.after,
         before=args.before,
@@ -474,6 +479,11 @@ def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--simulation-tag")
     parser.add_argument("--sub-tag")
     parser.add_argument("--origin", choices=list(catalog.ORIGINS))
+    parser.add_argument(
+        "--kind",
+        choices=list(catalog.KINDS),
+        help="production (n-numbered physics runs) or dev (d-numbered test runs)",
+    )
     parser.add_argument("--case")
     parser.add_argument("--after", help="ISO date lower bound, e.g. 2025-01-01")
     parser.add_argument("--before", help="ISO date upper bound")
