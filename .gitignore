@@ -33,3 +33,6 @@ kb/cases/*.local.yaml
 
 # f_init procedure: pulled comparison plots are regenerable; keep the JSON.
 f_init/cases/**/*.png
+
+# Claude Code personal overrides (machine-specific paths)
+.claude/settings.local.json

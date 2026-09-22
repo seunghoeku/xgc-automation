@@ -119,10 +119,24 @@ record per-machine procedures and known pitfalls in `docs/build-<machine>.md`
 cost a session to rediscover). Point `xgc.exe` in `machines.yaml` at the built
 executable. A `hpc_runner.build(machine)` hook is possible later.
 
+## Companion repository: XGC-Devel
+The XGC source lives in a separate, team-shared repository,
+`~/Documents/git/XGC-Devel`, attached to sessions here as an additional
+working directory (`.claude/settings.local.json`, gitignored). Division of
+labor: **changes to the code itself go to XGC-Devel; everything about
+simulation input and output — cases, inputs, `simulation_id`s, submissions,
+catalog records, analysis — stays here.** Before editing XGC source, read
+`XGC-Devel/AGENTS.md` (coding rules) and `XGC-Devel/CLAUDE.local.md` (local
+build notes); neither is loaded automatically from an additional directory.
+Commit from inside the repository being changed, never both at once. After
+building a new binary, update `machines.local.yaml` here before the next
+submission. Full rules and handoffs: `docs/repo-roles.md`.
+
 ## Where things are documented
 | Question | File |
 |---|---|
 | What is built, verified, still open, roadmap item N | `docs/roadmap.md` |
+| Which repository a change belongs to (XGC-Devel code vs. simulation I/O here), handoffs | `docs/repo-roles.md` |
 | Which tool/module owns which job | `docs/tool-layers.md` |
 | One submission end to end | `docs/workflow.md` |
 | Simulation IDs, directory naming, reservation flow | `docs/simulation-ids.md` |
