@@ -40,11 +40,12 @@
 set -euo pipefail
 
 {% if env_script %}
-# Redirect stderr: the env script probes for compiler wrappers (mpicc etc.)
-# that exist only on login nodes. Compute nodes carry a runtime-only MPI
-# install, so `which` complains harmlessly. Silencing it keeps real errors
-# visible in slurm-*.err. Verified: xgc resolves all libraries on compute nodes.
-source {{ env_script }} 2>/dev/null
+# The env script probes for compiler wrappers (mpicc etc.) that exist only on
+# login nodes, so `which` complains harmlessly on compute nodes. Its stderr goes
+# to env_setup.err in the run directory: slurm-*.err stays clean, and when the
+# env script itself fails under `set -e` (stellarai job 274 died silently at
+# this line) the reason is still on disk.
+source {{ env_script }} 2> {{ run_dir }}/env_setup.err
 {% endif %}
 {% for mod in modules %}
 module load {{ mod }}
@@ -64,11 +65,16 @@ echo "host=$(hostname) job=${SLURM_JOB_ID:-none} nodes={{ nodes }} start=$(date 
 echo "ranks={{ total_ranks }} threads_per_rank=${OMP_NUM_THREADS}"
 {% endif %}
 
+{% if srun_cpu_binding and cpus_per_task %}
+{% set srun_c = " -c " ~ cpus_per_task ~ " --cpu-bind=cores" %}
+{% else %}
+{% set srun_c = "" %}
+{% endif %}
 {% if xgc_exe %}
-srun -n {{ total_ranks }} {{ xgc_exe }}
+srun -n {{ total_ranks }}{{ srun_c }} {{ xgc_exe }}
 {% else %}
 # no XGC executable specified -> hello-world verification mode
-srun -n {{ total_ranks }} hostname
+srun -n {{ total_ranks }}{{ srun_c }} hostname
 {% endif %}
 
 echo "end=$(date -Is) rc=$?"

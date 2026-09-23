@@ -14,6 +14,7 @@ rather than a configure line remembered from another machine.
 | Machine | Reference | Toolchain | Status |
 |---|---|---|---|
 | stellar (Princeton) | [references/stellar.md](references/stellar.md) | Intel oneAPI 2024.2, CPU only | Build verified 2026-07-28; runtime not yet |
+| STELLAR-AI (Princeton/PPPL) | [references/stellarai.md](references/stellarai.md) | gcc 14.3.1 + OpenMPI 5.0.10, AMD Zen 5, CPU only, `XGC_PLATFORM=stellarai_cpu` | Built 2026-09-22 with static deps; smoke test d0008sa passed (job 283). /projects is login-only; srun needs `-c --cpu-bind=cores` |
 | Polaris (ALCF) | [references/polaris.md](references/polaris.md) | CPE 26.03: gcc 14.3 + CUDA 13.0.1 (Cray PE) | Production binary built 2026-09-05, smoke-tested on 2 nodes; older GCC 13 / CUDA 12.8 stacks retired after the 2026-08-19 system update |
 | Aurora (ALCF) | [references/aurora.md](references/aurora.md) | oneAPI IntelLLVM 2025.3.2 + SYCL, PE 26.26.0 | User build ran a 2-node smoke test 2026-09-09; rebuild after every PE update; set CMAKE_BUILD_TYPE explicitly |
 

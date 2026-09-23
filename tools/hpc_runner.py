@@ -361,6 +361,7 @@ def prepare_submission(
         cpus_per_task=cpus_per_task,
         gpus_per_node=gpus_per_node,
         gpu_aware_mpi=bool(xgc_cfg.get("gpu_aware_mpi", False)),
+        srun_cpu_binding=bool(cfg.get("scheduler", {}).get("srun_cpu_binding", False)),
         total_ranks=total_ranks,
         modules=xgc_cfg.get("modules") or [],
         env_script=resolved_env_script,

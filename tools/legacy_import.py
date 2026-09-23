@@ -44,6 +44,7 @@ _MACHINE_BY_CODE = {
     "su": "summit",
     "st": "stellar",
     "fl": "flux",
+    "sa": "stellarai",
 }
 
 # Retired machines the researcher encoded as a name prefix before the current

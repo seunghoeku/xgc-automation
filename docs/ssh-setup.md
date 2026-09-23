@@ -29,7 +29,7 @@ to another node when one misbehaves, by editing one line in
 
 ```sshconfig
 # --- shared multiplexing ---
-Host stellar stellar.princeton.edu flux polaris1 aurora frontier
+Host stellar stellar.princeton.edu stellarai flux polaris1 aurora frontier
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 8h
@@ -39,6 +39,12 @@ Host stellar stellar.princeton.edu flux polaris1 aurora frontier
 Host stellar stellar.princeton.edu
     HostName stellar.princeton.edu
     User <princeton_netid>
+
+Host stellarai
+    HostName stellarai-amd.princeton.edu
+    User <princeton_netid>
+    IdentityFile ~/.ssh/id_rsa
+    IdentitiesOnly yes
 
 Host flux
     HostName flux.pppl.gov

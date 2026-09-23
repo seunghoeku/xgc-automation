@@ -102,6 +102,22 @@ stellar:
     python: /home/alice/venvs/xgc-gui/bin/python3
     # env_script: /home/alice/env/xgc-gui.sh
 
+stellarai:
+  user: alice
+  auth:
+    ssh_config_host: stellarai
+  paths:
+    # scratch is a per-group fileset on STELLAR-AI, not per user
+    scratch: /scratch/gpfs/PTHEORY/alice
+    run_root: /scratch/gpfs/PTHEORY/alice/xgc-runs
+  xgc:
+    # Checkout and build on scratch: /projects is not visible on compute nodes.
+    exe: /scratch/gpfs/PTHEORY/alice/XGC-Devel/build/bin/xgc
+    src: /scratch/gpfs/PTHEORY/alice/XGC-Devel
+    env_script: /scratch/gpfs/PTHEORY/alice/XGC-Devel/quickstart/modules_and_env/stellarai_cpu.sh
+  defaults:
+    account: ptheory
+
 # Optional: mirror the simulation catalog to a Google Sheet
 # (docs/simulation-catalog.md). Requires `uv sync --extra sheets`, a service
 # account shared on the spreadsheet as Editor, and a key file kept OUTSIDE

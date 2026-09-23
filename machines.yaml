@@ -244,6 +244,59 @@ stellar:
     nodes: 1
     walltime: "00:10:00"         # partition limit is 15-00:01:00
 
+stellarai:
+  # STELLAR-AI (PPPL / DOE Genesis Mission platform, hosted by Princeton RC).
+  # Verified on first login 2026-09-22: Slurm; 95 CPU nodes, 2x AMD EPYC 9475F
+  # (Turin, 96 cores/node, no SMT), 370 GB/node, no GPUs (Gres null);
+  # partition `cpu` (default, MaxTime 7 days), partition `all` was down.
+  # Modules: gcc/14, aocc/5.2.0, intel-oneapi/2026.0, openmpi 5.0.10 per
+  # compiler, hdf5 1.14.6 per compiler/MPI.
+  # /projects (tigerdata NFS, incl. /projects/XGC shared with stellar) is on the
+  # LOGIN node only: compute nodes cannot see it (smoke test d0008sa, jobs
+  # 274-277). Run everything from /scratch/gpfs/<GROUP>. Build: docs/build-stellarai.md.
+  center: princeton
+  host: stellarai-amd.princeton.edu
+  user: <princeton_username>
+  auth:
+    method: ssh_controlmaster    # Duo MFA once per ControlPersist window
+    ssh_config_host: <ssh_alias>
+    mfa: true
+  scheduler:
+    type: slurm
+    submit: sbatch
+    status: squeue
+    cancel: scancel
+    submit_tpl: templates/slurm.sbatch.j2
+    # Pass `-c <cpus_per_task> --cpu-bind=cores` to srun. Slurm 26.05 does not hand
+    # sbatch --cpus-per-task on to srun, and its default mask covers a whole socket,
+    # so with OMP_PROC_BIND=spread the 6 ranks on a socket put their threads on the
+    # same 8 cores (d0008sa jobs 281/282: ~1.3 of 8 cores used per rank).
+    srun_cpu_binding: true
+  paths:
+    # No per-user scratch: scratch is a per-group GPFS fileset,
+    # /scratch/gpfs/<GROUP> (5 TiB, setgid). /scratch itself is node-local.
+    scratch: <group_scratch_path>/<user>   # e.g. /scratch/gpfs/PTHEORY/<user>
+    run_root: <group_scratch_path>/<user>/xgc-runs
+  xgc:
+    exe: null                    # personal build on scratch -> machines.local.yaml
+    src: null
+    build_type: Release
+    # Dependencies (static) are in /projects/XGC/STELLARAI/Software/install, which
+    # only the build needs. Batch jobs must source the env file from the user's
+    # XGC-Devel checkout on scratch (branch stellarai_cpu_setup), because the
+    # installed copy /projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai is
+    # invisible on compute nodes.
+    env_script: <xgc_src>/quickstart/modules_and_env/stellarai_cpu.sh
+    remote_python: /usr/bin/python3   # system python 3.12.14
+    modules: []
+  defaults:
+    account: <slurm_account>     # `sacctmgr show assoc user=<user>`
+    partition: cpu               # only partition that is up; 7-00:00:00 limit (+5 min OverTimeLimit)
+    nodes: 1
+    ntasks_per_node: 12          # x cpus_per_task 8 = 96 cores; env file sets OMP_NUM_THREADS=8
+    cpus_per_task: 8
+    walltime: "00:10:00"
+
 flux:
   center: pppl
   host: flux.pppl.gov            # internal network (172.16.99.52) — VPN/on-site required

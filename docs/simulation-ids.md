@@ -62,6 +62,7 @@ Machine codes:
 | Frontier | `fr` |
 | Summit | `su` |
 | Stellar | `st` |
+| STELLAR-AI (stellarai-amd) | `sa` |
 | Flux | `fl` |
 
 For a multi-machine simulation, list the primary machine first. The same

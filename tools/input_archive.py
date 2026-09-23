@@ -157,7 +157,7 @@ def _machine_names(codes: list[str]) -> list[str]:
     """
     code_to_machine = {
         "pe": "perlmutter", "po": "polaris", "au": "aurora", "do": "doudna",
-        "fr": "frontier", "su": "summit", "st": "stellar", "fl": "flux",
+        "fr": "frontier", "su": "summit", "st": "stellar", "fl": "flux", "sa": "stellarai",
     }
     registry = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
     try:

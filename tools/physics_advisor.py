@@ -106,6 +106,9 @@ def advise(description: str, *, machine: str | None = None) -> dict[str, Any]:
         raise PhysicsAdvisorError("problem description must not be empty")
 
     cases = [input_builder.load_case(item["name"]) for item in input_builder.list_cases()]
+    # Build smoke tests and similar non-physics cases opt out with advisor.enabled: false;
+    # they stay stageable through list_cases but are never proposed or listed as candidates.
+    cases = [c for c in cases if (c.get("advisor") or {}).get("enabled", True)]
     if machine:
         cases = [case for case in cases if case.get("machine") == machine]
     if not cases:

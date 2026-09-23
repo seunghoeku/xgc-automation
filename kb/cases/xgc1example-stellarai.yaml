@@ -1,0 +1,80 @@
+# XGC1Example on STELLAR-AI -- tiny smoke-test case, not a physics baseline.
+#
+# The official XGC1 example (/projects/XGC/STELLAR/BENCH/XGC1Example.tar.gz,
+# 2025-11-10) migrated on 2026-09-22 so that the current XGC accepts it, and
+# used to verify a fresh XGC build on a new machine: 4 planes, 7478 mesh nodes,
+# 2000 particles per rank, 3 steps. It runs in minutes on one node. Do not use
+# it for physics; the advisor never proposes it (no match signals).
+
+name: xgc1example-stellarai
+description: >
+  XGC1Example smoke-test case (circular ECBC-like geometry, ma_151x151 eqd,
+  1.0 rho_i mesh). Electrostatic XGC1, kinetic electrons and ions, collisions
+  on, 4 toroidal planes, 2000 particles per rank, 3 time steps. Purpose: verify
+  that a new XGC build starts, steps and writes output on STELLAR-AI.
+
+machine: stellarai
+case_dir: /scratch/gpfs/PTHEORY/seungku/xgc-automation-baselines/xgc1example
+backup_dir: /scratch/gpfs/PTHEORY/seungku/xgc-automation-baselines/xgc1example/original
+
+validated:
+  date: 2026-09-22
+  machine: stellarai
+  xgc_commit: c60540b6          # stellarai_cpu_setup, static dependency build
+  input_md5: 529361791717ebaf7fdc44b651802aaf   # after the f0_param, empty-namelist and per-species src_param fixes
+  dryrun: ACCEPTED              # login node, -n_ranks 96: 0 removed, 0 deprecated
+  n_ranks: 12                   # 0.022 GB per rank; resolution warning (0.014 ptl/vertex)
+  runtime_tested: true          # d0008sa job 283: 10 steps, XGC finished, 1 min 41 s on 1 node (12x8)
+
+physics:
+  model: electrostatic
+  flavor: XGC1
+  delta_f: false
+  boundary: edge                # sml_bounce=0, outpsi=1.0
+  device: circular test equilibrium (ma_151x151.eqd)
+  species:
+    - {name: electron, mass_au: 5.45e-4, charge_eu: -1.0}
+    - {name: hydrogen, mass_au: 1.0, charge_eu: 1.0}
+  toroidal:
+    nphi_total: 4
+    wedge_n: 6
+  radial_domain:
+    inpsi: 0.0
+    outpsi: 1.0
+  extras:
+    collisions: col_mode=4
+    n0_field: off (sml_00_efield=.false.)
+
+numerics:
+  dt: 4.0e-4
+  mstep: 3
+  ptl_num: 2000
+  f0_grid: {nmu: 31, nvp: 15}
+
+input_files:
+  mesh: [ma_1.00_rhoi_mesh.eqd.node, ma_1.00_rhoi_mesh.eqd.ele, ma_1.00_rhoi_mesh.eqd.flx.aif]
+  equilibrium: ma_151x151.eqd
+  profiles: {density: ma_den_bet02p500.dat, temp_electron: ma_te.dat, temp_ion: ma_ti.dat}
+  other: [adios2cfg.xml, petsc.rc]
+
+# Migration applied 2026-09-22; original input kept in backup_dir.
+migration:
+  removed_parameters:
+    - {from: sml_f0_grid_alpha, to: f0_update_alpha, note: "value 0.0; must go in &f0_param, not &sml_param. The C++ dryrun accepted it in sml_param but the Fortran namelist read aborted (d0008sa job 278)"}
+    - {from: sml_poisson_solver_type, to: null, note: "removed by XGC"}
+    - {from: neu_col_mode, to: null, note: "removed by XGC"}
+    - {from: sml_special, to: null, note: "deprecated; was 0"}
+    - {from: src_period, to: null, note: "deprecated; no effect"}
+  per_species_arrays:
+    - {names: [src_narea, src_heat_power1, src_pout1, src_decay_width1, src_pout2, src_pin2, src_decay_width2, src_heat_power2], note: "now one value per species (electron, ion). Old ion-only values kept for ions; electrons get src_narea=0 and code defaults. XGC aborts with 'didn't have enough values' otherwise (d0008sa job 280); the dryrun does not check this"}
+  added_namelists:
+    - {names: [resamp_param, init_cond, rad_param], note: "empty, as in XGC-Devel quickstart/inputs/input; XGC aborts with 'Namelist resamp_param not found' otherwise (d0008sa job 279). The dryrun does not check this"}
+
+notes:
+  - "Smoke-test only. Particle resolution is 0.11 ptl/vertex; the dryrun warns."
+  - "sml_mstep=3 in the baseline; a smoke test may raise it (d0008sa used 10)."
+
+advisor:
+  enabled: false               # build smoke test: never proposed for a physics problem
+  warnings:
+    - "Not a physics baseline: XGC1Example smoke test for build verification."

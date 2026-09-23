@@ -81,6 +81,7 @@ the standalone `hpc-monitor` package has its own configuration and installer.
 - `docs/build-stellar.md` — building XGC on stellar (note: `-O2` crashes the compiler)
 - `docs/build-polaris.md` — verified Polaris environment and CMake configure
   plus the locally tested PBS resource profile
+- `docs/build-stellarai.md` — STELLAR-AI (AMD Zen 5, CPU only) dependency stack and build
 - `docs/data-analysis.md` — remote reduction boundary and summary products
 - `docs/remote-gui.md` — launch the remote XGC_GUI Monitor through an SSH tunnel
 - [Queue monitoring](docs/queue-watch.md) — checkout and standalone package setup,

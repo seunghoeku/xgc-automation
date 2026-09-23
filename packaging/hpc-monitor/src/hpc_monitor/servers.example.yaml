@@ -39,6 +39,14 @@ servers:
     scheduler: slurm
     auth: controlmaster
 
+  stellarai:
+    enabled: false
+    host: stellarai-amd.princeton.edu
+    ssh_host: stellarai
+    user: <princeton_username>
+    scheduler: slurm
+    auth: controlmaster
+
   # Scheduler has not been confirmed for this host; choose before enabling.
   flux:
     enabled: false
