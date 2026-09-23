@@ -1426,3 +1426,17 @@ class InputFileDirTests(unittest.TestCase):
     def test_exactly_at_the_limit_passes(self) -> None:
         self.assertIsNone(self._problem("/" + "a" * 63 + "/"))
         self.assertIsNotNone(self._problem("/" + "a" * 64 + "/"))
+
+
+class DevDryrunDefaultTests(unittest.TestCase):
+    """skip_dryrun=None skips the dryrun for dev (d-series) simulations only."""
+
+    def test_dev_reservation_skips_by_default(self) -> None:
+        self.assertTrue(hr._is_dev_simulation({"simulation_id": "d0009pe", "kind": "dev"}))
+        # a reservation written before the kind field still counts by its prefix
+        self.assertTrue(hr._is_dev_simulation({"simulation_id": "d0009pe"}))
+
+    def test_production_and_unregistered_runs_keep_the_dryrun(self) -> None:
+        self.assertFalse(hr._is_dev_simulation({"simulation_id": "n675pe", "kind": "production"}))
+        self.assertFalse(hr._is_dev_simulation({"simulation_id": "n675pe"}))
+        self.assertFalse(hr._is_dev_simulation(None))

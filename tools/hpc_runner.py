@@ -1178,7 +1178,7 @@ def submit(
     confirm: bool = False,
     plan: SubmissionPlan | None = None,
     case_dir: str | None = None,
-    skip_dryrun: bool = False,
+    skip_dryrun: bool | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Submit a job, but only with explicit confirmation.
@@ -1190,6 +1190,11 @@ def submit(
     rejected input blocks submission. It costs seconds and no allocation, so it
     is far cheaper than discovering a bad namelist after queueing. skip_dryrun
     forces past it; a caller doing that should have a reason.
+
+    ``skip_dryrun=None`` (the default) decides by the simulation's series: a
+    dev (``d``) simulation skips the dryrun, since those are short tests where
+    a bad input costs one debug job; production and unregistered runs keep
+    it. Pass ``False`` to validate a dev run anyway.
 
     On machines whose login nodes cannot run the dryrun (``dryrun.login_node:
     false`` -- Polaris, Aurora) the job is submitted first; if it is still
@@ -1212,6 +1217,12 @@ def submit(
 
     cfg = m.get_machine(plan.machine)
     settings = dryrun_settings(cfg)
+    dryrun_policy = "requested skip" if skip_dryrun else "validated"
+    if skip_dryrun is None:
+        skip_dryrun = _is_dev_simulation(plan.simulation)
+        dryrun_policy = "skipped: dev simulation default" if skip_dryrun else "validated"
+    if not case_dir:
+        dryrun_policy = "no case_dir"
     dryrun_report: dict[str, Any] | None = None
     parallel_dryrun: dict[str, Any] | None = None
     if case_dir and not skip_dryrun and not settings["login_node"]:
@@ -1302,6 +1313,7 @@ def submit(
         "build_environment": reproduction["build_environment"],
         "input_backup": input_backup,
         "dryrun": dryrun_report,
+        "dryrun_policy": dryrun_policy,
         "dryrun_parallel": parallel_dryrun,
     }
     if reproduction.get("error"):
@@ -1325,8 +1337,18 @@ def submit(
         "input_backup": input_backup,
         "notebook": notebook,
         "dryrun": dryrun_report,
+        "dryrun_policy": dryrun_policy,
         "dryrun_parallel": parallel_dryrun,
     }
+
+
+def _is_dev_simulation(simulation: dict[str, Any] | None) -> bool:
+    """True for a reserved dev (``d``-series) simulation."""
+    if not simulation:
+        return False
+    if simulation.get("kind"):
+        return str(simulation["kind"]) == "dev"
+    return catalog.record_kind(str(simulation.get("simulation_id") or "")) == "dev"
 
 
 def status(machine: str, job_id: str) -> dict[str, Any]:

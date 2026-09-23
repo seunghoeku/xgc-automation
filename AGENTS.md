@@ -59,6 +59,9 @@ Do not renumber them.
   rejection is a warning, never an automatic cancel.
   Do not pass `skip_dryrun` there. (`docs/workflow.md`, "Dryrun on machines
   without a login-node dryrun")
+  **Dev (`d`-series) simulations skip the dryrun by default** on every
+  machine (`skip_dryrun` unset); production runs keep the gate. Pass
+  `skip_dryrun=False` to validate a dev run anyway.
 - Remote analysis placement is decided by **workload character, not duration
   alone**: bounded file-access-dominant analysis may run on a login node for up
   to six hours; compute-dominant analysis needs a scheduler allocation even

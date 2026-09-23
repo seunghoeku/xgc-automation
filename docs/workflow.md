@@ -162,6 +162,11 @@ caller:
    even with `confirm=True`. `skip_dryrun=True` overrides this and should only
    be used when the user explicitly asks. On machines whose login nodes cannot
    run `xgc --dryrun` at all the gate takes the parallel form described next.
+   Left unset, `skip_dryrun` follows the series: a dev (`d`) simulation skips
+   the dryrun (login-node and parallel alike), because a dev run is a short
+   test where a bad input costs one debug job; production and unregistered
+   runs keep it. `skip_dryrun=False` validates a dev run anyway. The choice
+   is recorded as `dryrun_policy` in the run's provenance.
 
 ### Dryrun on machines without a login-node dryrun
 

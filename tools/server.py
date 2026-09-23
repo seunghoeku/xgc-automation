@@ -779,7 +779,7 @@ def submit_job(
     account: str | None = None,
     partition: str | None = None,
     hello_world: bool = False,
-    skip_dryrun: bool = False,
+    skip_dryrun: bool | None = None,
     daos: bool = False,
     spare_nodes: int = 0,
     depend_on: str | None = None,
@@ -792,7 +792,10 @@ def submit_job(
 
     When case_dir is given, `xgc --dryrun` validates the input first and a
     rejected input blocks submission. Always pass case_dir for real XGC runs.
-    Do not set skip_dryrun unless the user explicitly asks for it. On machines
+    skip_dryrun defaults to the series: a dev (``d``) simulation skips the
+    dryrun, production runs keep it. Leave it unset; pass True for a
+    production run only when the user explicitly asks, or False to validate
+    a dev run anyway. On machines
     whose login nodes cannot run the dryrun (Polaris, Aurora: dryrun.login_node
     false) the job is submitted first and, if it is still queued after a short
     grace period, a 1-node job runs the dryrun in parallel in the first queue
