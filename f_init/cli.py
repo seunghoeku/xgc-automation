@@ -2,6 +2,7 @@
 
     xgc-finit CASE status
     xgc-finit CASE make-finit [--sigma-theta S] [--v-width W] [--step N] [--overwrite]
+    xgc-finit CASE make-canonical [--step N] [--no-correction] [--overwrite]
     xgc-finit CASE stage-dt0 --finit FILE [--dir NAME] [--confirm] [--overwrite]
     xgc-finit CASE stage-run --finit FILE [--dir NAME] [--confirm] [--overwrite]
     xgc-finit CASE convert --finit FILE [--target-dir DIR] [--out NAME] [--overwrite]
@@ -85,6 +86,24 @@ def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_make_canonical(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.make_canonical(case, step=args.step, correction=not args.no_correction,
+                                  overwrite=args.overwrite, species_name=args.species)
+    if args.json:
+        _print(payload, True)
+        return 0
+    print(f"f0 step {payload['f0_step']}: {payload['nnodes']} nodes, "
+          f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}, "
+          f"orbit correction {'on' if payload['correction'] else 'off'}")
+    for key, label in (("fsa_den_rel_err", "density"), ("fsa_temp_rel_err", "temperature")):
+        err = payload[key]
+        print(f"  flux-averaged {label} vs f0 target: rms {err['rms']:.2e}, max {err['abs_max']:.2e}")
+    stats = payload["f_g_stats"]
+    print(f"  min full f {payload['f_full_min']:.3e}; private-region nodes {payload['private_region_nodes']}")
+    print(f"  wrote {payload['output']}  (|f_g| max {stats['abs_max']:.3e}, rms {stats['rms']:.3e})")
+    return 0
+
+
 def _print_resources(res: dict[str, Any]) -> None:
     print(f"  nodes={res['nodes']} walltime={res['walltime']} qos={res['qos']} "
           f"account={res['account']} -> up to {res['node_hours']} node-hours")
@@ -131,7 +150,10 @@ def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace, *, run: bool = False
     finit = _finit_arg(args.finit)
     if run and not isinstance(finit, str):
         raise SystemExit("stage-run takes a single --finit file")
-    plan = planner(case, finit, dir_name=args.dir)
+    if run and getattr(args, "sim_dir", None):
+        plan = planner(case, finit, sim_dir=args.sim_dir)
+    else:
+        plan = planner(case, finit, dir_name=args.dir)
     if args.json and not args.confirm:
         _print(plan, True)
         return 0
@@ -146,16 +168,21 @@ def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace, *, run: bool = False
     for note in plan["input_notes"]:
         print(f"  {note}")
     print(plan["input_diff"])
-    print(f"{plan['script_name']} changes:")
-    for note in plan["script_notes"]:
-        print(f"  {note}")
-    _print_resources(plan["resources"])
+    if plan.get("sim_dir"):
+        print("job script: none copied; submit with xgc-tools submit_job "
+              "(case_dir + simulation_id), which records provenance")
+    else:
+        print(f"{plan['script_name']} changes:")
+        for note in plan["script_notes"]:
+            print(f"  {note}")
+        _print_resources(plan["resources"])
     if not args.confirm:
         print("\nPlan only. Re-run with --confirm to write the directory.")
         return 0
     result = proc.stage_dt0(case, plan, overwrite=args.overwrite)
     print(f"\nwrote {result['target_dir']}: {', '.join(result['written'])}")
-    print(f"next: xgc-finit {case.name} submit {plan['dir_name']} --confirm")
+    if not plan.get("sim_dir"):
+        print(f"next: xgc-finit {case.name} submit {plan['dir_name']} --confirm")
     return 0
 
 
@@ -354,6 +381,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
     p.add_argument("--overwrite", action="store_true")
 
+    p = sub.add_parser("make-canonical",
+                       help="canonical-Maxwellian f_init matched to the f0 moments (login node)")
+    p.add_argument("--species", default=None, help="named entry of the case's species_set")
+    p.add_argument("--step", type=int, default=None, help="f0 step; default f0_step of the case")
+    p.add_argument("--no-correction", action="store_true",
+                   help="plain psi_c without the orbit-width correction")
+    p.add_argument("--overwrite", action="store_true")
+
     p = sub.add_parser("convert", help="case 2: interpolate an f_init onto the turbulence mesh (login node)")
     p.add_argument("--finit", required=True, help="f_init file name in the stage A directory, usually an adjusted one")
     p.add_argument("--target-dir", default=None, help="directory with xgc.mesh.bp of the turbulence mesh; default turb_mesh_dir of the case")
@@ -372,6 +407,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("stage-run", help="plan/write a production-run directory (finit_sm_<tag>) for one f_init file")
     p.add_argument("--finit", required=True, help="f_init file name in the stage A directory, usually an adjusted one")
     p.add_argument("--dir", default=None, help="directory name; default finit_sm_<sigma>_<width>")
+    p.add_argument("--sim-dir", default=None,
+                   help="canonical directory of a reserved simulation_id (absolute); "
+                        "the job is then submitted with xgc-tools submit_job")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--overwrite", action="store_true")
 
@@ -454,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         handlers = {
             "status": cmd_status,
             "make-finit": cmd_make_finit,
+            "make-canonical": cmd_make_canonical,
             "convert": cmd_convert,
             "stage-dt0": cmd_stage_dt0,
             "stage-run": lambda c, a: cmd_stage_dt0(c, a, run=True),

@@ -253,6 +253,12 @@ def smooth_file(
     )
 
 
+def canonical_file(correction: bool = True, species_tag: str | None = None) -> str:
+    """Canonical-Maxwellian f_init; ``_nocorr`` marks the plain psi_c variant."""
+    suffix = "" if correction else "_nocorr"
+    return f"xgc.f_init_{_species_prefix(species_tag)}canonical{suffix}.bp"
+
+
 def finit_tag(filename: str) -> str:
     """``xgc.f_init_smooth_0.3_0.5.bp -> smooth_0.3_0.5``."""
     base = Path(filename).name

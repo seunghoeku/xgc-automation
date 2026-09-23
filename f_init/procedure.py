@@ -193,6 +193,54 @@ def make_finit(
     return payload
 
 
+def make_canonical(
+    case: Case,
+    *,
+    step: int | None = None,
+    correction: bool = True,
+    overwrite: bool = False,
+    species_name: str | None = None,
+) -> dict[str, Any]:
+    """Canonical-Maxwellian f_init whose flux-averaged n, T match the f0 snapshot."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    species, species_tag = case.species_for(species_name)
+    step = case.f0_step if step is None else step
+    if step is None:
+        raise ProcedureError("make-canonical needs --step or f0_step in the case file")
+    out_name = cfg.canonical_file(correction, species_tag)
+
+    script = _push_helper(case, target, "make_canonical_f_init.py")
+    argv = [
+        python, script,
+        "--xgc-reader", reader,
+        "--run-dir", case.maxwell_path,
+        "--step", str(step),
+        "--out-name", out_name,
+        "--var-string", str(species["var_string"]),
+        "--mass-au", str(species["mass_au"]),
+        "--charge-num", str(species.get("charge_num", 1.0)),
+    ]
+    if species.get("has_electron"):
+        argv.append("--has-electron")
+    if not correction:
+        argv.append("--no-correction")
+    if overwrite:
+        argv.append("--overwrite")
+
+    payload = _run_json(target, argv, timeout=3600)
+    cfg.append_log(
+        case, "make-canonical",
+        f0_step=payload.get("f0_step"), correction=correction,
+        species=species_tag or species["var_string"],
+        outputs=[payload.get("output")],
+        fsa_den_rel_err=payload.get("fsa_den_rel_err"),
+        fsa_temp_rel_err=payload.get("fsa_temp_rel_err"),
+        f_g_stats=payload.get("f_g_stats"),
+    )
+    return payload
+
+
 # --- case 2: f_init -> turbulence mesh ------------------------------------------
 
 def convert_finit(
@@ -294,16 +342,26 @@ def _dt0_dirname(case: Case, finits: dict[str | None, str]) -> str:
     return f"dt0_{tags.pop()}"
 
 
-def plan_run(case: Case, finit_file: str, *, dir_name: str | None = None) -> dict[str, Any]:
+def plan_run(case: Case, finit_file: str, *, dir_name: str | None = None,
+             sim_dir: str | None = None) -> dict[str, Any]:
     """A production run from an f_init file: stage A's input with the f_init
     slot switched and the case's ``run.overrides`` applied (cbc3's
     ``finit_sm_*`` convention). ``sml_dt``/``sml_mstep``/``sml_restart`` are
-    kept as in stage A so a timed-out job can be restarted."""
+    kept as in stage A so a timed-out job can be restarted.
+
+    ``sim_dir`` stages into a reserved simulation's canonical directory
+    instead of the case root: the input then points at stage A and the input
+    directory by absolute path, and no job script is copied, because
+    ``submit_job`` writes it and records the provenance."""
     finit_name = Path(finit_file).name
     run_cfg = case.run or {}
     overrides = {str(k): _fortran(v) for k, v in (run_cfg.get("overrides") or {}).items()}
-    dir_name = dir_name or cfg.run_dirname(finit_name, str(run_cfg.get("dir_prefix", "finit_")))
-    return _plan_from_maxwell(case, {None: finit_name}, dir_name, overrides, kind="run")
+    if sim_dir:
+        dir_name = posixpath.basename(sim_dir.rstrip("/"))
+    else:
+        dir_name = dir_name or cfg.run_dirname(finit_name, str(run_cfg.get("dir_prefix", "finit_")))
+    return _plan_from_maxwell(case, {None: finit_name}, dir_name, overrides, kind="run",
+                              sim_dir=sim_dir)
 
 
 def _fortran(value: Any) -> str:
@@ -321,11 +379,16 @@ def _fortran(value: Any) -> str:
 
 
 def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
-                       overrides: dict[str, str], *, kind: str) -> dict[str, Any]:
+                       overrides: dict[str, str], *, kind: str,
+                       sim_dir: str | None = None) -> dict[str, Any]:
     _cfg, target = _machine(case)
-    target_dir = case.subdir(dir_name)
+    target_dir = sim_dir.rstrip("/") if sim_dir else case.subdir(dir_name)
     script_name = case.job["script"]
     copy_files = list(case.job.get("copy_files", []))
+    if sim_dir:
+        # the scheduler script comes from submit_job; a copied runscript
+        # would name stage A's executable and only mislead
+        copy_files = [name for name in copy_files if not name.startswith("runscript")]
 
     missing = [
         name for name in copy_files + ["input", script_name] + list(finits.values())
@@ -342,7 +405,15 @@ def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
         name: int(case.species_for(name)[0]["slot"]) for name in finits
     }
     overrides = dict(overrides)
-    overrides["ptl_input_file_dir"] = f"'../{case.maxwell_dir}/'"
+    if sim_dir:
+        overrides["ptl_input_file_dir"] = f"'{case.maxwell_path.rstrip('/')}/'"
+        input_dir = nle.read_value(old_input, "sml_input_file_dir")
+        rel = input_dir.strip().strip("'\"") if input_dir else ""
+        if rel and not rel.startswith("/"):
+            absolute = posixpath.normpath(posixpath.join(case.maxwell_path, rel))
+            overrides["sml_input_file_dir"] = f"'{absolute}/'"
+    else:
+        overrides["ptl_input_file_dir"] = f"'../{case.maxwell_dir}/'"
     for name, token_for in (("ptl_f_init_file", lambda f: f"'{f}'"),
                             ("ptl_maxwellian_init", lambda _f: ".false.")):
         current = nle.read_value(old_input, name)
@@ -366,6 +437,7 @@ def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
 
     return {
         "kind": kind,
+        "sim_dir": bool(sim_dir),
         "dir_name": dir_name,
         "target_dir": target_dir,
         "exists": ssh.exists(target, target_dir),
@@ -399,15 +471,19 @@ def stage_dt0(case: Case, plan: dict[str, Any], *, overwrite: bool = False) -> d
         ssh.run(target, ["cp", "-p", f"{case.maxwell_path}/{name}", f"{target_dir}/{name}"],
                 check=True)
     ssh.write_file(target, f"{target_dir}/input", plan["input_text"])
-    ssh.write_file(target, f"{target_dir}/{plan['script_name']}", plan["script_text"])
+    written = ["input"] + plan["copy_files"]
+    if not plan.get("sim_dir"):
+        ssh.write_file(target, f"{target_dir}/{plan['script_name']}", plan["script_text"])
+        written.insert(1, plan["script_name"])
     entry = cfg.append_log(
         case, "stage-run" if plan.get("kind") == "run" else "stage-dt0",
-        dir=plan["dir_name"], finit_file=plan["finit_file"],
-        input_notes=plan["input_notes"], script_notes=plan["script_notes"],
-        resources=plan["resources"],
+        dir=target_dir if plan.get("sim_dir") else plan["dir_name"],
+        finit_file=plan["finit_file"],
+        input_notes=plan["input_notes"],
+        script_notes=[] if plan.get("sim_dir") else plan["script_notes"],
+        resources=None if plan.get("sim_dir") else plan["resources"],
     )
-    return {"target_dir": target_dir, "written": ["input", plan["script_name"]] + plan["copy_files"],
-            "log": entry}
+    return {"target_dir": target_dir, "written": written, "log": entry}
 
 
 # --- dryrun and submission --------------------------------------------------
