@@ -8,6 +8,7 @@ functions; this is the same system with a keyboard instead of a model.
     xgc-sim search "asdex i-mode"
     xgc-sim show n645pe
     xgc-sim note n645pe "growth rate matches the GENE benchmark"
+    xgc-sim ai-note n645pe "restart 3 reached gstep 900; relaxing"
     xgc-sim archive n645pe --system hpss --path /home/s/sku/n645pe.tar
     xgc-sim import-notebook --confirm
     xgc-sim sync-sheet --confirm
@@ -129,6 +130,8 @@ def _print_show(payload: dict[str, Any]) -> None:
             if run.get("provenance"):
                 print(f"      provenance: {run['provenance']}")
 
+    if record.get("ai_note"):
+        print(f"  ai note: {record['ai_note']}")
     if record.get("note"):
         print(f"  note: {record['note']}")
     if summary.get("runs") == 0 and record.get("origin") == "automation":
@@ -279,6 +282,15 @@ def _cmd_note(args: argparse.Namespace) -> int:
         _print_json(catalog.summarize(record))
     else:
         print(f"{record['record_id']}: note updated")
+    return 0
+
+
+def _cmd_ai_note(args: argparse.Namespace) -> int:
+    record = catalog.set_ai_note(args.record_id, args.ai_note, catalog_dir=_catalog_dir(args))
+    if args.json:
+        _print_json(catalog.summarize(record))
+    else:
+        print(f"{record['record_id']}: ai note updated")
     return 0
 
 
@@ -546,6 +558,11 @@ def _parser() -> argparse.ArgumentParser:
     note_parser.add_argument("record_id")
     note_parser.add_argument("note")
     note_parser.set_defaults(func=_cmd_note)
+
+    ai_note_parser = add("ai-note", help="set the AI note (the agent's own field)")
+    ai_note_parser.add_argument("record_id")
+    ai_note_parser.add_argument("ai_note")
+    ai_note_parser.set_defaults(func=_cmd_ai_note)
 
     status_parser = add("status", help="set the simulation status")
     status_parser.add_argument("record_id")

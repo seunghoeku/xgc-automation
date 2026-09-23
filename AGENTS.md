@@ -82,7 +82,10 @@ Do not renumber them.
   claim — `automation` (verified provenance) / `adopted` (real pre-catalog
   runs, outcome never recorded) / `notebook` (historical evidence only) — and
   only `automation` records own a reserved number. Adoption never mints one
-  retroactively. (`docs/simulation-catalog.md`)
+  retroactively. The record has two notes: `note` is the human's (write it
+  only with approved wording) and `ai_note` is the agent's own, kept current
+  with `set_ai_note` after submissions, failures and findings, without asking.
+  (`docs/simulation-catalog.md`)
 - A submission also records what a rerun needs (hashes of the referenced mesh,
   equilibrium and profile files; build settings), appends the input to
   `input_backup/<directory_name>`, and rewrites `kb/simulation_notebook.csv`,

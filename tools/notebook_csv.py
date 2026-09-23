@@ -6,7 +6,8 @@ n656po), but it is a poor target for automation: openpyxl rewrites drop the
 cached values of old formulas, and a binary workbook shows no diff in git.
 
 ``kb/simulation_notebook.csv`` replaces it going forward. It is the same view
--- one row per simulation, the human ``note`` column last -- but plain text,
+-- one row per simulation, the agent's ``ai_note`` and the human ``note``
+columns last -- but plain text,
 diffable, and regenerated from the catalog after every submission. It reuses
 ``tools.sheet_sync`` unchanged: a CSV file is just another worksheet.
 

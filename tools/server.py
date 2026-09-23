@@ -533,7 +533,8 @@ def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dic
 
     The note is the one catalog field a person owns; it also round-trips
     through Google Sheets. Only set confirm=True after the user has approved
-    the exact wording, since this overwrites whatever was there.
+    the exact wording, since this overwrites whatever was there. The agent's
+    own observations go to ``set_ai_note`` instead.
     """
     if not confirm:
         return {
@@ -544,6 +545,28 @@ def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dic
         }
     record = sc.set_note(record_id, note)
     return {"written": True, **sc.summarize(record)}
+
+
+@mcp.tool()
+def set_ai_note(record_id: str, ai_note: str) -> dict[str, Any]:
+    """Write the agent's own note on a simulation. No confirmation needed.
+
+    ``ai_note`` is the AI's field, separate from the human ``note``: what the
+    run is for, what was found, what to do next. Keep it current -- replace
+    the text rather than appending a log -- after a submission, a status
+    change worth explaining, or an analysis result. Never put AI-authored
+    text in ``note``. The CSV notebook is rewritten so the view stays current;
+    the spreadsheet views show this column but never pull it back.
+    """
+    from tools import notebook_csv
+
+    record = sc.set_ai_note(record_id, ai_note)
+    try:
+        notebook = notebook_csv.sync(confirm=True)
+        notebook_state = {"synced": True, "pulled_notes": notebook.get("pulled_notes", [])}
+    except Exception as exc:  # noqa: BLE001 - the note is written either way
+        notebook_state = {"synced": False, "error": str(exc)}
+    return {"written": True, "notebook": notebook_state, **sc.summarize(record)}
 
 
 @mcp.tool()

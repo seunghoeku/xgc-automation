@@ -12,8 +12,8 @@ one YAML file:
     kb/simulations/<record_id>.yaml
 
 The record is the single source of truth. It accumulates the scheduler runs
-belonging to that simulation, the status of the work, the archive location, and
-the human's own note. ``tools/simulation_registry.py`` still allocates the
+belonging to that simulation, the status of the work, the archive location, the
+human's own ``note``, and the ``ai_note`` the agent keeps. ``tools/simulation_registry.py`` still allocates the
 number; ``tools/hpc_runner.py`` appends runs as they are submitted; the
 ``xgc-sim`` CLI reads and searches; ``tools/sheet_sync.py`` mirrors the catalog
 to Google Sheets. None of that requires an LLM.
@@ -25,7 +25,9 @@ Design constraints worth stating, because they shaped the schema:
 * Records are plain YAML, one file per catalog item, so git history shows what
   changed about an item rather than one perpetually-conflicting index.
 * Writes are atomic and field-scoped. Automated updates must never clobber the
-  human's ``note``.
+  human's ``note``. The agent writes its own findings to ``ai_note`` instead,
+  a separate field that is pushed to the spreadsheet views but never pulled
+  back, so neither author can overwrite the other.
 """
 
 from __future__ import annotations
@@ -118,6 +120,10 @@ _KNOWN_MACHINE_CODE_RE = r"(?:pe|po|au|do|fr|su|st|fl)"
 # Fields the human owns. Automated writers must leave them alone unless the
 # human explicitly asked for the change.
 HUMAN_FIELDS = ("note",)
+# The agent's own running note: what a run was for, what was found, what to do
+# next. Written without per-wording approval; the spreadsheet views show it
+# but never pull it back.
+AI_FIELDS = ("ai_note",)
 
 
 class SimulationCatalogError(RuntimeError):
@@ -411,6 +417,7 @@ def new_record(
         "input_sha256": None,
         "runs": [],
         "archive": {"system": None, "path": None, "archived_at": None},
+        "ai_note": "",
         "note": str(note or ""),
         "created_at": _now(),
         "updated_at": _now(),
@@ -570,6 +577,20 @@ def set_note(
         {"note": str(note)},
         catalog_dir=catalog_dir,
         allow_human_fields=True,
+    )
+
+
+def set_ai_note(
+    record_id: str,
+    ai_note: str,
+    *,
+    catalog_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Set the agent's note. Replaces the previous text; the human note is untouched."""
+    return update_record(
+        record_id,
+        {"ai_note": str(ai_note)},
+        catalog_dir=catalog_dir,
     )
 
 
@@ -875,6 +896,7 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
         "latest_state": latest.get("state"),
         "submitted_at": latest.get("submitted_at"),
         "archive": (record.get("archive") or {}).get("path"),
+        "ai_note": record.get("ai_note") or "",
         "note": record.get("note") or "",
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
@@ -895,6 +917,7 @@ def _haystack(record: dict[str, Any]) -> str:
         record.get("origin"),
         record.get("case"),
         record.get("note"),
+        record.get("ai_note"),
         record.get("description"),
         record.get("geometry"),
         record.get("code"),
@@ -967,8 +990,8 @@ def search(
 
     ``kind`` narrows to ``production`` physics runs or ``dev`` test runs.
 
-    ``query`` matches every text field, including the human note and the
-    imported notebook description. All terms must match, but separators do not
+    ``query`` matches every text field, including the human note, the AI note,
+    and the imported notebook description. All terms must match, but separators do not
     have to: "asdex i-mode" finds "ASDEX_I_mode_EM". That is what makes "find
     the ASDEX I-mode run from two years ago" a one-liner.
     """

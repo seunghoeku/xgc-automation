@@ -130,6 +130,17 @@ class CatalogTests(unittest.TestCase):
             sc.read_record("n645pe", catalog_dir=self.dir)["note"], "human wrote this"
         )
 
+    def test_ai_note_is_separate_from_the_human_note(self) -> None:
+        self._create()
+        sc.set_note("n645pe", "human wrote this", catalog_dir=self.dir)
+        sc.set_ai_note("n645pe", "agent: restart reached gstep 900", catalog_dir=self.dir)
+        record = sc.read_record("n645pe", catalog_dir=self.dir)
+        self.assertEqual(record["note"], "human wrote this")
+        self.assertEqual(record["ai_note"], "agent: restart reached gstep 900")
+        self.assertEqual(sc.summarize(record)["ai_note"], "agent: restart reached gstep 900")
+        hits = sc.search("gstep 900", catalog_dir=self.dir)
+        self.assertEqual([hit["record_id"] for hit in hits], ["n645pe"])
+
     def test_unknown_status_is_rejected(self) -> None:
         self._create()
         with self.assertRaises(sc.SimulationCatalogError):

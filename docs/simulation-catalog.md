@@ -16,7 +16,8 @@ The catalog keeps the number and automates the bookkeeping. Reserving a number
 opens a record; submitting a job links itself to it; checking on that job marks
 it completed or failed. The parts a machine can determine, a machine
 determines. What is left for a human is judgement: the note, and approving
-anything that writes.
+anything that writes. The agent keeps its own running summary in a separate
+field, `ai_note`, so its observations never overwrite the human's.
 
 Nothing here needs an LLM. The `xgc-sim` command is the whole system with a
 keyboard; the MCP tools call the same functions.
@@ -108,6 +109,7 @@ archive:
   system: hpss
   path: /home/s/sku/n645pe.tar
   archived_at: 2026-09-02T18:00:00+00:00
+ai_note: 1st job timed out at gstep 1200; restart submitted as 57785001
 note: growth rate 1.2e5 /s, matches the GENE benchmark
 created_at: ...
 updated_at: ...
@@ -196,6 +198,7 @@ Three rules keep automation from overwriting judgement:
 | Catching up | `xgc-sim refresh` | polls every in-flight run at once |
 | Output archived | `xgc-sim archive` | records the location, `archived` |
 | Anytime | `xgc-sim note` | the human note |
+| Anytime | `set_ai_note` / `xgc-sim ai-note` | the agent's note (no approval needed) |
 
 Submission also copies the exact input namelist into the provenance record and
 stores its SHA-256. XGC's namelist parser also extracts `sml_node_file`,
@@ -381,14 +384,28 @@ to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept inside
 the repository: one row per simulation, the same columns as the Google Sheet
 (`tools/sheet_sync.COLUMNS`, including `kind` to separate production runs from
-dev tests), the human `note` column last. It replaces the
+dev tests), the agent's `ai_note` and the human `note` columns last. It replaces the
 hand-kept `Other_data/simulation_note_XGC1.xlsx` going forward; that workbook
 stays as the historical notebook (rows through n656po) and is never written by
 automation, because openpyxl rewrites drop the cached values of its old
 formulas and a binary file shows no diff in git.
 
 The direction is the same as the sheet: machine facts are pushed from the
-catalog and overwrite the file; only `note` is pulled back.
+catalog and overwrite the file; only `note` is pulled back. `ai_note` is
+push-only like every machine column: an edit to it in the CSV or the sheet is
+overwritten, because it belongs to the agent.
+
+### Human note and AI note
+
+| Field | Author | Written with | Round trip |
+|---|---|---|---|
+| `note` | the researcher | `xgc-sim note`, `set_simulation_note` (approved wording), or the CSV/Sheet cell | pulled back from CSV and Sheet |
+| `ai_note` | the agent | `set_ai_note` MCP tool, `xgc-sim ai-note` | push-only |
+
+The agent writes `ai_note` without asking: what the run is for, what happened
+(failures, restarts, key results), and what is next. It replaces the text
+instead of appending a log, keeps to a few sentences, and never writes
+AI-authored text into `note`.
 
 ```bash
 xgc-sim sync-notebook            # diff only

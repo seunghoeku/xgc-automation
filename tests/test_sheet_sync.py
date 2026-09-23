@@ -160,6 +160,18 @@ class SyncTests(unittest.TestCase):
         pushed = {row[0]: row[note_index] for row in worksheet.values[1:]}
         self.assertEqual(pushed["n645pe"], "human wrote this")
 
+    def test_ai_note_is_pushed_but_never_pulled(self) -> None:
+        sc.set_ai_note("n645pe", "agent wrote this", catalog_dir=self.dir)
+        worksheet = sheet_from([{"record_id": "n645pe", "ai_note": "typed in browser"}])
+        result = sheet_sync.sync(worksheet=worksheet, catalog_dir=self.dir, confirm=True)
+        self.assertEqual(result["pulled_notes"], [])
+        ai_index = list(sheet_sync.COLUMNS).index("ai_note")
+        pushed = {row[0]: row[ai_index] for row in worksheet.values[1:]}
+        self.assertEqual(pushed["n645pe"], "agent wrote this")
+        record = sc.read_record("n645pe", catalog_dir=self.dir)
+        self.assertEqual(record["ai_note"], "agent wrote this")
+        self.assertEqual(record["note"], "")
+
     def test_machine_fields_edited_in_the_sheet_are_overwritten(self) -> None:
         # The sheet is a replica: a human retyping the status must not become
         # the truth, because nothing verified it.

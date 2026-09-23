@@ -12,9 +12,10 @@ So the direction is fixed:
     catalog                          <--pull--  Google Sheet     (note column only)
 
 Everything the automation can determine -- number, machine, status, case, job
-id, directory, archive location -- is pushed and overwrites whatever the sheet
-says. The single ``note`` column belongs to the human and is pulled back, so
-editing a comment in the browser still works the way it always did.
+id, directory, archive location, and the agent's ``ai_note`` -- is pushed and
+overwrites whatever the sheet says. The single ``note`` column belongs to the
+human and is pulled back, so editing a comment in the browser still works the
+way it always did.
 
 The sheet is a replica. Losing it costs nothing; the catalog rebuilds it. That
 is deliberate: it means a network failure or a revoked credential can never
@@ -48,6 +49,8 @@ from tools import simulation_catalog as catalog
 
 # Column order in the sheet. The first entry is the join key, and `note` is the
 # only column the human owns, so it sits at the end where it is easy to edit.
+# `ai_note` sits beside it for reading, but is push-only like every other
+# machine column.
 COLUMNS = (
     "record_id",
     "simulation_tag",
@@ -73,6 +76,7 @@ COLUMNS = (
     "submitted_at",
     "archive",
     "updated_at",
+    "ai_note",
     "note",
 )
 
