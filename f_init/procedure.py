@@ -701,6 +701,7 @@ def compare(
     vort_inset_ylim: list[float] | None = None,
     shear_inset_ylim: list[float] | None = None,
     highlight: list[str] | None = None,
+    inset_window: list[float] | None = None,
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -747,6 +748,8 @@ def compare(
     # argparse reads '-1.2' as a number here, since no option looks like one
     for name in highlight or []:
         argv += ["--highlight", name]
+    if inset_window:
+        argv += ["--inset-window", *(str(v) for v in inset_window)]
     if vort_inset_ylim:
         argv += ["--vort-inset-ylim", *(str(v) for v in vort_inset_ylim)]
     if shear_inset_ylim:

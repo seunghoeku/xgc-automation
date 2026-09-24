@@ -140,6 +140,9 @@ def main() -> int:
                              "figure; default all. Two panels are labelled (a)/(b) like the paper")
     parser.add_argument("--highlight", action="append", default=[],
                         help="run name (directory basename) drawn thicker and on top (repeatable)")
+    parser.add_argument("--inset-window", type=float, nargs=2, default=None, metavar=("T0", "T1"),
+                        help="inset time window [ms] of the combined figure; default the first "
+                             "0.2 ms after the f_init start")
     parser.add_argument("--vort-inset-ylim", type=float, nargs=2, default=None,
                         help="fixed y range of the vorticity-flux inset (default: the data)")
     parser.add_argument("--shear-inset-ylim", type=float, nargs=2, default=None,
@@ -263,7 +266,7 @@ def main() -> int:
         return inside
 
     def series_figure(key, ylabel, title, fname, xlim=None, loc="best", inset=None, ylim_top=None,
-                      legend_below=False):
+                      legend_below=False, inset_ylim=None, inset_room=False):
         """One trace per run; with ``xlim`` the y range follows the data inside
         the window and runs without samples there stay out of the legend.
         ``inset`` = (t0, t1, bounds) magnifies that window inside the axes;
@@ -301,12 +304,24 @@ def main() -> int:
         if inset is not None:
             t0, t1, bounds = inset
             from matplotlib.ticker import MaxNLocator
+            top = bounds[1] > 0.3
+            if inset_room:
+                # keep every curve clear of the inset (as in the combined figure)
+                xl = ax.get_xlim()
+                t_from = xl[0] + bounds[0] * (xl[1] - xl[0])
+                make_room(ax, key, t_from, bounds[1] - 0.04 if top else bounds[1] + bounds[3] + 0.04, top)
             axins = ax.inset_axes(bounds)
             draw_series(axins, key, xlim=(t0, t1), lw_=lw * 0.7)
+            if inset_ylim is not None:
+                axins.set_ylim(*inset_ylim)
             axins.xaxis.set_major_locator(MaxNLocator(4))
             axins.yaxis.set_major_locator(MaxNLocator(4))
             axins.tick_params(labelsize=int(font * 0.6))
-            axins.set_title(f"{t0:.2f} - {t1:.2f} ms", fontsize=int(font * 0.65))
+            if inset_room:
+                axins.text(0.99, 0.96 if top else 0.04, f"{t0:.2f} - {t1:.2f} ms", transform=axins.transAxes,
+                           ha="right", va="top" if top else "bottom", fontsize=int(font * 0.65))
+            else:
+                axins.set_title(f"{t0:.2f} - {t1:.2f} ms", fontsize=int(font * 0.65))
             ax.indicate_inset_zoom(axins, edgecolor="0.3")
         if legend_below:
             nrow = -(-len(ax.get_legend_handles_labels()[1]) // 2)
@@ -376,7 +391,8 @@ def main() -> int:
             axins.xaxis.set_major_locator(MaxNLocator(5))
             axins.yaxis.set_major_locator(MaxNLocator(4))
             axins.tick_params(labelsize=int(font * 0.7))
-            axins.text(0.99, 0.96 if inset_top else 0.04, f"{t0:.2f} - {t1:.2f} ms",
+            fmt = ".3f" if args.inset_window else ".2f"   # show a requested window as given
+            axins.text(0.99, 0.96 if inset_top else 0.04, f"{t0:{fmt}} - {t1:{fmt}} ms",
                        transform=axins.transAxes, ha="right", va="top" if inset_top else "bottom",
                        fontsize=int(font * 0.72))
             ax.indicate_inset_zoom(axins, edgecolor="0.3")
@@ -401,13 +417,16 @@ def main() -> int:
                   f"(a) Radial Vorticity Flux at {psi_txt}", "vorticity", loc="lower right",
                   inset=None if inset_win is None else (*inset_win, [0.30, 0.62, 0.67, 0.29]),
                   ylim_top=None if inset_win is None else 5.0)
-    series_figure("shear_khz", "ExB shear (kHz)", f"(b) ExB shear at {psi_txt}", "exb_shear",
-                  loc="upper right",
-                  inset=None if inset_win is None else (*inset_win, [0.40, 0.10, 0.57, 0.30]))
+    # standalone shear figure: legend below the axes, enlarged inset at the
+    # bottom right with the curves kept above it (same layout as panel (b)
+    # of the combined figure)
+    series_figure("shear_khz", "ExB shear (kHz)", f"ExB shear at {psi_txt}", "exb_shear",
+                  inset=None if inset_win is None else (*inset_win, [0.26, 0.09, 0.72, 0.46]),
+                  legend_below=True, inset_ylim=args.shear_inset_ylim, inset_room=True)
     series_figure("eflux_mw", "Energy Flux (MW)", f"Radial Energy Flux at {psi_txt}", "energy_flux")
 
     if inset_win is not None:
-        combined_figure(inset_win)
+        combined_figure(tuple(args.inset_window) if args.inset_window else inset_win)
 
     t_end = max(r["time_ms"][-1] for r in runs)
     win = (t_end - args.end_window, t_end)

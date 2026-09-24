@@ -272,7 +272,7 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
         shift_finit=args.shift_finit, paper=args.paper, twod_runs=args.twod_runs or None,
         twod_scale=args.twod_scale,
         vort_inset_ylim=args.vort_inset_ylim, shear_inset_ylim=args.shear_inset_ylim,
-        highlight=args.highlight or None,
+        highlight=args.highlight or None, inset_window=args.inset_window,
     )
     if args.json:
         _print(payload, True)
@@ -494,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--twod-scale", choices=["shared", "per-panel"], default="shared",
                    help="colour range of the (psi_N, t) panels; per-panel makes a quiet run readable")
     p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
+    p.add_argument("--inset-window", type=float, nargs=2, default=None, metavar=("T0", "T1"),
+                   help="inset window [ms] of the combined figure (with --shift-finit)")
     p.add_argument("--highlight", action="append", default=[],
                    help="run drawn thicker and on top, e.g. finit_sm_0.5_0.5 (repeatable)")
     p.add_argument("--vort-inset-ylim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
