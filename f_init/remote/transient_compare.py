@@ -44,12 +44,34 @@ def last_f0_step(directory: str) -> int | None:
     return max(steps) if steps else None
 
 
+def dedupe_oned(od) -> int:
+    """A restart re-runs the steps after its checkpoint and oneddiag keeps both
+    copies; keep the last copy of every step, in step order. Returns the
+    number of records dropped."""
+    import numpy as np
+    step = np.asarray(getattr(od, "step", getattr(od, "gstep", [])))
+    n = step.shape[0] if step.ndim else 0
+    if n == 0:
+        return 0
+    last = {}
+    for i, s in enumerate(step.ravel().tolist()):
+        last[s] = i
+    keep = np.array([last[s] for s in sorted(last)])
+    if keep.size == n and np.all(keep == np.arange(n)):
+        return 0
+    for name, value in list(vars(od).items()):
+        if isinstance(value, np.ndarray) and value.ndim >= 1 and value.shape[0] == n:
+            setattr(od, name, value[keep])
+    return int(n - keep.size)
+
+
 def load_run(xgc_reader, path: str):
     x = xgc_reader.xgc1(path=path)   # note: chdir into path
     x.load_unitsm()
     x.setup_mesh()
     x.setup_f0mesh()
     x.load_oned()
+    dedupe_oned(x.od)
     x.load_bfield()
     x.heat_flux_all()
     return x
@@ -116,6 +138,12 @@ def main() -> int:
     parser.add_argument("--twod-runs", nargs="*", default=None,
                         help="run names (directory basenames, 'maxwell' for stage A) for the 2-D "
                              "figure; default all. Two panels are labelled (a)/(b) like the paper")
+    parser.add_argument("--highlight", action="append", default=[],
+                        help="run name (directory basename) drawn thicker and on top (repeatable)")
+    parser.add_argument("--vort-inset-ylim", type=float, nargs=2, default=None,
+                        help="fixed y range of the vorticity-flux inset (default: the data)")
+    parser.add_argument("--shear-inset-ylim", type=float, nargs=2, default=None,
+                        help="fixed y range of the ExB-shear inset [kHz] (default: the data)")
     parser.add_argument("--out-prefix", required=True)
     args = parser.parse_args()
 
@@ -211,6 +239,11 @@ def main() -> int:
     for r in runs:
         r["style"] = parse_style(r["style"])
 
+    def line_kw(r, width):
+        """Line width and stacking: highlighted runs 1.4x wider, drawn last."""
+        hi = r["name"] in args.highlight
+        return {"linewidth": width * (1.4 if hi else 1.0), "zorder": 10 if hi else 2}
+
     def draw_series(ax, key, xlim=None, lw_=None):
         """Plot every run on ``ax``; returns the values inside ``xlim``."""
         inside = []
@@ -221,7 +254,7 @@ def main() -> int:
             if not np.any(m):
                 continue
             inside.extend(v[m].tolist())
-            ax.plot(t, v, label=r["label"], linewidth=lw_ or lw, linestyle=r["style"], color=r["color"])
+            ax.plot(t, v, label=r["label"], linestyle=r["style"], color=r["color"], **line_kw(r, lw_ or lw))
         if xlim:
             ax.set_xlim(*xlim)
             if inside:
@@ -229,7 +262,8 @@ def main() -> int:
                 ax.set_ylim(min(inside) - pad, max(inside) + pad)
         return inside
 
-    def series_figure(key, ylabel, title, fname, xlim=None, loc="best", inset=None, ylim_top=None):
+    def series_figure(key, ylabel, title, fname, xlim=None, loc="best", inset=None, ylim_top=None,
+                      legend_below=False):
         """One trace per run; with ``xlim`` the y range follows the data inside
         the window and runs without samples there stay out of the legend.
         ``inset`` = (t0, t1, bounds) magnifies that window inside the axes;
@@ -243,7 +277,7 @@ def main() -> int:
             if not np.any(m):
                 continue
             inside.extend(v[m].tolist())
-            ax.plot(t, v, label=r["label"], linewidth=lw, linestyle=r["style"], color=r["color"])
+            ax.plot(t, v, label=r["label"], linestyle=r["style"], color=r["color"], **line_kw(r, lw))
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -255,7 +289,15 @@ def main() -> int:
         if ylim_top is not None:
             lo, hi = ax.get_ylim()
             ax.set_ylim(lo, max(hi, ylim_top))
-        ax.legend(loc=loc, fontsize=legend_fs)
+        if legend_below:
+            # outside the axes, two columns under the x label
+            handles, labels_ = ax.get_legend_handles_labels()
+            fig.legend(handles, labels_, loc="lower center", ncol=2, fontsize=int(legend_fs * 0.9),
+                       frameon=False, bbox_to_anchor=(0.5, 0.0))
+            nrow = -(-len(labels_) // 2)
+            fig.set_size_inches(figsize[0], figsize[1] * (1 + 0.05 * nrow))
+        else:
+            ax.legend(loc=loc, fontsize=legend_fs)
         if inset is not None:
             t0, t1, bounds = inset
             from matplotlib.ticker import MaxNLocator
@@ -266,11 +308,88 @@ def main() -> int:
             axins.tick_params(labelsize=int(font * 0.6))
             axins.set_title(f"{t0:.2f} - {t1:.2f} ms", fontsize=int(font * 0.65))
             ax.indicate_inset_zoom(axins, edgecolor="0.3")
-        fig.tight_layout()
+        if legend_below:
+            nrow = -(-len(ax.get_legend_handles_labels()[1]) // 2)
+            fig.tight_layout(rect=(0, 0.05 * nrow / (1 + 0.05 * nrow), 1, 1))
+        else:
+            fig.tight_layout()
         path = f"{out_prefix}_{fname}.png"
         fig.savefig(path, dpi=dpi)
         plt.close(fig)
         outputs[fname] = path
+
+    def make_room(ax, key, t_from, frac, top):
+        """Stretch the y range so every run stays clear of an inset that
+        covers the axes fraction above ``frac`` (``top``) or below it, for
+        t >= ``t_from``."""
+        lo, hi = ax.get_ylim()
+        vals = []
+        for r in runs:
+            t = np.asarray(r["time_ms"])
+            v = np.asarray(r[key])
+            m = t >= t_from
+            vals.extend(v[m].tolist())
+        if not vals:
+            return
+        if top:
+            vmax = max(vals)
+            need = lo + (vmax - lo) / frac
+            ax.set_ylim(lo, max(hi, need))
+        else:
+            vmin = min(vals)
+            need = hi - (hi - vmin) / (1.0 - frac)
+            ax.set_ylim(min(lo, need), hi)
+
+    def combined_figure(win):
+        """Paper Fig. GAM as one figure: (a) vorticity flux, (b) ExB shear,
+        side by side, one legend below both panels, enlarged insets over the
+        first 0.2 ms after the f_init start."""
+        from matplotlib.ticker import MaxNLocator
+        t0, t1 = win
+        panels = [
+            ("vort_flux", "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)",
+             f"(a) Radial Vorticity Flux at {psi_txt}", True, args.vort_inset_ylim),
+            ("shear_khz", "ExB shear (kHz)", f"(b) ExB shear at {psi_txt}", False, args.shear_inset_ylim),
+        ]
+        size = (26, 11.5) if args.paper else (17, 7)
+        fig, axes = plt.subplots(1, 2, figsize=size)
+        for ax, (key, ylabel, title, inset_top, inset_ylim) in zip(axes, panels):
+            draw_series(ax, key)
+            ax.set_xlabel("Time (ms)")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            t_all = [r["time_ms"] for r in runs]
+            ax.set_xlim(0.0, max(t[-1] for t in t_all))
+            # inset spans the axes from x-fraction 0.22 to the right edge and
+            # half the height; the data after its left edge is kept outside it
+            x0, w, h = 0.22, 0.76, 0.46
+            y0 = 0.51 if inset_top else 0.09
+            xl = ax.get_xlim()
+            t_from = xl[0] + x0 * (xl[1] - xl[0])
+            make_room(ax, key, t_from, y0 - 0.04 if inset_top else y0 + h + 0.04, inset_top)
+            axins = ax.inset_axes([x0, y0, w, h])
+            draw_series(axins, key, xlim=(t0, t1), lw_=lw * 0.75)
+            if inset_ylim is not None:
+                # a fixed range keeps the late small oscillations readable
+                # when one run's first swing is much larger (clipped)
+                axins.set_ylim(*inset_ylim)
+            axins.xaxis.set_major_locator(MaxNLocator(5))
+            axins.yaxis.set_major_locator(MaxNLocator(4))
+            axins.tick_params(labelsize=int(font * 0.7))
+            axins.text(0.99, 0.96 if inset_top else 0.04, f"{t0:.2f} - {t1:.2f} ms",
+                       transform=axins.transAxes, ha="right", va="top" if inset_top else "bottom",
+                       fontsize=int(font * 0.72))
+            ax.indicate_inset_zoom(axins, edgecolor="0.3")
+        handles, labels_ = axes[0].get_legend_handles_labels()
+        ncol = 4 if len(labels_) > 4 else len(labels_)
+        fig.legend(handles, labels_, loc="lower center", ncol=ncol, fontsize=legend_fs,
+                   frameon=False, bbox_to_anchor=(0.5, 0.0))
+        nrow = -(-len(labels_) // ncol)
+        fig.tight_layout(rect=(0, 0.03 + 0.05 * nrow, 1, 1))
+        path = f"{out_prefix}_gam_combined.png"
+        fig.savefig(path, dpi=dpi)
+        plt.close(fig)
+        outputs["gam_combined"] = path
 
     psi_txt = f"$\\psi_N={psi_at:3.2f}$"
     # With the f_init runs shifted, the referee's inset (0.3-0.5 ms) sits over
@@ -287,10 +406,13 @@ def main() -> int:
                   inset=None if inset_win is None else (*inset_win, [0.40, 0.10, 0.57, 0.30]))
     series_figure("eflux_mw", "Energy Flux (MW)", f"Radial Energy Flux at {psi_txt}", "energy_flux")
 
+    if inset_win is not None:
+        combined_figure(inset_win)
+
     t_end = max(r["time_ms"][-1] for r in runs)
     win = (t_end - args.end_window, t_end)
     series_figure("shear_khz", "ExB shear (kHz)", f"ExB shear at {psi_txt}, t = {win[0]:.2f} - {win[1]:.2f} ms",
-                  "exb_shear_end", xlim=win)
+                  "exb_shear_end", xlim=win, legend_below=True)
 
     # zoom of the transient right after the f_init start
     t_first = plot_offset * s2ms
@@ -356,7 +478,7 @@ def main() -> int:
         for i, r in enumerate(runs):
             if r.get("noise_time_ms"):
                 ax.plot(r["noise_time_ms"], np.asarray(r["noise_rms"]) * 1e-12, label=r["label"],
-                        linewidth=lw, linestyle=r["style"], color=r["color"])
+                        linestyle=r["style"], color=r["color"], **line_kw(r, lw))
         if not args.shift_finit:
             ax.set_xlim(0.0, min(r["time_ms"][-1] for r in runs))
         ax.set_xlabel("Time (ms)")

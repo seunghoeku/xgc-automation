@@ -11,6 +11,7 @@
     xgc-finit CASE jobs
     xgc-finit CASE adjust DIR [--factor F] [--check-only] [--ref-step N] [--cmp-step N] [--overwrite]
     xgc-finit CASE check DIR
+    xgc-finit CASE profile-compare [DIR ...] [--ref DIR] [--f0-step N]
     xgc-finit CASE compare [DIR ...] [--psi P] [--shift-finit] [--paper] [--no-particles]
     xgc-finit CASE extend-maxwell [--confirm]
     xgc-finit CASE distribution [--psi P] [--node N] [--paper]
@@ -270,6 +271,8 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
         f0_step=args.f0_step, particles=not args.no_particles, end_window_ms=args.end_window,
         shift_finit=args.shift_finit, paper=args.paper, twod_runs=args.twod_runs or None,
         twod_scale=args.twod_scale,
+        vort_inset_ylim=args.vort_inset_ylim, shear_inset_ylim=args.shear_inset_ylim,
+        highlight=args.highlight or None,
     )
     if args.json:
         _print(payload, True)
@@ -285,6 +288,30 @@ def cmd_compare(case: cfg.Case, args: argparse.Namespace) -> int:
         print(f"{row['name']:<22} {row['label']:<26} {f(row['vort_flux_peak']):>11} "
               f"{f(row['shear_peak_khz']):>10} {f(row['eflux_peak_mw']):>10} "
               f"{f(row['shear_end_std_khz']):>13} {f(row['noise_rms_last']):>10}")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
+    return 0
+
+
+def cmd_profile_compare(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.profile_compare(case, args.dirs or None, ref=args.ref, f0_step=args.f0_step)
+    if args.json:
+        _print(payload, True)
+        return 0
+    print(f"profiles vs stage A at the f0 step; last common gstep {payload['common_last_gstep']}")
+    print(f"{'run':<22}{'dn/n rms first/last [%]':>26}{'dT/T rms first/last [%]':>26}"
+          f"{'vs ref dn/dT [%]':>20}{'rms(w0w1)/<w0> first/last':>28}{'w0 cv':>8}")
+    for name, s in payload["summary"].items():
+        w1 = s.get("w_rms_over_w0_first_last")
+        w1_txt = f"{w1[0]:.3g}/{w1[1]:.3g}" if w1 else "-"
+        cv = f"{s['w0_cv']:.3g}" if s.get("w0_cv") is not None else "-"
+        if "first" not in s:
+            print(f"{name:<22}{'-':>26}{'-':>26}{'-':>20}{w1_txt:>28}{cv:>8}")
+            continue
+        dn = f"{100 * s['first']['dn_over_n_target_rms']:.3g}/{100 * s['last']['dn_over_n_target_rms']:.3g}"
+        dT = f"{100 * s['first']['dT_over_T_target_rms']:.3g}/{100 * s['last']['dT_over_T_target_rms']:.3g}"
+        vr = f"{100 * s['last_vs_ref']['dn_over_n_rms']:.3g}/{100 * s['last_vs_ref']['dT_over_T_rms']:.3g}"
+        print(f"{name:<22}{dn:>26}{dT:>26}{vr:>20}{w1_txt:>28}{cv:>8}")
     for key, path in payload.get("local", {}).items():
         print(f"  {key}: {path}")
     return 0
@@ -389,6 +416,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="plain psi_c without the orbit-width correction")
     p.add_argument("--overwrite", action="store_true")
 
+    p = sub.add_parser("profile-compare",
+                       help="profiles vs stage A and marker weights of the finit_* runs (login node)")
+    p.add_argument("dirs", nargs="*", help="run directories; default every finit_* one")
+    p.add_argument("--ref", default=None, help="reference run for the run-to-run differences")
+    p.add_argument("--f0-step", type=int, default=None, help="default f0_step of the case")
+
     p = sub.add_parser("convert", help="case 2: interpolate an f_init onto the turbulence mesh (login node)")
     p.add_argument("--finit", required=True, help="f_init file name in the stage A directory, usually an adjusted one")
     p.add_argument("--target-dir", default=None, help="directory with xgc.mesh.bp of the turbulence mesh; default turb_mesh_dir of the case")
@@ -461,6 +494,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--twod-scale", choices=["shared", "per-panel"], default="shared",
                    help="colour range of the (psi_N, t) panels; per-panel makes a quiet run readable")
     p.add_argument("--no-particles", action="store_true", help="skip the particle-noise scan")
+    p.add_argument("--highlight", action="append", default=[],
+                   help="run drawn thicker and on top, e.g. finit_sm_0.5_0.5 (repeatable)")
+    p.add_argument("--vort-inset-ylim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
+                   help="fixed y range of the vorticity-flux inset in the combined figure")
+    p.add_argument("--shear-inset-ylim", type=float, nargs=2, default=None, metavar=("LO", "HI"),
+                   help="fixed y range [kHz] of the ExB-shear inset in the combined figure")
 
     p = sub.add_parser("extend-maxwell", help="resubmit stage A so it continues from its last checkpoint")
     p.add_argument("--confirm", action="store_true")
@@ -493,6 +532,7 @@ def main(argv: list[str] | None = None) -> int:
             "status": cmd_status,
             "make-finit": cmd_make_finit,
             "make-canonical": cmd_make_canonical,
+            "profile-compare": cmd_profile_compare,
             "convert": cmd_convert,
             "stage-dt0": cmd_stage_dt0,
             "stage-run": lambda c, a: cmd_stage_dt0(c, a, run=True),

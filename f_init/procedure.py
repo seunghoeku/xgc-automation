@@ -698,6 +698,9 @@ def compare(
     paper: bool = False,
     twod_runs: list[str] | None = None,
     twod_scale: str = "shared",
+    vort_inset_ylim: list[float] | None = None,
+    shear_inset_ylim: list[float] | None = None,
+    highlight: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -741,6 +744,13 @@ def compare(
         argv += ["--twod-runs", *twod_runs]
     if twod_scale != "shared":
         argv += ["--twod-scale", twod_scale]
+    # argparse reads '-1.2' as a number here, since no option looks like one
+    for name in highlight or []:
+        argv += ["--highlight", name]
+    if vort_inset_ylim:
+        argv += ["--vort-inset-ylim", *(str(v) for v in vort_inset_ylim)]
+    if shear_inset_ylim:
+        argv += ["--shear-inset-ylim", *(str(v) for v in shear_inset_ylim)]
 
     payload = _run_json(target, argv, timeout=3600)
 
@@ -763,6 +773,57 @@ def compare(
     return payload
 
 
+def profile_compare(
+    case: Case,
+    dirs: list[str] | None = None,
+    *,
+    ref: str | None = None,
+    f0_step: int | None = None,
+) -> dict[str, Any]:
+    """Run ``remote/profile_weight_compare.py``: flux-surface profiles against
+    stage A at the f0 extraction step, and marker weights (w1, w0) over time,
+    for the production runs (default: every ``finit_*`` directory). Pulls the
+    JSON and PNGs into the case's artifacts directory."""
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    prefix = str((case.run or {}).get("dir_prefix", "finit_"))
+    if not dirs:
+        inv = inventory(case)
+        dirs = sorted(
+            (d["name"] for d in inv["dirs"] if d["name"].startswith(prefix) and d["has_input"]),
+            key=_smooth_sort_key,
+        )
+    if not dirs:
+        raise ProcedureError(f"no {prefix}* directories under {case.root}; run stage-run first")
+    f0_step = case.f0_step if f0_step is None else f0_step
+    if f0_step is None:
+        raise ProcedureError("profile-compare needs --f0-step or f0_step in the case file")
+    ref = ref or dirs[0]
+    if ref not in dirs:
+        raise ProcedureError(f"--ref {ref!r} is not among the compared directories {dirs}")
+
+    out_dir = f"{case.root}/.xgc-finit/compare"
+    ssh.mkdir_p(target, out_dir)
+    remote_prefix = f"{out_dir}/profile_weight_ref_{ref}"
+    script = _push_helper(case, target, "profile_weight_compare.py")
+    species, _tag = case.species_for(None)
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--f0-step", str(f0_step), "--ref", ref,
+            "--mass-au", str(species["mass_au"]), "--out-prefix", remote_prefix]
+    for d in dirs:
+        argv += ["--dir", f"{d}={case.subdir(d)}"]
+
+    payload = _run_json(target, argv, timeout=3600)
+    local = _pull_outputs(case, target, payload)
+    payload["local"] = local
+    cfg.append_log(
+        case, "profile-compare", dirs=dirs, ref=ref, f0_step=f0_step,
+        common_last_gstep=payload.get("common_last_gstep"),
+        summary=payload.get("summary"), local=local,
+    )
+    return payload
+
+
 def _smooth_sort_key(name: str) -> tuple[float, float]:
     nums = re.findall(r"[0-9.]+", name)
     try:
@@ -773,12 +834,13 @@ def _smooth_sort_key(name: str) -> tuple[float, float]:
 
 # Fixed colours so a curve keeps its identity when runs are added to the scan:
 # Maxwellian is always C0 (blue); the smoothing settings below keep the
-# matplotlib cycle they were first drawn with (0.5 rad = C3, red).
+# matplotlib cycle they were first drawn with, except that the 0.5 rad
+# reference is black and the unsmoothed run took its red (2026-09-23).
 _APPEARANCE: dict[tuple[float, float], tuple[str, str]] = {
-    (0.0, 0.0): ("black", "-."),
+    (0.0, 0.0): ("C3", "-."),     # was black; black now marks the 0.5 rad reference
     (0.0, 0.5): ("C1", "-."),
     (0.3, 0.5): ("C2", "--"),
-    (0.5, 0.5): ("C3", "-"),
+    (0.5, 0.5): ("black", "-"),
     (0.8, 0.5): ("C4", ":"),
     (1.0, 0.5): ("C5", "(0, (3, 1, 1, 1, 1, 1))"),
 }
@@ -786,6 +848,8 @@ _FALLBACK_COLOURS = ["C6", "C7", "C8", "C9"]
 
 
 def _line_appearance(dir_name: str, prefix: str) -> tuple[str, str]:
+    if "canonical" in dir_name:
+        return "C6", "(0, (6, 2))"
     key = _smooth_sort_key(dir_name)
     if key in _APPEARANCE:
         return _APPEARANCE[key]
@@ -798,6 +862,8 @@ def _line_appearance(dir_name: str, prefix: str) -> tuple[str, str]:
 def _default_label(dir_name: str, prefix: str) -> str:
     """``finit_sm_0.5_0.5 -> 'pol. smooth 0.5 rad'``; ``finit_sm_0_0.5 -> 'v smooth, no pol. smooth'``."""
     tag = dir_name[len(prefix):] if dir_name.startswith(prefix) else dir_name
+    if tag.startswith("canonical"):
+        return "Canonical Maxwellian"
     match = re.match(r"^sm_([0-9.]+)_([0-9.]+)$", tag)
     if not match:
         return dir_name
