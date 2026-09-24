@@ -14,6 +14,9 @@ functions; this is the same system with a keyboard instead of a model.
     xgc-sim sync-sheet --confirm
     xgc-sim sync-notebook --confirm
     xgc-sim adopt-remote polaris /grand/.../n648po_dAdt_ecbc --confirm
+    xgc-sim campaign n645pe               # plan the HPC-Campaign archive
+    xgc-sim campaign n645pe --confirm     # start it on the login node
+    xgc-sim campaign n645pe --status      # collect the result
 
 Every subcommand prints a table by default and JSON with ``--json``, so it is
 equally usable by a person and by a script.
@@ -27,6 +30,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from tools import campaign as campaign_tool
 from tools import legacy_import
 from tools import refresh as refresh_tool
 from tools import run_adoption
@@ -201,10 +205,27 @@ def _print_refresh_plan(payload: dict[str, Any]) -> None:
     print("\nnothing was contacted or written")
 
 
+def _campaign_line(item: dict[str, Any]) -> str:
+    state = item.get("state") or ("error" if item.get("error") else "unknown")
+    if item.get("stale"):
+        state += ", stale"
+    detail = item.get("reason") or item.get("error") or item.get("archive") or ""
+    return f"    {item.get('record_id', ''):<34} campaign {state}  {detail}".rstrip()
+
+
+def _print_campaigns(payload: dict[str, Any]) -> None:
+    campaigns = payload.get("campaigns") or []
+    if campaigns:
+        print("\ncampaign archives:")
+        for item in campaigns:
+            print(_campaign_line(item))
+
+
 def _print_refresh(payload: dict[str, Any]) -> None:
     counts = payload["counts"]
     if not counts["polled"]:
         print("nothing in flight; the catalog is already up to date")
+        _print_campaigns(payload)
         return
 
     print(f"polled {counts['polled']} run(s) across {counts['simulations']} simulation(s)")
@@ -226,6 +247,7 @@ def _print_refresh(payload: dict[str, Any]) -> None:
         print(f"\ncould not reach {len(payload['errors'])} run(s):")
         for item in payload["errors"]:
             print(f"    {item['record_id']} job {item.get('job_id')}: {item['error']}")
+    _print_campaigns(payload)
 
 
 def _print_sync(payload: dict[str, Any]) -> None:
@@ -432,6 +454,34 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
     return 1 if payload["errors"] else 0
 
 
+def _cmd_campaign(args: argparse.Namespace) -> int:
+    try:
+        if args.status:
+            payload = campaign_tool.status(args.record_id, catalog_dir=_catalog_dir(args))
+        else:
+            payload = campaign_tool.build(
+                args.record_id,
+                confirm=args.confirm,
+                replace=args.replace,
+                catalog_dir=_catalog_dir(args),
+            )
+    except campaign_tool.CampaignError as exc:
+        print(f"xgc-sim: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _print_json(payload)
+        return 0
+    if payload.get("confirm_required"):
+        print(f"{payload['record_id']}: would package run {payload['for_run_id']} on {payload['machine']}")
+        print(f"    run dir: {payload['run_dir']}")
+        print(f"    archive: {payload['archive']}{'  (REPLACES the existing file)' if payload['replace'] else ''}")
+        print(f"    command: {payload['command']}")
+        print("\nnothing was started; rerun with --confirm")
+        return 0
+    print(_campaign_line(payload).strip())
+    return 0 if payload.get("state") != "failed" else 1
+
+
 def _cmd_sync_sheet(args: argparse.Namespace) -> int:
     # Imported lazily so the rest of the CLI works without the optional
     # Google dependencies installed.
@@ -632,6 +682,20 @@ def _parser() -> argparse.ArgumentParser:
         help="list what would be polled without contacting anything",
     )
     refresh_parser.set_defaults(func=_cmd_refresh)
+
+    campaign_parser = add(
+        "campaign",
+        help="build or check a simulation's HPC-Campaign (.aca) archive",
+    )
+    campaign_parser.add_argument("record_id")
+    campaign_parser.add_argument(
+        "--status", action="store_true", help="report the state; collect a finished build"
+    )
+    campaign_parser.add_argument(
+        "--replace", action="store_true", help="overwrite an existing archive (with --confirm)"
+    )
+    campaign_parser.add_argument("--confirm", action="store_true")
+    campaign_parser.set_defaults(func=_cmd_campaign)
 
     sheet_parser = add(
         "sync-sheet", help="mirror the catalog to Google Sheets (notes pull back)"

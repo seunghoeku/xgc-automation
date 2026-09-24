@@ -39,6 +39,14 @@ perlmutter:
     python: /path/to/your/python3    # must be able to import xgc_analysis
     pythonpath: /path/to/XGC_reader  # parent of the xgc_analysis package
     # env_script: /path/sourced/before/running (optional)
+  # HPC-Campaign archive when a simulation completes (docs/campaign.md).
+  # python/pythonpath/env_script default to `analysis`; the interpreter must
+  # import both xgc_analysis and hpc_campaign.
+  # campaign:
+  #   auto: true                   # off unless set
+  #   pythonpath: /path/to/XGC-Analysis
+  #   hostname: NERSC              # optional HPC-Campaign host alias
+  #   auto_kinds: [production]     # default; add dev to package test runs
 
 polaris:
   user: alice

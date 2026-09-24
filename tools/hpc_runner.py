@@ -35,6 +35,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools import dryrun
 from tools import build_banner
+from tools import campaign
 from tools import machines as m
 from tools import namelist as nlm
 from tools import notebook_csv
@@ -1538,6 +1539,10 @@ def _record_observed_state(
         return None
     simulation_id, run_id = found
     try:
+        before = catalog.read_record(simulation_id).get("status")
+    except catalog.SimulationCatalogError:
+        before = None
+    try:
         record = catalog.update_run_state(
             simulation_id,
             run_id,
@@ -1556,6 +1561,11 @@ def _record_observed_state(
     build = maybe_capture_build(machine, simulation_id, run_id, out["state"])
     if build is not None:
         result["build_capture"] = build
+    if record.get("status") == "completed" and before != "completed":
+        # Opt-in per machine (campaign.auto); see tools/campaign.py.
+        packaged = campaign.on_completion(simulation_id)
+        if packaged is not None:
+            result["campaign"] = packaged
     return result
 
 

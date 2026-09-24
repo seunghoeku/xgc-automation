@@ -154,6 +154,7 @@ submission. Full rules and handoffs: `docs/repo-roles.md`.
 | Aurora day to day: submit, DAOS container, reading results | `docs/aurora-operations.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
+| HPC-Campaign `.aca` archive built when a simulation completes | `docs/campaign.md` |
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |
 | Standalone SwiftBar monitor distribution | [hpc-queue-monitor](https://github.com/seunghoeku/hpc-queue-monitor); checkout integration in `docs/queue-watch.md` |
 | Non-Maxwellian `f_init` procedure (optional; load only when asked) | `f_init/README.md`, skill `f-init` |

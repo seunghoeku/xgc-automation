@@ -481,7 +481,10 @@ def refresh_simulations(
     that was submitted and not polled since still reads as ``submitted``.
 
     This only writes down what the scheduler already decided, so it needs no
-    confirmation. It polls and never submits, cancels, or touches remote files.
+    confirmation. It polls and never submits or cancels. On machines with
+    ``campaign.auto: true`` a simulation that turns completed gets its
+    campaign archive started on the login node (reported under
+    ``campaigns``); nothing existing is overwritten.
     Pass dry_run=True to see what would be polled without contacting anything.
 
     A run that hit the wall clock reports ``timeout`` and leaves the simulation
@@ -490,6 +493,42 @@ def refresh_simulations(
     if dry_run:
         return refresh_tool.plan_refresh(machine=machine, record_id=record_id)
     return refresh_tool.refresh(machine=machine, record_id=record_id)
+
+
+@mcp.tool()
+def build_campaign(
+    record_id: str,
+    confirm: bool = False,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Package a completed simulation as an HPC-Campaign ``.aca`` archive.
+
+    Runs XGC-Analysis's packager detached on the machine's login node and
+    writes ``<run_dir>/<record_id>.aca``; the result is collected later by
+    ``campaign_status`` or ``refresh_simulations``. Machines with
+    ``campaign.auto: true`` do this by themselves when a production
+    simulation completes; this tool is for other runs, retries, and
+    rebuilds. With confirm=False it only returns the plan and the command.
+    replace=True overwrites an existing archive: pass it only after the user
+    agreed to that.
+    """
+    from tools import campaign
+
+    try:
+        return campaign.build(record_id, confirm=confirm, replace=replace)
+    except campaign.CampaignError as exc:
+        return {"started": False, "error": str(exc)}
+
+
+@mcp.tool()
+def campaign_status(record_id: str) -> dict[str, Any]:
+    """Report a simulation's campaign archive state; collects a finished build."""
+    from tools import campaign
+
+    try:
+        return campaign.status(record_id)
+    except campaign.CampaignError as exc:
+        return {"error": str(exc)}
 
 
 @mcp.tool()

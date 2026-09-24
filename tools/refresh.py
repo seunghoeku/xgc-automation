@@ -11,9 +11,11 @@ in flight, asks each machine about the runs involved, and writes the answers
 back. One command, no arguments, safe to repeat -- the kind of thing that can
 live in a shell alias or a cron entry.
 
-It is read-only against the machines: it polls the scheduler, reads a bounded
-slice of a run's stdout once to capture the XGC build banner, and never
-submits, cancels, or modifies remote files.
+Against the machines it polls the scheduler, reads a bounded slice of a
+run's stdout once to capture the XGC build banner, and never submits or
+cancels. The one remote write is opt-in per machine (``campaign.auto``): a
+simulation that turns ``completed`` gets its HPC-Campaign archive started on
+the login node, and later refreshes collect the result (``tools/campaign.py``).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from tools import campaign
 from tools import hpc_runner
 from tools import machines as machine_config
 from tools import scheduler as sched
@@ -189,6 +192,7 @@ def refresh(
     machine: str | None = None,
     record_id: str | None = None,
     status_fn: Callable[[str, str], dict[str, Any]] | None = None,
+    campaign_hooks: bool | None = None,
 ) -> dict[str, Any]:
     """Poll every in-flight run and write the scheduler's answers back.
 
@@ -199,7 +203,14 @@ def refresh(
 
     A machine that is unreachable is reported per-run and does not stop the
     rest, so one expired credential cannot block the whole catalog.
+
+    ``campaign_hooks`` (default: on unless ``status_fn`` is given, i.e. off
+    for tests) starts campaign archives for newly completed simulations and
+    follows up on earlier builds. Their results go to ``campaigns`` and never
+    count as refresh errors.
     """
+    if campaign_hooks is None:
+        campaign_hooks = status_fn is None
     plan = plan_refresh(catalog_dir=catalog_dir, machine=machine, record_id=record_id)
     query = status_fn or hpc_runner.status
 
@@ -336,11 +347,30 @@ def refresh(
             updated.append(entry)
             before = record.get("status")
 
+    campaigns: list[dict[str, Any]] = []
+    if campaign_hooks:
+        started: set[str] = set()
+        for item in updated:
+            if item["status_after"] == "completed" and item["status_before"] != "completed":
+                outcome = campaign.on_completion(item["record_id"], catalog_dir=catalog_dir)
+                if outcome is not None:
+                    campaigns.append(outcome)
+                    started.add(item["record_id"])
+        campaigns.extend(
+            campaign.follow_up(
+                catalog_dir=catalog_dir,
+                machine=machine,
+                record_id=record_id,
+                skip=started,
+            )
+        )
+
     return {
         "polled": plan["counts"]["runs"],
         "updated": updated,
         "unchanged": unchanged,
         "errors": errors,
+        "campaigns": campaigns,
         "counts": {
             "simulations": plan["counts"]["simulations"],
             "polled": plan["counts"]["runs"],

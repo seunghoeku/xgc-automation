@@ -756,6 +756,10 @@ class CatalogLinkTests(unittest.TestCase):
         self.catalog_patch.start()
         self.runs_patch = patch.object(hr, "RUNS_DIR", self.runs)
         self.runs_patch.start()
+        # Completion would start a campaign build over SSH (tools/campaign.py).
+        self.campaign_patch = patch.object(hr.campaign, "on_completion", return_value=None)
+        self.campaign_patch.start()
+        self.addCleanup(self.campaign_patch.stop)
         hr.catalog.create_record(
             "n645pe", machines=["perlmutter"], short_name="tcv delta f"
         )
