@@ -50,50 +50,125 @@ echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_r
 {% if xgc_exe %}
 {% if gpus_per_node and spare_nodes %}
 # GPU gate: {{ nodes }} nodes allocated = {{ compute_nodes }} compute + {{ spare_nodes }} spare.
-# Polaris hands out nodes whose GPUs are dead or invisible (n661po job 7628452,
-# n655po job 7602216: x3003c0s25b0n0), so probe every node first and give the
-# launcher a hostfile of the first {{ compute_nodes }} nodes that expose all
-# {{ gpus_per_node }} GPUs. An early crash drops the nodes that reported dead
-# ranks and relaunches once on the remaining healthy ones.
+# Polaris hands out nodes whose GPUs are dead, invisible, or listed but unable
+# to open a CUDA context (n661po job 7628452 on x3003c0s25b0n0: cudaErrorNoDevice;
+# n674po job 7651746 on x3208c0s37b1n0 and x3112c0s7b1n0: cudaErrorDevicesUnavailable
+# although `nvidia-smi -L` listed 4 GPUs). So: drop the known-bad nodes from
+# kb/bad_nodes.yaml, probe every other node (nvidia-smi compute mode and
+# resident compute processes, then a CUDA primary-context open per GPU) and
+# give the launcher a hostfile of the first {{ compute_nodes }} nodes whose
+# {{ gpus_per_node }} GPUs all pass. While XGC keeps dying early, drop the nodes
+# that reported dead ranks, probe the rest again and relaunch, as long as
+# {{ compute_nodes }} healthy nodes remain.
 ERR_LOG="{{ run_dir }}/pbs-${PBS_JOBID}.err"
 GOOD_HOSTS="{{ run_dir }}/gpu_gate.${PBS_JOBID}.good_hosts"
 BAD_HOSTS="{{ run_dir }}/gpu_gate.${PBS_JOBID}.bad_hosts"
 PROBE_OUT="{{ run_dir }}/gpu_gate.${PBS_JOBID}.probe"
+CRASHED="{{ run_dir }}/gpu_gate.${PBS_JOBID}.crashed_hosts"
+REMAINING="{{ run_dir }}/gpu_gate.${PBS_JOBID}.remaining_hosts"
 EARLY_FAILURE_SECONDS=300
+KNOWN_BAD_HOSTS="{{ known_bad_hosts | join(' ') }}"
+
+# Per-node probe, passed to python3 as an argument so the simulation directory
+# needs no helper file. Prints "<host> <usable> <listed> <problems>".
+# A GPU is usable when nvidia-smi lists it, its compute mode is not Prohibited,
+# no compute process already holds it, and its primary context (what
+# cudaSetDevice in Kokkos init creates) opens.
+read -r -d '' GPU_PROBE_PY <<'PYEOF' || true
+import ctypes, os, socket, subprocess
+os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # CUDA ordinal == nvidia-smi index
+def smi(query):
+    try:
+        # Python 3.6 spelling (SLES 15 system python3): no capture_output/text.
+        out = subprocess.run(["nvidia-smi", query, "--format=csv,noheader"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             universal_newlines=True, timeout=60).stdout
+    except Exception:
+        return []
+    return [[f.strip() for f in line.split(",")] for line in out.splitlines()]
+gpus = [r for r in smi("--query-gpu=index,uuid,compute_mode,pstate") if len(r) == 4 and r[0].isdigit()]
+busy = {r[0] for r in smi("--query-compute-apps=gpu_uuid,pid") if r and r[0].startswith("GPU-")}
+problems, smi_ok, ctx_ok = [], set(), set()
+for index, uuid, mode, pstate in gpus:
+    if mode == "Prohibited":
+        problems.append("gpu%s:prohibited" % index)
+    elif uuid in busy:
+        problems.append("gpu%s:busy" % index)
+    else:
+        smi_ok.add(int(index))
+try:
+    cuda = ctypes.CDLL("libcuda.so.1")
+    rc = cuda.cuInit(0)
+    if rc:
+        problems.append("cuInit:%d" % rc)
+    else:
+        count = ctypes.c_int(0)
+        cuda.cuDeviceGetCount(ctypes.byref(count))
+        release = getattr(cuda, "cuDevicePrimaryCtxRelease_v2", None) or cuda.cuDevicePrimaryCtxRelease
+        for i in range(count.value):
+            dev, ctx = ctypes.c_int(0), ctypes.c_void_p()
+            rc = cuda.cuDeviceGet(ctypes.byref(dev), i)
+            if rc == 0:
+                rc = cuda.cuDevicePrimaryCtxRetain(ctypes.byref(ctx), dev)
+            if rc == 0:
+                release(dev)
+                ctx_ok.add(i)
+            else:
+                problems.append("gpu%d:context-error-%d" % (i, rc))
+except OSError:
+    problems.append("no-libcuda")
+print(socket.gethostname(), len(smi_ok & ctx_ok), len(gpus), ",".join(problems) or "ok", flush=True)
+PYEOF
 
 short_name() { printf '%s\n' "${1%%.*}"; }
 
+HEALTHY_HOSTS=()
+HEALTHY_COUNT=0
 probe_gpus() {
   # $1: hostfile (one node per line, as in $PBS_NODEFILE).
-  # Writes GOOD_HOSTS (first {{ compute_nodes }} nodes with {{ gpus_per_node }} GPUs) and BAD_HOSTS.
+  # Writes GOOD_HOSTS (first {{ compute_nodes }} nodes whose {{ gpus_per_node }} GPUs pass),
+  # sets HEALTHY_HOSTS to every node that passed, appends failures to BAD_HOSTS.
   local hostfile="$1" n_hosts
   n_hosts=$(wc -l <"$hostfile")
   : >"$PROBE_OUT"
-  # `|| true`: a node that hangs or refuses the launch simply never answers.
-  timeout 300 mpiexec --hostfile "$hostfile" --np "$n_hosts" --ppn 1 \
-    /bin/bash -c 'n=$(timeout 60 nvidia-smi -L 2>/dev/null | grep -c "^GPU"); echo "$(hostname) ${n:-0}"' \
-    >"$PROBE_OUT" 2>>"$ERR_LOG" || true
   : >"$GOOD_HOSTS"
-  : >"$BAD_HOSTS"
-  local host key count
+  HEALTHY_HOSTS=()
+  HEALTHY_COUNT=0
+  [ "$n_hosts" -gt 0 ] || return 0
+  # `|| true`: a node that hangs or refuses the launch simply never answers.
+  # Without python3 on a node the probe falls back to counting `nvidia-smi -L`.
+  # stderr stays on the shared .err descriptor: a separate `2>>` would move the
+  # end of the file past the offset later launches write at.
+  timeout 300 mpiexec --hostfile "$hostfile" --np "$n_hosts" --ppn 1 \
+    /bin/bash -c 'unset CUDA_VISIBLE_DEVICES; if command -v python3 >/dev/null 2>&1; then timeout 120 python3 -c "$1" || echo "$(hostname) 0 0 probe-failed"; else n=$(timeout 60 nvidia-smi -L 2>/dev/null | grep -c "^GPU"); echo "$(hostname) ${n:-0} ${n:-0} no-python3:nvidia-smi-L-only"; fi' \
+    gpu-probe "$GPU_PROBE_PY" \
+    >"$PROBE_OUT" || true
+  local host key line usable detail
   while read -r host; do
     [ -n "$host" ] || continue
     key=$(short_name "$host")
-    count=$(awk -v k="$key" '{ split($1, a, "."); if (a[1] == k) { print $2; exit } }' "$PROBE_OUT")
-    if [ -z "$count" ]; then
+    line=$(awk -v k="$key" '{ split($1, a, "."); if (a[1] == k) { print $2, $4; exit } }' "$PROBE_OUT")
+    usable=${line%% *}
+    detail=${line#* }
+    if [ -z "$line" ]; then
       echo "$host no-answer" >>"$BAD_HOSTS"
-    elif [ "$count" -lt {{ gpus_per_node }} ]; then
-      echo "$host ${count}-gpus" >>"$BAD_HOSTS"
-    elif [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
-      echo "$host" >>"$GOOD_HOSTS"
+    elif ! [ "$usable" -ge {{ gpus_per_node }} ] 2>/dev/null; then
+      echo "$host ${usable}-of-{{ gpus_per_node }}-gpus-usable ${detail}" >>"$BAD_HOSTS"
+    else
+      HEALTHY_HOSTS+=("$host")
+      HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+      if [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
+        echo "$host" >>"$GOOD_HOSTS"
+      fi
     fi
   done <"$hostfile"
 }
 
 report_gate() {
-  echo "GPU gate: $(wc -l <"$GOOD_HOSTS") of {{ compute_nodes }} compute nodes selected from $(wc -l <"$1") allocated; $(wc -l <"$BAD_HOSTS") unhealthy"
+  echo "GPU gate: $(wc -l <"$GOOD_HOSTS") of {{ compute_nodes }} compute nodes selected from $(wc -l <"$1") candidates; ${HEALTHY_COUNT} healthy; $(wc -l <"$BAD_HOSTS") unhealthy so far"
   if [ -s "$BAD_HOSTS" ]; then
-    echo "GPU gate: unhealthy nodes (report to support@alcf.anl.gov):"
+    echo "GPU gate: unhealthy nodes (report to support@alcf.anl.gov; record in kb/bad_nodes.yaml):"
     sed 's/^/  /' "$BAD_HOSTS"
   fi
 }
@@ -107,49 +182,77 @@ launch_xgc() {
     xgc-rank "{{ xgc_exe }}"{{ xgc_args | default('') }}
 }
 
-probe_gpus "$PBS_NODEFILE"
-report_gate "$PBS_NODEFILE"
+# Known-bad nodes never reach the probe.
+: >"$BAD_HOSTS"
+: >"$CRASHED"
+: >"$REMAINING"
+while read -r host; do
+  [ -n "$host" ] || continue
+  case " $KNOWN_BAD_HOSTS " in
+    *" $(short_name "$host") "*) echo "$host known-bad (kb/bad_nodes.yaml)" >>"$BAD_HOSTS" ;;
+    *) echo "$host" >>"$REMAINING" ;;
+  esac
+done <"$PBS_NODEFILE"
+
+probe_gpus "$REMAINING"
+report_gate "$REMAINING"
 if [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
   echo "GPU gate: not enough healthy nodes; giving the allocation back without starting XGC"
   echo "end=$(date -Is) rc=3"
   exit 3
 fi
 
-set +e
-launch_start=$(date +%s)
-launch_xgc
-rc=$?
-launch_elapsed=$(( $(date +%s) - launch_start ))
-set -e
-echo "GPU gate: first launch rc=${rc} after ${launch_elapsed}s"
-
-if [ "$rc" -ne 0 ] && [ "$launch_elapsed" -lt "$EARLY_FAILURE_SECONDS" ] \
-   && grep -q -E "rank [0-9]+ died|cuda" "$ERR_LOG"; then
-  # Nodes named in "<host>: rank N died ..." lines are dropped; whatever is
-  # left (including the spares) is probed again and used for one relaunch.
-  CRASHED="{{ run_dir }}/gpu_gate.${PBS_JOBID}.crashed_hosts"
-  REMAINING="{{ run_dir }}/gpu_gate.${PBS_JOBID}.remaining_hosts"
-  grep -o -E "^[^ :]+: rank [0-9]+ died" "$ERR_LOG" | cut -d: -f1 | sort -u >"$CRASHED" || true
+attempt=1
+while true; do
+  err_offset=$(wc -c <"$ERR_LOG")
+  set +e
+  launch_start=$(date +%s)
+  launch_xgc
+  rc=$?
+  launch_elapsed=$(( $(date +%s) - launch_start ))
+  set -e
+  echo "GPU gate: launch ${attempt} rc=${rc} after ${launch_elapsed}s"
+  if [ "$rc" -eq 0 ] || [ "$launch_elapsed" -ge "$EARLY_FAILURE_SECONDS" ]; then
+    break
+  fi
+  # Only this launch's part of the .err log counts. PALS reports
+  # "<host>: rank N died from signal S" / "exited with code C"; ranks killed
+  # by the launcher's own teardown (signal 9/15) are only used when no rank
+  # failed by itself.
+  deaths=$(tail -c +"$((err_offset + 1))" "$ERR_LOG" \
+    | grep -E "^[^ :]+: rank [0-9]+ (died from signal [0-9]+|exited with code [0-9]+)" || true)
+  culprits=$(printf '%s\n' "$deaths" | grep -v -E "died from signal (9|15)( |$)" || true)
+  [ -n "$culprits" ] || culprits="$deaths"
+  new_crashed=$(printf '%s\n' "$culprits" | cut -s -d: -f1 | while read -r c; do short_name "$c"; done | sort -u)
+  if [ -z "$new_crashed" ]; then
+    echo "GPU gate: early failure, but no rank named a node; not relaunching"
+    break
+  fi
+  printf '%s\n' "$new_crashed" >>"$CRASHED"
+  # Next candidates: nodes that passed the last probe, minus every crashed node.
   : >"$REMAINING"
-  while read -r host; do
-    [ -n "$host" ] || continue
-    if ! grep -q -x -F "$(short_name "$host")" <(while read -r c; do short_name "$c"; done <"$CRASHED"); then
+  dropped=0
+  for host in ${HEALTHY_HOSTS[@]+"${HEALTHY_HOSTS[@]}"}; do
+    if grep -q -x -F "$(short_name "$host")" "$CRASHED"; then
+      echo "$host crashed-in-launch-${attempt}" >>"$BAD_HOSTS"
+      dropped=$((dropped + 1))
+    else
       echo "$host" >>"$REMAINING"
     fi
-  done <"$PBS_NODEFILE"
-  echo "GPU gate: early failure; dropping $(wc -l <"$CRASHED") node(s) that reported dead ranks: $(tr '\n' ' ' <"$CRASHED")"
+  done
+  echo "GPU gate: early failure in launch ${attempt}; dropping ${dropped} node(s) that reported dead ranks: $(printf '%s\n' "$new_crashed" | tr '\n' ' ')"
+  if [ "$dropped" -eq 0 ]; then
+    echo "GPU gate: the dead ranks were on no candidate node; not relaunching"
+    break
+  fi
   probe_gpus "$REMAINING"
   report_gate "$REMAINING"
-  if [ "$(wc -l <"$GOOD_HOSTS")" -ge {{ compute_nodes }} ]; then
-    set +e
-    launch_xgc
-    rc=$?
-    set -e
-    echo "GPU gate: relaunch rc=${rc}"
-  else
+  if [ "$(wc -l <"$GOOD_HOSTS")" -lt {{ compute_nodes }} ]; then
     echo "GPU gate: not enough healthy nodes left for a relaunch"
+    break
   fi
-fi
+  attempt=$((attempt + 1))
+done
 echo "end=$(date -Is) rc=${rc}"
 exit "$rc"
 {% elif gpus_per_node %}

@@ -263,8 +263,15 @@ class PolarisPlanTests(unittest.TestCase):
         self.assertEqual(plan.resources["node_hours_max"], 204.0)
         # XGC launches from a probed hostfile, never from $PBS_NODEFILE directly.
         self.assertIn('mpiexec --hostfile "$GOOD_HOSTS" --np 128 -ppn 4', plan.script)
-        self.assertIn("nvidia-smi -L", plan.script)
         self.assertIn("GPU gate", plan.script)
+        # The probe checks more than the device list: busy/prohibited GPUs and
+        # a CUDA primary-context open, the step that failed in n674po 7651746.
+        self.assertIn("--query-gpu=index,uuid,compute_mode,pstate", plan.script)
+        self.assertIn("--query-compute-apps=gpu_uuid,pid", plan.script)
+        self.assertIn("cuDevicePrimaryCtxRetain", plan.script)
+        self.assertIn("nvidia-smi -L", plan.script)  # fallback without python3
+        # Relaunches repeat while enough healthy nodes remain.
+        self.assertIn("while true; do", plan.script)
         self.assertIn("CUDA_VISIBLE_DEVICES", plan.script)
         self.assertNotIn("mpiexec --np 128 -ppn 4 \\", plan.script)
         # The rendered script must be valid bash.
@@ -272,6 +279,172 @@ class PolarisPlanTests(unittest.TestCase):
             ["bash", "-n"], input=plan.script, text=True, capture_output=True
         )
         self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_known_bad_hosts_expire_after_the_window_or_when_cleared(self) -> None:
+        from datetime import date
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_nodes.yaml"
+            path.write_text(
+                "polaris:\n"
+                "  x1000c0s0b0n0:\n"  # failed 2 days ago: excluded
+                "    failures: [{date: 2026-09-18, job: '0'}, {date: 2026-09-23, job: '1'}]\n"
+                "  x2000c0s0b0n0.hsn.cm.polaris.alcf.anl.gov:\n"  # 6 days: excluded
+                "    failures: [{date: 2026-09-19, job: '2'}]\n"
+                "  x3000c0s0b0n0:\n"  # 7 days: window over, probed again
+                "    failures: [{date: 2026-09-18, job: '3'}]\n"
+                "  x4000c0s0b0n0:\n"  # recent but cleared afterwards
+                "    cleared: 2026-09-24\n"
+                "    failures: [{date: 2026-09-23, job: '4'}]\n"
+                "  x5000c0s0b0n0:\n"  # failed again after being cleared
+                "    cleared: 2026-09-20\n"
+                "    failures: [{date: 2026-09-24, job: '5'}]\n",
+                encoding="utf-8",
+            )
+            today = date(2026, 9, 25)
+            self.assertEqual(
+                hr.known_bad_hosts("polaris", path, today=today),
+                ["x1000c0s0b0n0", "x2000c0s0b0n0", "x5000c0s0b0n0"],
+            )
+            self.assertEqual(hr.known_bad_hosts("aurora", path, today=today), [])
+            self.assertEqual(hr.known_bad_hosts("polaris", Path(tmp) / "none"), [])
+            # A top-level exclude_days overrides the default window.
+            path.write_text(
+                "exclude_days: 3\npolaris:\n  x2000c0s0b0n0:\n"
+                "    failures: [{date: 2026-09-19}]\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(hr.known_bad_hosts("polaris", path, today=today), [])
+        # The committed list: the n674po nodes are excluded right after 7651746
+        # and released a week later.
+        self.assertIn(
+            "x3208c0s37b1n0", hr.known_bad_hosts("polaris", today=date(2026, 9, 25))
+        )
+        self.assertEqual(hr.known_bad_hosts("polaris", today=date(2026, 10, 3)), [])
+
+    def test_known_bad_hosts_are_excluded_only_with_spare_nodes(self) -> None:
+        with patch.object(hr, "known_bad_hosts", return_value=["x9c0s1b0n0"]):
+            with patch.object(hr.m, "get_machine", return_value=self.cfg):
+                gated = hr.prepare_submission(
+                    "polaris", run_id="run-polaris-excl", spare_nodes=1
+                )
+                plain = hr.prepare_submission("polaris", run_id="run-polaris-noexcl")
+        self.assertIn('KNOWN_BAD_HOSTS="x9c0s1b0n0"', gated.script)
+        self.assertEqual(gated.resources["excluded_hosts"], ["x9c0s1b0n0"])
+        self.assertEqual(plain.resources["excluded_hosts"], [])
+
+    def _run_gate(self, tmp: Path, *, nodes: int, spare: int, hosts: list[str],
+                  known_bad: list[str], probe_bad: list[str],
+                  crashes: list[str]) -> tuple[subprocess.CompletedProcess, Path]:
+        """Run the rendered gate with stub mpiexec/timeout/date on PATH.
+
+        The stub mpiexec answers the probe (``probe_bad`` hosts report 3 of 4
+        GPUs usable) and, for launch N, crashes on ``crashes[N-1]`` with a
+        signal-6 rank there plus a signal-15 teardown rank on another node.
+        """
+        run_dir = tmp / "case"
+        run_dir.mkdir()
+        stub = tmp / "stub"
+        stub.mkdir()
+        fqdn = [f"{h}.hsn.cm.polaris.alcf.anl.gov" for h in hosts]
+        (tmp / "nodefile").write_text("\n".join(fqdn) + "\n", encoding="utf-8")
+        (stub / "probe_bad").write_text("".join(f"{h}\n" for h in probe_bad))
+        for i, host in enumerate(crashes, start=1):
+            (stub / f"crash{i}").write_text(host)
+        scripts = {
+            "timeout": '#!/bin/bash\nshift\nexec "$@"\n',
+            "date": (
+                '#!/bin/bash\n'
+                'if [ "${1:-}" = "-Is" ]; then echo 2026-09-25T00:00:00; '
+                'else exec /bin/date "$@"; fi\n'
+            ),
+            "mpiexec": f"""#!/bin/bash
+stub="{stub}"
+while [ $# -gt 0 ]; do
+  case "$1" in --hostfile) hostfile="$2"; shift 2 ;; *) args+=("$1"); shift ;; esac
+done
+if [[ " ${{args[*]}} " == *" gpu-probe "* ]]; then
+  while read -r h; do
+    if grep -q -x -F "${{h%%.*}}" "$stub/probe_bad"; then echo "$h 3 4 gpu2:context-error-46"
+    else echo "$h 4 4 ok"; fi
+  done <"$hostfile"
+  exit 0
+fi
+n=$(( $(cat "$stub/launches" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$stub/launches"
+cp "$hostfile" "$stub/launch$n.hosts"
+if [ -f "$stub/crash$n" ]; then
+  bad=$(cat "$stub/crash$n")
+  other=$(grep -v "^$bad" "$hostfile" | head -1)
+  echo "$bad.hsn.cm.polaris.alcf.anl.gov: rank 5 died from signal 6 and dumped core" >&2
+  echo "$other: rank 9 died from signal 15" >&2
+  exit 134
+fi
+exit 0
+""",
+        }
+        for name, body in scripts.items():
+            (stub / name).write_text(body)
+            (stub / name).chmod(0o755)
+        cfg = dict(self.cfg, xgc=dict(self.cfg["xgc"], env_script=None))
+        with patch.object(hr, "known_bad_hosts", return_value=known_bad):
+            with patch.object(hr.m, "get_machine", return_value=cfg):
+                plan = hr.prepare_submission(
+                    "polaris", run_id="run-gate-sim", nodes=nodes,
+                    spare_nodes=spare, run_dir=str(run_dir),
+                )
+        env = {
+            "PATH": f"{stub}:/usr/bin:/bin",
+            "PBS_JOBID": "1.test",
+            "PBS_NODEFILE": str(tmp / "nodefile"),
+            "HOME": str(tmp),
+        }
+        result = subprocess.run(
+            ["bash", "-c", plan.script], env=env, text=True, capture_output=True,
+            timeout=60,
+        )
+        return result, run_dir
+
+    def test_gpu_gate_keeps_relaunching_while_enough_nodes_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            result, run_dir = self._run_gate(
+                tmp, nodes=2, spare=4,
+                hosts=["n1", "n2", "n3", "n4", "n5", "n6"],
+                known_bad=["n1"], probe_bad=["n2"], crashes=["n3", "n5"],
+            )
+            out = (run_dir / "pbs-1.test.out").read_text()
+            launches = int((tmp / "stub" / "launches").read_text())
+            last_hosts = (tmp / "stub" / f"launch{launches}.hosts").read_text().split()
+            bad = (run_dir / "gpu_gate.1.test.bad_hosts").read_text()
+
+        self.assertEqual(result.returncode, 0, out + result.stderr)
+        # Two crashes, two relaunches: more than the old single retry.
+        self.assertEqual(launches, 3)
+        self.assertIn("GPU gate: launch 3 rc=0", out)
+        # n1 never probed (known bad), n2 failed the probe, n3/n5 crashed; the
+        # signal-15 teardown rank on n4 did not get n4 dropped.
+        self.assertEqual([h.split(".")[0] for h in last_hosts], ["n4", "n6"])
+        self.assertIn("n1.hsn.cm.polaris.alcf.anl.gov known-bad", bad)
+        self.assertIn("n2.hsn.cm.polaris.alcf.anl.gov 3-of-4-gpus-usable gpu2:context-error-46", bad)
+        self.assertIn("n3.hsn.cm.polaris.alcf.anl.gov crashed-in-launch-1", bad)
+        self.assertIn("n5.hsn.cm.polaris.alcf.anl.gov crashed-in-launch-2", bad)
+        self.assertNotIn("n4", bad)
+
+    def test_gpu_gate_stops_when_too_few_healthy_nodes_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            result, run_dir = self._run_gate(
+                tmp, nodes=2, spare=1, hosts=["n1", "n2", "n3"],
+                known_bad=[], probe_bad=[], crashes=["n1", "n2"],
+            )
+            out = (run_dir / "pbs-1.test.out").read_text()
+            launches = int((tmp / "stub" / "launches").read_text())
+
+        self.assertEqual(result.returncode, 134, out + result.stderr)
+        self.assertEqual(launches, 2)
+        self.assertIn("not enough healthy nodes left for a relaunch", out)
+        self.assertIn("end=2026-09-25T00:00:00 rc=134", out)
 
     def test_depend_on_renders_an_afterany_pbs_directive(self) -> None:
         with patch.object(hr.m, "get_machine", return_value=self.cfg):

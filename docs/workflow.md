@@ -119,25 +119,51 @@ count the characters when it must be absolute.
 
 ## Spare nodes and the GPU gate (Polaris)
 
-Polaris sometimes hands out a node whose GPUs are dead or invisible; XGC then
-aborts in Kokkos initialisation with `cudaErrorNoDevice` and the whole
-allocation is lost (n661po job 7628452 and n655po job 7602216, both on
-x3003c0s25b0n0). `plan_job` / `submit_job` take `spare_nodes=N` to guard
-against this:
+Polaris sometimes hands out a node whose GPUs are dead, invisible, or listed
+but unable to open a CUDA context; XGC then aborts in Kokkos initialisation and
+the whole allocation is lost (n661po job 7628452 and n655po job 7602216 on
+x3003c0s25b0n0, `cudaErrorNoDevice`; n674po jobs 7642998 and 7651746 on
+x3208c0s37b1n0 and x3112c0s7b1n0, `cudaErrorDevicesUnavailable` although
+`nvidia-smi -L` had listed 4 GPUs on both). `plan_job` / `submit_job` take
+`spare_nodes=N` to guard against this:
 
 - the PBS request grows to `nodes + N`, and so does the node-hour estimate;
-- the job script probes every allocated node with `nvidia-smi -L` (one rank
-  per node, 5-minute cap) and launches XGC with `mpiexec --hostfile` on the
-  first `nodes` nodes that expose all `gpus_per_node` devices; unhealthy nodes
-  are listed in `gpu_gate.<jobid>.bad_hosts` and in the `.out` log for an
-  ALCF report;
+- allocated nodes whose most recent failure in `kb/bad_nodes.yaml` is less
+  than `exclude_days` (7) old are dropped before anything runs on them; the
+  plan shows them as `excluded_hosts`. After the window a node is probed like
+  any other (ALCF usually repairs or swaps a bad node within about a week), so
+  the list never shrinks the usable pool for good;
+- every other node is probed once (one rank per node, 5-minute cap). A GPU
+  counts as usable when `nvidia-smi --query-gpu` lists it, its compute mode is
+  not `Prohibited`, `--query-compute-apps` shows no process already on it, and
+  its CUDA primary context opens (`cuDevicePrimaryCtxRetain` through
+  `libcuda.so.1`, the same step `cudaSetDevice` performs in Kokkos init). The
+  probe is inline Python passed as an argument, so the simulation directory
+  gets no helper file; a node without `python3` falls back to counting
+  `nvidia-smi -L`;
+- XGC launches with `mpiexec --hostfile` on the first `nodes` nodes whose
+  `gpus_per_node` GPUs all pass. Unhealthy nodes accumulate in
+  `gpu_gate.<jobid>.bad_hosts` with the reason (`known-bad`, `no-answer`,
+  `3-of-4-gpus-usable gpu2:context-error-46`, `crashed-in-launch-1`, ...) and
+  are echoed to the `.out` log for an ALCF report;
 - if fewer than `nodes` healthy nodes exist the job exits with rc=3 before
   starting XGC;
-- if XGC dies within 5 minutes and the `.err` log names dead ranks, the nodes
-  they ran on are dropped, the rest is probed again, and XGC relaunches once.
+- whenever XGC dies within 5 minutes, the nodes named by this launch's
+  `<host>: rank N died ...` / `exited with code ...` lines in the `.err` log
+  are dropped (teardown kills by signal 9/15 are used only when no rank failed
+  by itself), the surviving healthy nodes are probed again, and XGC relaunches.
+  This repeats while `nodes` healthy nodes remain; the job then ends with the
+  last launch's rc. It also stops when no dead rank names a candidate node.
 
 The rank count stays `nodes * ntasks_per_node`; spares idle. Only the Polaris
 template renders the gate, so `spare_nodes` is refused elsewhere.
+
+After a gate event, read `gpu_gate.<jobid>.bad_hosts` and add a failure entry
+(date, job, error) for the node to `kb/bad_nodes.yaml`, so jobs submitted in
+the next week skip it without spending a launch. A node that fails again gets
+another entry, which restarts its window. `cleared: <date>` ends a window early
+(e.g. ALCF reports the node repaired); failures dated after it count again.
+Entries are never deleted, so the history shows repeat offenders.
 
 ## Why validate before submitting
 

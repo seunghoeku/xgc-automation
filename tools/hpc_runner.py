@@ -27,10 +27,11 @@ import re
 import socket
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from tools import dryrun
@@ -51,6 +52,9 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 # Every submitted input is also appended here under the simulation's directory
 # name, the same layout as the historical archive (docs/input-archive.md).
 INPUT_BACKUP_DIR = PROJECT_ROOT / "input_backup"
+# Nodes that killed a job with a GPU/hardware fault; the GPU gate excludes
+# them before probing (templates/polaris.pbs.j2).
+BAD_NODES_FILE = PROJECT_ROOT / "kb" / "bad_nodes.yaml"
 
 
 class SubmissionError(RuntimeError):
@@ -71,6 +75,62 @@ def _jinja_env() -> Environment:
         undefined=StrictUndefined,
         keep_trailing_newline=True,
     )
+
+
+# A node is excluded for this many days after its most recent failure; ALCF
+# usually repairs or swaps a bad node within about a week, so a permanent
+# exclusion would waste good nodes. kb/bad_nodes.yaml may override it with a
+# top-level ``exclude_days``.
+BAD_NODE_EXCLUDE_DAYS = 7
+
+
+def _as_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def known_bad_hosts(
+    machine: str, path: Path | None = None, today: date | None = None
+) -> list[str]:
+    """Short hostnames in ``kb/bad_nodes.yaml`` the GPU gate should skip now.
+
+    A host is skipped while its most recent failure is less than
+    ``exclude_days`` old and not older than its ``cleared`` date; afterwards
+    the gate probes it again like any other node, and a new failure entry
+    excludes it again.
+    """
+    path = path or BAD_NODES_FILE
+    if not path.exists():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    days = int(data.get("exclude_days", BAD_NODE_EXCLUDE_DAYS))
+    today = today or _now().date()
+    hosts = data.get(machine) or {}
+    if not isinstance(hosts, dict):
+        raise SubmissionError(f"{path.name}: {machine!r} must map hostnames to entries")
+    excluded = []
+    for host, entry in hosts.items():
+        entry = entry if isinstance(entry, dict) else {}
+        dates = [
+            d for d in (_as_date(f.get("date")) for f in entry.get("failures") or []
+                        if isinstance(f, dict))
+            if d
+        ]
+        if not dates:
+            continue
+        last = max(dates)
+        cleared = _as_date(entry.get("cleared")) if entry.get("cleared") else None
+        if cleared and last <= cleared:
+            continue
+        if (today - last).days < days:
+            excluded.append(str(host).split(".")[0])
+    return sorted(excluded)
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -175,10 +235,13 @@ def prepare_submission(
             section with ``pool`` and ``container`` in the machine definition.
         spare_nodes: request this many nodes beyond ``nodes`` and let the job
             script pick the healthy ones. Before launching XGC every allocated
-            node is probed for its GPUs and the launcher gets a hostfile of the
-            first ``nodes`` nodes that expose all of them; a crash within the
-            first minutes drops the nodes that reported dead ranks and relaunches
-            once on the remaining healthy ones. Rank count stays ``nodes *
+            node except the known-bad ones in ``kb/bad_nodes.yaml`` is probed
+            (nvidia-smi compute mode and resident processes, then a CUDA context
+            open on every GPU) and the launcher gets a hostfile of the first
+            ``nodes`` nodes whose GPUs all pass. While XGC keeps crashing within
+            the first minutes, the nodes that reported dead ranks are dropped and
+            XGC relaunches on the rest, as long as ``nodes`` healthy nodes
+            remain. Rank count stays ``nodes *
             ntasks_per_node``; the spare nodes idle. Only templates that render
             the GPU gate accept it (Polaris).
         depend_on: scheduler job id this job must wait for. Rendered as an
@@ -324,6 +387,7 @@ def prepare_submission(
             "that many devices"
         )
     requested_nodes = nodes + spare_nodes
+    excluded_hosts = known_bad_hosts(machine) if spare_nodes else []
     depend_on = (depend_on or "").strip() or None
     if depend_on is not None and (
         " " in depend_on or ":" in depend_on or not depend_on[0].isdigit()
@@ -348,6 +412,7 @@ def prepare_submission(
         nodes=requested_nodes,
         compute_nodes=nodes,
         spare_nodes=spare_nodes,
+        known_bad_hosts=excluded_hosts,
         walltime=walltime,
         account=account,
         partition=partition,
@@ -389,6 +454,7 @@ def prepare_submission(
         "nodes": requested_nodes,
         "compute_nodes": nodes,
         "spare_nodes": spare_nodes,
+        "excluded_hosts": excluded_hosts,
         "ntasks_per_node": ntasks_per_node,
         "cpus_per_task": cpus_per_task,
         "gpus_per_node": gpus_per_node,

@@ -296,7 +296,9 @@ def plan_job(
         daos: execute inside the machine's DAOS container (Aurora) instead of
             the parallel filesystem; logs and input stay in the case directory.
         spare_nodes: request extra nodes and run only on the ones whose GPUs
-            answer a probe (Polaris). ``nodes`` stays the compute node count;
+            pass a probe (Polaris; kb/bad_nodes.yaml hosts are skipped, and
+            early crashes keep dropping nodes and relaunching while ``nodes``
+            healthy ones remain). ``nodes`` stays the compute node count;
             the allocation and the cost estimate grow by ``spare_nodes``.
         depend_on: scheduler job id to wait for (afterany). Use it to chain a
             restart behind the job currently running in the same directory.
