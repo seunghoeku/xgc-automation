@@ -702,6 +702,7 @@ def compare(
     shear_inset_ylim: list[float] | None = None,
     highlight: list[str] | None = None,
     inset_window: list[float] | None = None,
+    inset_exclude: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run ``remote/transient_compare.py`` over the Maxwellian run and the
     production runs (default: every ``finit_*`` directory in the inventory),
@@ -750,6 +751,8 @@ def compare(
         argv += ["--highlight", name]
     if inset_window:
         argv += ["--inset-window", *(str(v) for v in inset_window)]
+    for name in inset_exclude or []:
+        argv += ["--inset-exclude", name]
     if vort_inset_ylim:
         argv += ["--vort-inset-ylim", *(str(v) for v in vort_inset_ylim)]
     if shear_inset_ylim:

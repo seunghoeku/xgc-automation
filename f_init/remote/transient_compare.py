@@ -140,6 +140,9 @@ def main() -> int:
                              "figure; default all. Two panels are labelled (a)/(b) like the paper")
     parser.add_argument("--highlight", action="append", default=[],
                         help="run name (directory basename) drawn thicker and on top (repeatable)")
+    parser.add_argument("--inset-exclude", action="append", default=[],
+                        help="run name left out of the combined figure's inset y range (still drawn, "
+                             "clipped); repeatable")
     parser.add_argument("--inset-window", type=float, nargs=2, default=None, metavar=("T0", "T1"),
                         help="inset time window [ms] of the combined figure; default the first "
                              "0.2 ms after the f_init start")
@@ -388,6 +391,19 @@ def main() -> int:
                 # a fixed range keeps the late small oscillations readable
                 # when one run's first swing is much larger (clipped)
                 axins.set_ylim(*inset_ylim)
+            elif args.inset_exclude:
+                # range from every other run, so one large run cannot hide
+                # the differences among the rest (it is clipped instead)
+                vals = []
+                for r in runs:
+                    if r["name"] in args.inset_exclude:
+                        continue
+                    t = np.asarray(r["time_ms"])
+                    m = (t >= t0) & (t <= t1)
+                    vals.extend(np.asarray(r[key])[m].tolist())
+                if vals:
+                    pad = 0.08 * (max(vals) - min(vals)) or 1.0
+                    axins.set_ylim(min(vals) - pad, max(vals) + pad)
             axins.xaxis.set_major_locator(MaxNLocator(5))
             axins.yaxis.set_major_locator(MaxNLocator(4))
             axins.tick_params(labelsize=int(font * 0.7))
