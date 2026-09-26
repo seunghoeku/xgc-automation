@@ -364,12 +364,15 @@ def cmd_distribution(case: cfg.Case, args: argparse.Namespace) -> int:
 
 
 def cmd_er_profile(case: cfg.Case, args: argparse.Namespace) -> int:
-    payload = proc.er_profile(case, f0_step=args.f0_step, paper=args.paper, psi_max=args.psi_max)
+    payload = proc.er_profile(case, f0_step=args.f0_step, paper=args.paper, psi_max=args.psi_max,
+                              psi_min=args.psi_min, run_dir=args.run_dir, steps=args.steps, labels=args.labels,
+                              smooth_psi=args.smooth_psi, title=args.title, tag=args.tag)
     if args.json:
         _print(payload, True)
         return 0
     lo, hi = payload["er_range_kv_per_m"]
-    print(f"<E_r> at steps {payload['steps']} (t = {payload['time_ms'][0]:.3f}, {payload['time_ms'][1]:.3f} ms); "
+    times = ", ".join(f"{t:.3f}" for t in payload["time_ms"])
+    print(f"<E_r> at steps {payload['steps']} (t = {times} ms); "
           f"snapshot range {lo:.2f} .. {hi:.2f} kV/m")
     for key, path in payload.get("local", {}).items():
         print(f"  {key}: {path}")
@@ -523,6 +526,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("er-profile", help="<E_r>(psi_N) of stage A at the f_init snapshot and at the end")
     p.add_argument("--f0-step", type=int, default=None)
     p.add_argument("--psi-max", type=float, default=0.9, help="cut the plot here (outer boundary layer)")
+    p.add_argument("--psi-min", type=float, default=0.0)
+    p.add_argument("--run-dir", default=None,
+                   help="remote run directory to read instead of stage A (e.g. a turbulence run started from the f_init)")
+    p.add_argument("--steps", default=None, help="comma-separated steps; 'first'/'last' allowed")
+    p.add_argument("--labels", default=None, help="'|'-separated legend suffixes for --steps")
+    p.add_argument("--smooth-psi", type=float, default=0.0, help="Gaussian width in psi_N (0: none)")
+    p.add_argument("--title", default=None)
+    p.add_argument("--tag", default=None, help="suffix for the output file names")
     p.add_argument("--paper", action="store_true")
 
     sub.add_parser("log", help="what this CLI has done to the case")

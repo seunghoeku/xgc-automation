@@ -966,29 +966,45 @@ def distribution_figure(case: Case, *, no_smooth: str | None = None, smooth: str
 
 
 def er_profile(case: Case, *, f0_step: int | None = None, paper: bool = False,
-               psi_max: float = 0.9) -> dict[str, Any]:
-    """<E_r>(psi_N) of the stage A run at the f_init snapshot and at the end."""
+               psi_max: float = 0.9, psi_min: float = 0.0, run_dir: str | None = None,
+               steps: str | None = None, labels: str | None = None, smooth_psi: float = 0.0,
+               title: str | None = None, tag: str | None = None) -> dict[str, Any]:
+    """<E_r>(psi_N) of the stage A run at the f_init snapshot and at the end.
+
+    With ``run_dir`` and ``steps`` any run's oneddiag is read instead, e.g. a
+    turbulence run started from the f_init, whose first step stands for the
+    f_init's own field.
+    """
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     f0_step = case.f0_step if f0_step is None else f0_step
-    if f0_step is None:
+    if f0_step is None and not steps:
         inv = inventory(case)
         f0_step = (inv["maxwell"] or {}).get("last_f0_step")
-    if f0_step is None:
+    if f0_step is None and not steps:
         raise ProcedureError("no f0 step known; set f0_step in the case file or pass --f0-step")
     out_dir = f"{case.root}/.xgc-finit/compare"
     ssh.mkdir_p(target, out_dir)
-    stem = "er_profile" + ("_paper" if paper else "")
+    stem = "er_profile" + (f"_{tag}" if tag else "") + ("_paper" if paper else "")
     script = _push_helper(case, target, "er_profile.py")
-    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
-            "--f0-step", str(f0_step), "--psi-max", str(psi_max), "--out-prefix", f"{out_dir}/{stem}"]
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", run_dir or case.maxwell_path,
+            "--psi-min", str(psi_min), "--psi-max", str(psi_max), "--smooth-psi", str(smooth_psi),
+            "--out-prefix", f"{out_dir}/{stem}"]
+    if steps:
+        argv += ["--steps", steps]
+        if labels:
+            argv += ["--labels", labels]
+    else:
+        argv += ["--f0-step", str(f0_step)]
     if paper:
         argv.append("--paper")
-    if case.extra.get("er_title"):
-        argv += ["--title", str(case.extra["er_title"])]
+    title = title or case.extra.get("er_title")
+    if title:
+        argv += ["--title", str(title)]
     payload = _run_json(target, argv, timeout=1800)
     payload["local"] = _pull_outputs(case, target, payload)
-    cfg.append_log(case, "er-profile", psi_max=psi_max, steps=payload.get("steps"), time_ms=payload.get("time_ms"),
+    cfg.append_log(case, "er-profile", run_dir=run_dir, psi_max=psi_max, smooth_psi=smooth_psi,
+                   steps=payload.get("steps"), time_ms=payload.get("time_ms"),
                    er_range_kv_per_m=payload.get("er_range_kv_per_m"), local=payload["local"])
     return payload
 
