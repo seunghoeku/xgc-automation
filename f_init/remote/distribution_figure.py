@@ -109,7 +109,7 @@ def main() -> int:
         cb = fig.colorbar(cf, ax=ax)
         cb.set_label("$(f - f_M)/f_M$ (%)" if args.normalize == "local" else "$(f - f_M)/\\max f_M$ (%)")
         ax.text(0.02, 0.97, f"$\\psi_N = {where['psi_n']:.2f}$, outboard midplane",
-                transform=ax.transAxes, va="top", fontsize=int(font * 0.75),
+                transform=ax.transAxes, va="top", fontsize=int(font * 0.9),
                 bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"})
         fig.tight_layout()
         path = f"{out_prefix}{'' if args.normalize == 'local' else '_peak'}_{'ab'[k]}.png"

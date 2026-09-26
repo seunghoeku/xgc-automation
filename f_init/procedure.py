@@ -941,6 +941,10 @@ def distribution_figure(case: Case, *, no_smooth: str | None = None, smooth: str
     out_dir = f"{case.root}/.xgc-finit/compare"
     ssh.mkdir_p(target, out_dir)
     stem = "distribution" + ("_paper" if paper else "")
+    if node is not None:
+        stem += f"_node{node}"
+    elif psi != 0.45:
+        stem += f"_psi{cfg.fmt_num(psi)}"
     script = _push_helper(case, target, "distribution_figure.py")
     argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
             "--no-smooth", f"{case.maxwell_path}/{no_smooth}", "--smooth", f"{case.maxwell_path}/{smooth}",
