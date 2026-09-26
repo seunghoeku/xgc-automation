@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--psi-max", type=float, default=0.9,
                         help="right edge of the plot; the outer boundary layer is excluded")
     parser.add_argument("--paper", action="store_true")
+    parser.add_argument("--title", default="Relaxed radial electric field, axisymmetric CBC")
     parser.add_argument("--out-prefix", required=True)
     args = parser.parse_args()
 
@@ -76,7 +77,7 @@ def main() -> int:
     ax.axhline(0.0, color="0.5", lw=1)
     ax.set_xlabel("$\\psi_N$")
     ax.set_ylabel("$\\langle E_r \\rangle$ (kV/m)")
-    ax.set_title("Relaxed radial electric field, axisymmetric CBC")
+    ax.set_title(args.title)
     ax.set_xlim(0.0, args.psi_max)
     shown = psi <= args.psi_max
     lo = min(er[i0][shown].min(), er[i1][shown].min()) * 1e-3

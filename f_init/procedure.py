@@ -980,6 +980,8 @@ def er_profile(case: Case, *, f0_step: int | None = None, paper: bool = False,
             "--f0-step", str(f0_step), "--psi-max", str(psi_max), "--out-prefix", f"{out_dir}/{stem}"]
     if paper:
         argv.append("--paper")
+    if case.extra.get("er_title"):
+        argv += ["--title", str(case.extra["er_title"])]
     payload = _run_json(target, argv, timeout=1800)
     payload["local"] = _pull_outputs(case, target, payload)
     cfg.append_log(case, "er-profile", psi_max=psi_max, steps=payload.get("steps"), time_ms=payload.get("time_ms"),
