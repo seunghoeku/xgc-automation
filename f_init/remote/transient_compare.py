@@ -365,7 +365,7 @@ def main() -> int:
         from matplotlib.ticker import MaxNLocator
         t0, t1 = win
         panels = [
-            ("vort_flux", "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)",
+            ("vort_flux", "Vorticity Flux ($10^{10}$ $m^3 s^{-2}$)",
              f"(a) Radial Vorticity Flux at {psi_txt}", True, args.vort_inset_ylim),
             ("shear_khz", "ExB shear (kHz)", f"(b) ExB shear at {psi_txt}", False, args.shear_inset_ylim),
         ]
@@ -429,7 +429,7 @@ def main() -> int:
     inset_win = (plot_offset * s2ms, plot_offset * s2ms + 0.2) if args.shift_finit else None
     # The inset lives in the empty band above the Maxwellian relaxation
     # (t > 0.15 ms, flux > 2.5): the y range is raised to 5 to make room.
-    series_figure("vort_flux", "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)",
+    series_figure("vort_flux", "Vorticity Flux ($10^{10}$ $m^3 s^{-2}$)",
                   f"(a) Radial Vorticity Flux at {psi_txt}", "vorticity", loc="lower right",
                   inset=None if inset_win is None else (*inset_win, [0.30, 0.62, 0.67, 0.29]),
                   ylim_top=None if inset_win is None else 5.0)
@@ -451,7 +451,7 @@ def main() -> int:
 
     # zoom of the transient right after the f_init start
     t_first = plot_offset * s2ms
-    series_figure("vort_flux", "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)",
+    series_figure("vort_flux", "Vorticity Flux ($10^{10}$ $m^3 s^{-2}$)",
                   f"Radial Vorticity Flux at {psi_txt}, first 0.15 ms",
                   "vorticity_zoom", xlim=(t_first - 0.005, t_first + 0.15), loc="lower right")
 
@@ -461,7 +461,7 @@ def main() -> int:
     z0 = np.asarray(runs[0]["vort_flux_2d"])
     vlim0 = float(np.max(np.abs(z0)))
     levels = np.linspace(-vlim0, vlim0, 101)
-    cbar_label = "Vorticity Flux ($10^{-10}$ $m^3 s^{-2}$)"
+    cbar_label = "Vorticity Flux ($10^{10}$ $m^3 s^{-2}$)"
     twod = runs if args.twod_runs is None else [r for r in runs if r["name"] in args.twod_runs]
     if args.twod_runs is not None and len(twod) != len(args.twod_runs):
         known = [r["name"] for r in runs]
