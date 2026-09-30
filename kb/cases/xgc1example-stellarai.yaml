@@ -20,7 +20,7 @@ backup_dir: /scratch/gpfs/PTHEORY/seungku/xgc-automation-baselines/xgc1example/o
 validated:
   date: 2026-09-22
   machine: stellarai
-  xgc_commit: c60540b6          # stellarai_cpu_setup, static dependency build
+  xgc_commit: e3b1a0b0          # stellarai_cpu_setup, static dependency build (binary banner: c60540b6, same tree before the mode-fix rewrite)
   input_md5: 529361791717ebaf7fdc44b651802aaf   # after the f0_param, empty-namelist and per-species src_param fixes
   dryrun: ACCEPTED              # login node, -n_ranks 96: 0 removed, 0 deprecated
   n_ranks: 12                   # 0.022 GB per rank; resolution warning (0.014 ptl/vertex)

@@ -25,6 +25,11 @@ perlmutter:
     status: squeue
     cancel: scancel
     submit_tpl: templates/slurm.sbatch.j2
+    # Pass `-c <cpus_per_task> --cpu-bind=cores` to srun. Since Slurm 22.05 srun
+    # does not inherit sbatch --cpus-per-task (Perlmutter runs 25.11), so without
+    # it every rank's OpenMP threads share one core. Hand-written runscripts here
+    # always passed -c 32 --cpu-bind=cores.
+    srun_cpu_binding: true
   paths:
     scratch: <pscratch_path>        # echo $PSCRATCH on a login node
     run_root: <pscratch_path>/xgc-runs
