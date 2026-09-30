@@ -153,12 +153,24 @@ resolves the CUDA libraries there. Jobs source the env file, which puts
   (`quickstart/runlines/stellarai.sh`). Check the GPU-to-socket mapping with
   `nvidia-smi topo -m` on a compute node once they are up; the run line assumes
   GPUs 0-3 sit on socket 0.
-- **hcoll is disabled** (`OMPI_MCA_coll_hcoll_enable=0` in the env file,
-  XGC-Devel `70fc0b0a0`). With HPC-X hcoll on, the 8-node job 333 (d0031sa)
-  hung in `MPI_Init`: every rank spun at 100% CPU in `hcoll_init_with_opts` ->
-  `comm_allreduce_hcolrte` -> `uct_dc_mlx5_iface_progress_ll` and printed
-  nothing for 12 minutes. A 1-node run never hits it. This applies to the GPU
-  env file only; the CPU env file keeps hcoll.
+- **Inter-node traffic uses only `mlx5_11`** (`UCX_NET_DEVICES=mlx5_11:1` in
+  the env file, XGC-Devel `c29e1646d`). Each GPU node has 13 HCAs. On
+  2026-09-29, `sai-n01g3` had its GPU-rail NDR HCAs (`mlx5_0/3/9/12`) stuck in
+  `INIT`, while the other GPU nodes had them `ACTIVE`. With UCX's default
+  device choice, any message to or from that node never completed. The 8-node
+  jobs 333 and 334 spun at 100% CPU without output, first in hcoll's
+  `MPI_Init` allreduce, then (with hcoll off) in the first `MPI_Gather`
+  (`taskmap_write`). A two-rank ping-pong between n01g3 and n01g4 fails with
+  the default and with `mlx5_4`, and passes with `mlx5_11` (32.8 GB/s). An
+  8-node, 64-rank allreduce also passes with `mlx5_11`. `mlx5_11` (NDR 400G,
+  `ib11`) is `ACTIVE` on every GPU node. Check the HCA states with
+  `cat /sys/class/infiniband/*/ports/1/state` before lifting the restriction:
+  it forgoes the multi-rail bandwidth. The test program is
+  `/scratch/gpfs/PTHEORY/seungku/Software/mpitest/pp.c`.
+- hcoll is also disabled (`OMPI_MCA_coll_hcoll_enable=0`, `70fc0b0a0`). Its
+  hang was the same network problem, but Open MPI's own collectives are the
+  simpler default. Both settings are in the GPU env file only; the CPU env
+  file is unchanged.
 - GPU-aware MPI is off (the XGC default). `ompi_info` on vis2 lists the `cuda`
   MPI extension but only the `null` accelerator component; check on a compute
   node before trying `USE_GPU_AWARE_MPI`.
