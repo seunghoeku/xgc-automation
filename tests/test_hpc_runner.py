@@ -759,6 +759,26 @@ class PerlmutterPlanTests(unittest.TestCase):
         self.assertEqual(plan.resources["executable"], executable)
         self.assertEqual(plan.resources["env_script"], env_script)
 
+    def test_one_gpu_per_rank_when_ranks_match_gpus(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            matched = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-gpu-bind",
+                hello_world=True,
+                ntasks_per_node=4,
+                gpus_per_node=4,
+            )
+            unmatched = hr.prepare_submission(
+                "perlmutter",
+                run_id="run-perlmutter-gpu-shared",
+                hello_world=True,
+                ntasks_per_node=8,
+                gpus_per_node=4,
+            )
+
+        self.assertIn("--gpus-per-task=1 --gpu-bind=single:1 hostname", matched.script)
+        self.assertNotIn("--gpu-bind", unmatched.script)
+
     def test_prebuilt_plan_passes_its_build_to_dryrun(self) -> None:
         executable = "/pscratch/builds/xgca/bin/xgca"
         env_script = "/pscratch/builds/xgca/setup.sh"

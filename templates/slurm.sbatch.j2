@@ -70,6 +70,13 @@ echo "ranks={{ total_ranks }} threads_per_rank=${OMP_NUM_THREADS}"
 {% else %}
 {% set srun_c = "" %}
 {% endif %}
+{% if gpus_per_node and ntasks_per_node and ntasks_per_node|int == gpus_per_node|int %}
+{# One GPU per rank. Without it every rank sees all of the node's GPUs, and
+   memsets issued from OpenMP threads (whose current device is 0) fail on
+   another device's memory: stellarai d0030sa job 331 died in step 1 with
+   cudaErrorInvalidValue in the collision Picard loop. #}
+{% set srun_c = srun_c ~ " --gpus-per-task=1 --gpu-bind=single:1" %}
+{% endif %}
 {% if xgc_exe %}
 srun -n {{ total_ranks }}{{ srun_c }} {{ xgc_exe }}
 {% else %}

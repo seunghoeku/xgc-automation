@@ -2,8 +2,8 @@
 
 Status 2026-09-29: dependency stack installed. `xgc` and `xgca` built from
 XGC-Devel branch `stellarai-gpu` @ `b3fa2c9b1` with `XGC_PLATFORM=stellarai`;
-`--info` reports the GPU version with the CUDA Kokkos backend. No compute-node
-run yet.
+`--info` reports the GPU version with the CUDA Kokkos backend. First
+compute-node run: d0030sa (job 332, 1 node) runs with one GPU per rank.
 
 STELLAR-AI has two partitions under one Slurm (26.05) and one `/scratch/gpfs`.
 The CPU partition and its build are in `docs/build-stellarai.md`
@@ -160,18 +160,23 @@ resolves the CUDA libraries there. Jobs source the env file, which puts
   A GPU run passes the GPU settings per job (`partition: gpu`,
   `gpus_per_node: 8`, `ntasks_per_node: 8`, `cpus_per_task: 12`, the GPU
   `env_script` and `xgc_exe`). The flow_match case `nt193793_stellarai_gpu`
-  sets them in its `job.stellarai` section. The generic Slurm template
-  launches `srun -n N -c 12 --cpu-bind=cores` without per-rank
-  `CUDA_VISIBLE_DEVICES`, so each rank sees all 8 GPUs and Kokkos maps the
-  device by local rank.
+  sets them in its `job.stellarai` section.
+- **One GPU per rank is required.** When ranks per node equals
+  `gpus_per_node`, the Slurm template adds `--gpus-per-task=1
+  --gpu-bind=single:1` to srun. Without it every rank sees all 8 GPUs, and
+  d0030sa job 331 died in step 1 with `cudaErrorInvalidValue` from a Kokkos
+  zero-memset in `CollisionGrid::picard_loop` (3 of 8 ranks). Job 332 with the
+  binding ran past step 1.
 - The login-node dryrun gate does not apply: the GPU binary cannot run on
   either login node. Dev runs skip it by default; for production runs, dryrun
   the input with the `stellarai_cpu` build on `stellarai-amd`.
 
 ## Open items
 
-- Smoke test on a compute node (flow_match `nt193793_stellarai_gpu` it01,
-  compared with the CPU run n682sa).
+- Finish the comparison of d0030sa (job 332) with the CPU run n682sa. First
+  timing: about 22 s/step on 1 GPU node (8x B200), against about 16 s/step for
+  n682sa on 8 CPU nodes. Look at the per-kernel timers before sizing
+  production runs.
 - Confirm `/projects` is invisible on the GPU nodes too, and that
   `/usr/local/cuda-13.2` and the CUDA OpenMPI are present there.
 - Decide how xgc-automation should address the partition (a second machine key
