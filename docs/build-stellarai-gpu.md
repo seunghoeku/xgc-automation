@@ -153,6 +153,12 @@ resolves the CUDA libraries there. Jobs source the env file, which puts
   (`quickstart/runlines/stellarai.sh`). Check the GPU-to-socket mapping with
   `nvidia-smi topo -m` on a compute node once they are up; the run line assumes
   GPUs 0-3 sit on socket 0.
+- **hcoll is disabled** (`OMPI_MCA_coll_hcoll_enable=0` in the env file,
+  XGC-Devel `70fc0b0a0`). With HPC-X hcoll on, the 8-node job 333 (d0031sa)
+  hung in `MPI_Init`: every rank spun at 100% CPU in `hcoll_init_with_opts` ->
+  `comm_allreduce_hcolrte` -> `uct_dc_mlx5_iface_progress_ll` and printed
+  nothing for 12 minutes. A 1-node run never hits it. This applies to the GPU
+  env file only; the CPU env file keeps hcoll.
 - GPU-aware MPI is off (the XGC default). `ompi_info` on vis2 lists the `cuda`
   MPI extension but only the `null` accelerator component; check on a compute
   node before trying `USE_GPU_AWARE_MPI`.
