@@ -150,7 +150,7 @@ submission. Full rules and handoffs: `docs/repo-roles.md`.
 | Remote reduction, analysis placement rules | `docs/data-analysis.md` |
 | SSH aliases, ControlMaster, sshproxy, multiplexing | `docs/ssh-setup.md` |
 | First-time setup, overlay files, absent personal data | `docs/setup-new-user.md` |
-| Building XGC per machine | `docs/build-stellar.md`, `docs/build-stellarai.md`, `docs/build-polaris.md`, `docs/build-aurora.md` |
+| Building XGC per machine | `docs/build-stellar.md`, `docs/build-stellarai.md`, `docs/build-stellarai-gpu.md`, `docs/build-polaris.md`, `docs/build-aurora.md` |
 | Aurora day to day: submit, DAOS container, reading results | `docs/aurora-operations.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |

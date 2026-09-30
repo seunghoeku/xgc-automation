@@ -1,5 +1,11 @@
 # Building XGC on STELLAR-AI (stellarai)
 
+This file covers the **CPU partition** (`XGC_PLATFORM=stellarai_cpu`). The GPU
+partition (8x B200 per node, `XGC_PLATFORM=stellarai`, login node
+`stellarai-vis2`) is in `docs/build-stellarai-gpu.md`. On 2026-09-29 the
+installed CPU env file and build script were renamed from `*.stellarai` to
+`*.stellarai_cpu`; the `*.stellarai` names now belong to the GPU stack.
+
 Status 2026-09-22: dependency stack installed, XGC built from XGC-Devel branch
 `stellarai_cpu_setup` with `XGC_PLATFORM=stellarai_cpu`, compute-node smoke
 test `d0008sa` passed (job 283: 10 steps, `XGC finished!`, rc 0). No production
@@ -31,8 +37,8 @@ batch jobs source the env file from the **scratch checkout**, not from
 | Item | Path |
 |---|---|
 | Env file (used by jobs and builds) | `<checkout>/quickstart/modules_and_env/stellarai_cpu.sh` |
-| Installed copy of the env file | `/projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai` (login node only; keep identical) |
-| Dependency build script | `/projects/XGC/STELLARAI/Software/bin/build_deps.stellarai [ninja\|fftw\|kokkos\|adios2\|gtest\|petsc\|all]` |
+| Installed copy of the env file | `/projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai_cpu` (login node only; keep identical) |
+| Dependency build script | `/projects/XGC/STELLARAI/Software/bin/build_deps.stellarai_cpu [ninja\|fftw\|kokkos\|adios2\|gtest\|petsc\|all]` |
 | Dependency sources, logs | `/projects/XGC/STELLARAI/Software/src/`, `src/logs/` |
 | Dependency install root | `/projects/XGC/STELLARAI/Software/install/<pkg>/<version>/gcc-14.3-openmpi-5.0.10`, with `<version>/DEFAULT` and `<pkg>/DEFAULT` links (same layout as `/projects/XGC/STELLAR/Software`) |
 | XGC checkout | `/scratch/gpfs/PTHEORY/seungku/XGC-Devel`, branch `stellarai_cpu_setup` |
@@ -69,7 +75,7 @@ Not installed: Cabana (not referenced by XGC's CMake), FusionIO and DEGAS2
 (not wanted for now), Ginkgo, Omega_h. camtimers and pspline are built from the
 XGC tree (`USE_SYSTEM_CAMTIMERS/PSPLINE=OFF`), as on `perlmutter_cpu`.
 
-`build_deps.stellarai` reuses a source directory when it exists and logs
+`build_deps.stellarai_cpu` reuses a source directory when it exists and logs
 `SOURCE REUSED` or `SOURCE DOWNLOAD`. PETSc's `--download-*` packages are
 fetched again whenever its arch directory is removed. A full `all` rebuild
 takes about 17 minutes on the login node at `J=16`.
@@ -82,6 +88,7 @@ cd /scratch/gpfs/PTHEORY/seungku/XGC-Devel
 rm -rf build && mkdir build && cd build
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
 ninja -j 16 xgc          # 680 targets, about 7 minutes
+ninja -j 16 xgca         # 252 more targets, about 4 minutes (added 2026-09-28; bin/xgca 56 MB)
 ```
 
 The env file sets `CC/CXX/FC` to the OpenMPI wrappers and
@@ -101,7 +108,7 @@ did not load the modules. Delete `build/` and configure again.
 
 FFTW builds in its source tree, and `make distclean` does not remove the
 generated `FFTW3Config.cmake`. Reinstalling into a new prefix then installs a
-config file that points at the old prefix. `build_deps.stellarai` deletes it
+config file that points at the old prefix. `build_deps.stellarai_cpu` deletes it
 before configuring.
 
 ## Running
@@ -127,7 +134,8 @@ before configuring.
 
 ## Verification
 
-Checked 2026-09-22 on the static build (commit `c60540b6`):
+Checked 2026-09-22 on the static build, commit `e3b1a0b0` (branch tip `ef81ea36`
+adds only docs and the quickstart.sh build step):
 
 | Check | Result |
 |---|---|
@@ -145,6 +153,23 @@ the wrong namelist (`f0_update_alpha` belongs in `&f0_param`), missing empty
 namelists (`&resamp_param`, `&init_cond`, `&rad_param`), and source parameters
 that are now per-species arrays (`src_narea` and friends need one value per
 species). All three are fixed in the case and recorded there.
+
+### Commit hashes after the branch rewrite
+
+The branch was rewritten once, on 2026-09-22, to add
+`quickstart/job_scripts/stellarai_cpu.sh` with mode 100755 (a merge-request
+check). File contents did not change. The tested binary was built before the
+rewrite, so its build banner, the provenance files and the catalog's observed
+build still say `c60540b6`. Those records carry an `xgc_commit_rewritten` map to
+the new hashes:
+
+| Before | After |
+|---|---|
+| `02b3d284` | `2728b428` |
+| `04ae662a` | `ff15f5e5` |
+| `faa90827` | `5d61fef7` |
+| `c60540b6` | `e3b1a0b0` |
+| `0b3d949b` | `6bf673b3` |
 
 ## Open items
 

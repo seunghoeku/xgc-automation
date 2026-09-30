@@ -1,7 +1,8 @@
 # Building XGC on STELLAR-AI (stellarai-amd.princeton.edu)
 
-Verified: 2026-09-22 / XGC-Devel `stellarai_cpu_setup` @ `c60540b6` (code; later
-commits on the branch are docs only), built in
+Verified: 2026-09-22 / XGC-Devel `stellarai_cpu_setup` @ `e3b1a0b0` (code; later
+commits are docs and the quickstart.sh build step; the binary banner says `c60540b6`,
+the same tree before a mode-only rewrite), built in
 `/scratch/gpfs/PTHEORY/seungku/XGC-Devel/build`. Full notes: `docs/build-stellarai.md`.
 
 ## The one rule: `/projects` is login-node only
@@ -14,7 +15,7 @@ compute nodes. Consequences:
 - XGC checkout, build and run directories go on `/scratch/gpfs/PTHEORY/<user>`.
 - Jobs source the env file **from the scratch checkout**
   (`quickstart/modules_and_env/stellarai_cpu.sh`), never the installed copy
-  `/projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai`.
+  `/projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai_cpu`.
 
 ## Summary
 
@@ -36,7 +37,7 @@ CPU-only (2x AMD EPYC 9475F, Zen 5, 96 cores/node, no SMT, no GPUs), so
 | Compiler | gcc 14.3.1 via OpenMPI 5.0.10 wrappers (`mpicc`/`mpicxx`/`mpifort`) |
 | Modules | `gcc/14`, `openmpi/gcc/5.0.10`, `hdf5/gcc/openmpi-5.0.10/1.14.6` |
 | Dependencies (static) | `/projects/XGC/STELLARAI/Software/install/<pkg>/DEFAULT/DEFAULT`: FFTW 3.3.10, Kokkos 4.7.04 (OpenMP+Serial, ZEN5), ADIOS2 2.12.1, gtest 1.17.0, PETSc 3.24.4 (fblaslapack/metis/parmetis); ninja 1.13.1 |
-| Dependency rebuild | `/projects/XGC/STELLARAI/Software/bin/build_deps.stellarai [pkg\|all]`, logs in `src/logs` |
+| Dependency rebuild | `/projects/XGC/STELLARAI/Software/bin/build_deps.stellarai_cpu [pkg\|all]`, logs in `src/logs` |
 | Platform | `XGC_PLATFORM=stellarai_cpu` -> `CMake/find_dependencies_stellarai_cpu.cmake` (branch `stellarai_cpu_setup`, not in master) |
 | camtimers/pspline | built in-tree (`USE_SYSTEM_*=OFF`) |
 | Not installed | FusionIO, DEGAS2, Cabana, Ginkgo, Omega_h |

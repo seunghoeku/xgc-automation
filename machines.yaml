@@ -284,7 +284,7 @@ stellarai:
     # Dependencies (static) are in /projects/XGC/STELLARAI/Software/install, which
     # only the build needs. Batch jobs must source the env file from the user's
     # XGC-Devel checkout on scratch (branch stellarai_cpu_setup), because the
-    # installed copy /projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai is
+    # installed copy /projects/XGC/STELLARAI/Software/bin/set_up_xgc.stellarai_cpu is
     # invisible on compute nodes.
     env_script: <xgc_src>/quickstart/modules_and_env/stellarai_cpu.sh
     remote_python: /usr/bin/python3   # system python 3.12.14
