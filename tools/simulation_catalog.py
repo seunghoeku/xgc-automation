@@ -844,9 +844,11 @@ def iter_records(*, catalog_dir: Path | None = None) -> Iterator[dict[str, Any]]
         return
     records: list[dict[str, Any]] = []
     for path in sorted(directory.glob("*.yaml")):
+        if path.name.startswith("._"):  # macOS AppleDouble sidecars left by tar/scp copies
+            continue
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
+        except (OSError, yaml.YAMLError, UnicodeDecodeError):
             continue
         if isinstance(data, dict) and data.get("record_id"):
             records.append(data)

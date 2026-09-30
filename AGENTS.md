@@ -158,5 +158,6 @@ submission. Full rules and handoffs: `docs/repo-roles.md`.
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |
 | Standalone SwiftBar monitor distribution | [hpc-queue-monitor](https://github.com/seunghoeku/hpc-queue-monitor); checkout integration in `docs/queue-watch.md` |
 | Non-Maxwellian `f_init` procedure (optional; load only when asked) | `f_init/README.md`, skill `f-init` |
+| Rotation-input matching loop for XGCa (optional; load only when asked) | `flow_match/README.md`, CLI `xgc-flowmatch` |
 | Traps already paid for (per case) | `kb/cases/<name>.yaml` notes, `docs/input-archive.md` |
 | Past session history and rationale | `git log` |

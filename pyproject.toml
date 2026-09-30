@@ -17,6 +17,12 @@ sheets = [
     "gspread>=6.0",
     "google-auth>=2.28",
 ]
+# Rotation-input matching loop (flow_match/README.md): local profile arithmetic.
+flow-match = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
 
 [project.scripts]
 xgc-remote-gui = "tools.remote_gui:main"
@@ -25,10 +31,11 @@ xgc-queue-watch = "tools.queue_watch:main"
 # Optional non-Maxwellian f_init procedure (f_init/README.md); not part of the
 # everyday flow, so it has its own package and entry point.
 xgc-finit = "f_init.cli:main"
+xgc-flowmatch = "flow_match.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["tools", "f_init"]
+packages = ["tools", "f_init", "flow_match"]

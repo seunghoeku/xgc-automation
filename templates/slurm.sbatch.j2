@@ -19,6 +19,9 @@
 {% if constraint %}
 #SBATCH --constraint={{ constraint }}
 {% endif %}
+{% if exclude_nodes %}
+#SBATCH --exclude={{ exclude_nodes }}
+{% endif %}
 {% if ntasks_per_node %}
 #SBATCH --ntasks-per-node={{ ntasks_per_node }}
 {% endif %}

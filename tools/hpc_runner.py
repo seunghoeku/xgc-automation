@@ -211,6 +211,7 @@ def prepare_submission(
     xgc_args: str | None = None,
     spare_nodes: int = 0,
     depend_on: str | None = None,
+    exclude_nodes: str | None = None,
 ) -> SubmissionPlan:
     """Render the job script and estimate cost. Submits nothing.
 
@@ -413,6 +414,9 @@ def prepare_submission(
         compute_nodes=nodes,
         spare_nodes=spare_nodes,
         known_bad_hosts=excluded_hosts,
+        # Slurm hostlist expression (e.g. sai-n07n[1-12]) the job must not use;
+        # for nodes a site has not drained yet.
+        exclude_nodes=(exclude_nodes or "").strip() or None,
         walltime=walltime,
         account=account,
         partition=partition,

@@ -92,7 +92,8 @@ machine: variables list, but reads fail with `EVPathRemoteFile ... FileNotOpen`
 (verified on Polaris and Aurora 2026-09-24, hpc-campaign 0.7.1). Until it is
 set, builds stay `pending`.
 
-Chosen aliases: `NERSC-Perlmutter`, `ALCF-Polaris` and `ALCF-Aurora`; the ALCF two are kept separate because the
+Chosen aliases: `NERSC-Perlmutter`, `ALCF-Polaris`, `ALCF-Aurora`,
+`Princeton-StellarAI` and `PPPL-Flux`; the ALCF two are kept separate because the
 two machines have different data filesystems (`/grand` and `/lus/flare`) and
 different home filesystems. Each machine's `~/.config/hpc-campaign/config.yaml`
 names the same alias (plus `campaignstorepath` and `cachepath` under
@@ -125,6 +126,69 @@ Or install XGC-Analysis with its extra:
 ```bash
 python -m pip install -e '/path/to/XGC-Analysis[campaign]'
 ```
+
+## Flux as a reader-only hub (2026-09-28)
+
+Flux (PPPL) runs no XGC. It reads archives whose data lives on stellar-ai:
+there is no shared filesystem and flux (PPPL internal network) is the only
+side that can open a connection, so archives are built on stellar-ai and only
+the `.aca` is copied to flux's store (`~/hpc-campaign/store/`).
+
+Verified 2026-09-28 with `d0008sa.aca` (built by `xgc-sim campaign d0008sa
+--confirm`, 528 kB, host `Princeton-StellarAI`): with the connector running
+on flux, `adios2.FileReader` on the copied archive read `xgc.oneddiag.bp`,
+`xgc.mesh.bp` and `xgc.bfield.bp` variables from stellar-ai with the same
+values as a local read there; scalars and shapes come from the archive
+itself, array data from the remote server (0.05-0.2 s per small variable).
+
+What flux holds:
+
+- `~/Software/hpc-campaign-venv`: made from the `python/3.13` module (the
+  `python/3.11` module has no `_tkinter`, and `hpc_campaign connector`
+  imports tkinter at module level). pip adios2 2.12.1, hpc-campaign 0.7.1,
+  `python-dateutil` (needed by `hpc_campaign.utils` but not declared by the
+  wheel), and XGC-Analysis `[campaign]` in editable mode.
+- `~/Software/hpc-campaign-env.sh`: exports `LD_LIBRARY_PATH` for
+  `/opt/hpc/software/python/3.13.11/lib`. Source it before using the venv
+  from a non-login shell (SSH commands): the interpreter otherwise fails to
+  load `libpython3.13.so.1.0`, and `module` is only a function in login shells.
+- `~/git/XGC-Analysis` at upstream/master 26d253e (same as Perlmutter),
+  delivered as a git bundle because the GitHub repository is private and
+  flux has no GitHub credentials.
+- `~/.config/hpc-campaign/config.yaml` (`PPPL-Flux`, store and cache under
+  `~/hpc-campaign/`) and `hosts.yaml` with the `Princeton-StellarAI` group:
+  one service that starts stellar-ai's `adios2_remote_server`
+  (`/projects/XGC/STELLARAI/Software/install/adios2/2.12.1/gcc-14.3-openmpi-5.0.10/bin/`)
+  over SSH as `seungku` with `authentication: publickey` and flux's
+  `~/.ssh/id_ed25519`. **Do not put the package's `version: v0.1` line in
+  hosts.yaml**: ADIOS parses the same file and rejects any top-level key
+  that is not a host definition (`adiosHostOptions ... must be either
+  'local' or a reference to another already defined host`).
+- The connector: `hpc_campaign connector -c ~/.config/hpc-campaign/hosts.yaml
+  -p 30000` (ADIOS looks for port 30000). It uses paramiko, not OpenSSH, so
+  it does not share the `~/.ssh/config` ControlMaster; stellar-ai accepted
+  the public key from flux without a Duo prompt, so the connector runs
+  unattended. `~/hpc-campaign/remote_read_test.sh` starts it (pid in
+  `connector.pid`, log in `connector.log`) and reads the test archive.
+
+Stellar-ai side: `/scratch/gpfs/PTHEORY/seungku/Software/{hpc-campaign-venv,XGC-Analysis}`
+(system python 3.12; `/projects` is login-only), `~/.config/hpc-campaign/config.yaml`
+with `Princeton-StellarAI`, and the `campaign` section of `machines.local.yaml`.
+Flux has no `campaign` section there because its `machines.yaml` block is
+still a placeholder (scheduler unconfirmed).
+
+Flux traps: `~/.bashrc` sets `noclobber` (use `>|` to overwrite) and calls
+`module`, which prints `module: command not found` in non-login shells.
+
+## Study archives of the flow-matching loop
+
+`flow_match` (see `flow_match/README.md`) keeps one archive per case under
+`<store>/flow_match/<case>.aca`, updated after every iteration with embedded
+text (input, rotation profiles, midplane analysis) and remote references to
+the diagnostics of the averaging window. It uses `hpc_campaign manager`
+directly (`text --store`, `data`), not the XGC-Analysis packager, and reads
+the embedded text with plain SQLite so the controller (flux) needs neither
+`xgc_analysis` nor `hpc_campaign` for the loop itself.
 
 ## Reading the archive elsewhere
 
