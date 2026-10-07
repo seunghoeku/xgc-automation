@@ -27,11 +27,18 @@ xgc-automation's side in detail.
   place for local-only notes and is excluded from git.
 
 **xgc-automation: everything about running the code and remembering what ran.**
+Since 2026-10-07 this side is itself two repositories: xgc-automation (shared
+code, documentation, machine facts, promoted cases, templates) and the user's
+**catalog repository** (`xgc-catalog`), which holds the state the tools write
+and is found through `XGC_CATALOG_DIR` / `~/.config/xgc-automation/config.yaml`
+(`docs/simulation-catalog.md`, "Catalog repository"). Record and provenance
+commits go to the catalog repository.
 - Simulation inputs: cases (`kb/cases/`), templates (`templates/`), input
-  files written for a run, `input_backup/`, `f_init/`.
-- Simulation identity and records: `simulation_id` reservation
-  (`kb/simulation_registry.yaml`), catalog records (`kb/simulations/`),
-  the CSV notebook, provenance (`runs/`).
+  files written for a run; `input_backup/` and `f_init/cases/` in the catalog
+  repository.
+- Simulation identity and records (catalog repository): `simulation_id`
+  reservation (`kb/simulation_registry.yaml`), catalog records
+  (`kb/simulations/`), the derived CSV notebook, provenance (`runs/`).
 - Job submission, status, cancellation, remote directories, transfers.
 - Which binary runs where: `machines.yaml` and the local overlay
   `machines.local.yaml` (`<machine>.xgc.exe`, `.commit`, `.build`).

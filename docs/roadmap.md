@@ -117,10 +117,12 @@ what was actually verified, and what is still open.
          for every state path that `PROJECT_ROOT` resolved (15 modules);
          default stays the current layout~~ (done 2026-10-07: `tools/paths.py`,
          `xgc-sim paths`).
-      3. Move the state into a per-user catalog repository
-         (`xgc-catalog-<user>`), history kept with `git filter-repo`; the
-         user's `USER.md` (accounts, allocations, preferences) lives there
-         and `AGENTS.md` imports it; shared repo ships `templates/USER.md.example`.
+      3. ~~Move the state into a per-user catalog repository, history kept
+         with `git filter-repo`; the user's `USER.md` (accounts, allocations,
+         preferences) lives there and `AGENTS.md` imports it; shared repo
+         ships `templates/USER.md.example`~~ (done 2026-10-07: `xgc-catalog`,
+         60 commits / 3203 files extracted; state paths gitignored here;
+         `~/.config/xgc-automation/config.yaml` + `USER.md` symlink).
       4. Catalog tools pull before writing, commit and push after; the only
          contested writes are the registry counter (retry once on a rejected
          push) since the CSV is gone.

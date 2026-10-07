@@ -117,11 +117,21 @@ type.** Never write personal values into committed files.
 
 Shared files (code, docs, `machines.yaml`, `templates/`, `kb/cases/`) come
 from the checkout; the user's state (catalog, registry, `runs/`,
-`input_backup/`, case logs, caches) follows `XGC_CATALOG_DIR` or
-`~/.config/xgc-automation/config.yaml`, default the checkout. State paths are
-taken from `tools/paths.py`, never rebuilt from `PROJECT_ROOT`; `xgc-sim paths`
-shows the resolved layout. A checkout on the machine itself binds it with
-`auth.method: local` (`docs/ssh-setup.md`).
+`input_backup/`, case logs, caches) lives in the user's **catalog
+repository**, found through `XGC_CATALOG_DIR` or
+`~/.config/xgc-automation/config.yaml` (default: the checkout, gitignored
+there). State paths are taken from `tools/paths.py`, never rebuilt from
+`PROJECT_ROOT`; `xgc-sim paths` shows the resolved layout. Catalog writes are
+committed and pushed in the catalog repository, never here. A checkout on the
+machine itself binds it with `auth.method: local` (`docs/ssh-setup.md`).
+(`docs/simulation-catalog.md`, "Catalog repository")
+
+## Per-user context
+The person's accounts, allocations, checkouts and working preferences are in
+their catalog repository's `USER.md`, imported here through a symlink (absent
+for a user who has not set one up; `templates/USER.md.example`):
+
+@~/.config/xgc-automation/USER.md
 
 ## Portability (macOS first, Linux compatible)
 - All remote work goes through `tools/ssh.py` (argv-list subprocess calls, no

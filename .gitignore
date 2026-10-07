@@ -42,3 +42,18 @@ f_init/cases/**/*.png
 # every submission (docs/simulation-catalog.md, "CSV notebook").
 kb/simulation_notebook.csv
 kb/simulation_notebook.csv.tmp
+
+# One user's state. It lives in a catalog repository (XGC_CATALOG_DIR or
+# ~/.config/xgc-automation/config.yaml, see tools/paths.py and
+# docs/simulation-catalog.md "Catalog repository"); with the default layout it
+# would be created inside this checkout and must still never be committed here.
+kb/simulations/
+kb/simulation_registry.yaml
+kb/simulation_registry.yaml.bak*
+kb/bad_nodes.yaml
+kb/cases/drafts/
+runs/
+input_backup/
+f_init/cases/
+flow_match/cases/
+Other_data/

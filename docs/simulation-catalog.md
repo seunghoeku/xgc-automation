@@ -381,6 +381,30 @@ Of 742 rows, 741 import. The one skip is an annotation row. Three rows that used
 to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
 `f136-f139`) now survive under distinct sub-tags.
 
+## Catalog repository
+
+Since 2026-10-07 the state is not in this repository. `kb/simulations/`,
+`kb/simulation_registry.yaml`, `kb/bad_nodes.yaml`, `kb/cases/drafts/`,
+`runs/`, `input_backup/`, `f_init/cases/`, `flow_match/cases/` and
+`Other_data/` were extracted with `git filter-repo` (history kept) into a
+per-user **catalog repository** (`xgc-catalog` for the original author), and
+the same paths are gitignored here so a default-layout checkout never commits
+them. The tools find the catalog through `XGC_CATALOG_DIR` or
+`catalog_dir` in `~/.config/xgc-automation/config.yaml` (`tools/paths.py`,
+`xgc-sim paths`); `machines.local.yaml` stays in each checkout because it
+differs per machine.
+
+The catalog repository also holds `USER.md`, the person's accounts,
+allocations, checkouts and preferences, symlinked to
+`~/.config/xgc-automation/USER.md` and imported by `AGENTS.md`;
+`templates/USER.md.example` is the blank. Commits that change records,
+provenance or input backups are made in the catalog repository; this one
+only carries code, documentation, machine facts and promoted cases.
+
+Until the tools pull and push the catalog themselves (roadmap item 13 step
+4), `git pull` there before reserving or submitting and push right after on
+every checkout.
+
 ## CSV notebook
 
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept next

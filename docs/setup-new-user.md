@@ -114,6 +114,14 @@ resolved layout and marks what does not exist yet. `machines.yaml`,
 `templates/` and the baseline cases in `kb/cases/` always come from the
 checkout (`tools/paths.py`).
 
+The recommended layout is a small git repository of your own for that
+directory (a "catalog repository"): `git init ~/xgc-catalog`, copy
+`templates/USER.md.example` there as `USER.md`, fill it in, and
+`ln -s ~/xgc-catalog/USER.md ~/.config/xgc-automation/USER.md` so the agent
+instructions pick it up. The state paths are gitignored in this checkout, so
+with the default layout nothing of yours can land in the shared repository
+either. See `docs/simulation-catalog.md`, "Catalog repository".
+
 If the checkout runs on the cluster itself (a clone on a login node), bind
 that machine with `auth.method: local` instead of an ssh alias; see
 `docs/ssh-setup.md`, "Running the automation on the machine itself".

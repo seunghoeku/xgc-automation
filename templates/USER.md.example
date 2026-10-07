@@ -1,0 +1,26 @@
+# USER.md: who this catalog belongs to
+
+Copy this file to the root of your catalog repository (the directory
+`XGC_CATALOG_DIR` or `catalog_dir` in `~/.config/xgc-automation/config.yaml`
+points at), fill it in, and symlink it to `~/.config/xgc-automation/USER.md`.
+The agent instructions (`AGENTS.md`) import it from there, so the shared
+repository never carries personal values.
+
+## Person
+- Name, institution, e-mail; GitHub user.
+- Language for chat replies; files, notes and commits stay in English.
+
+## Accounts and allocations
+| Machine | Login | Allocation / notes |
+|---|---|---|
+| Perlmutter (NERSC) | `<user>` | `<project>` (GPU: `<project>_g`) |
+| Polaris / Aurora (ALCF) | `<user>` | `<project>` |
+| stellar / stellar-ai (Princeton) | `<user>` | `<account>` |
+
+## Checkouts of xgc-automation
+- Which machines hold a checkout, where, and where this catalog is on each
+  (`auth.method: local` for a checkout on the cluster itself).
+
+## How I like to work
+- Standing rules the agent should know: approval habits, what to report,
+  what to clean up and when.
