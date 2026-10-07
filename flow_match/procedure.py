@@ -33,6 +33,7 @@ from tools import machines
 from tools import simulation_catalog as sc
 from tools import simulation_registry as sr
 from tools import ssh
+from tools import paths
 
 from . import backends as be
 from . import campaign as camp
@@ -188,7 +189,8 @@ def analyze(
     local_dir.mkdir(parents=True, exist_ok=True)
     local: dict[str, str] = {}
     for key, remote_path in (("json", f"{stem}.json"), ("prf", f"{stem}.prf"), ("png", f"{stem}.png")):
-        dest = local_dir / Path(remote_path).name
+        dest = paths.product_target(local_dir / Path(remote_path).name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         ssh.pull(target, remote_path, str(dest))
         local[key] = str(dest)
 
@@ -382,7 +384,8 @@ def adjust(
     out_path = local_dir / out_name
     save_prf(out_path, psi_in, omega_new)
 
-    png = local_dir / f"adjust_{label}.png"
+    png = paths.product_target(local_dir / f"adjust_{label}.png")
+    png.parent.mkdir(parents=True, exist_ok=True)
     try:
         import matplotlib
 

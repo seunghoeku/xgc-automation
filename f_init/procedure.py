@@ -22,6 +22,7 @@ from tools import dryrun as dryrun_mod
 from tools import machines
 from tools import scheduler as sched
 from tools import ssh
+from tools import paths
 
 from . import config as cfg
 from . import namelist_edit as nle
@@ -272,8 +273,9 @@ def convert_finit(
     payload = _run_json(target, argv, timeout=7200)
     case.artifacts_dir.mkdir(parents=True, exist_ok=True)
     if payload.get("png"):
-        local_png = case.artifacts_dir / f"convert__{Path(out_file).stem}.png"
+        local_png = paths.product_target(case.artifacts_dir / f"convert__{Path(out_file).stem}.png")
         try:
+            local_png.parent.mkdir(parents=True, exist_ok=True)
             ssh.pull(target, payload["png"], str(local_png))
             payload["local_png"] = str(local_png)
         except Exception as exc:  # noqa: BLE001

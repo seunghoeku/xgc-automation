@@ -72,5 +72,47 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(machines.LOCAL_MACHINES_FILE, paths.LOCAL_MACHINES_FILE)
 
 
+class DataRootTests(unittest.TestCase):
+    """Products (PNG, NPZ, logs) go to the data directory, mirrored; text stays."""
+
+    def test_data_root_precedence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.yaml"
+            config.write_text("data_dir: ./products\n", encoding="utf-8")
+            root, source = paths.resolve_data_root({"XGC_DATA_DIR": tmp}, config=config)
+            self.assertEqual((root, source), (Path(tmp).resolve(), "$XGC_DATA_DIR"))
+            root, source = paths.resolve_data_root({}, config=config)
+            self.assertEqual(root, (Path(tmp) / "products").resolve())
+            self.assertEqual(source, str(config))
+            root, source = paths.resolve_data_root(
+                {}, config=Path(tmp) / "missing.yaml", state_root=Path(tmp)
+            )
+            self.assertEqual(root, Path(tmp) / "data")
+
+    def test_product_target_mirrors_the_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state, data = Path(tmp) / "catalog", Path(tmp) / "data"
+            state.mkdir()
+            png = state / "runs" / "master" / "run-x" / "summaries" / "a.png"
+            self.assertEqual(
+                paths.product_target(png, state_root=state, data_root=data),
+                data / "runs" / "master" / "run-x" / "summaries" / "a.png",
+            )
+            json_path = png.with_suffix(".json")
+            self.assertEqual(
+                paths.product_target(json_path, state_root=state, data_root=data), json_path
+            )
+            elsewhere = Path(tmp) / "other" / "b.npz"
+            self.assertEqual(
+                paths.product_target(elsewhere, state_root=state, data_root=data), elsewhere
+            )
+
+    def test_product_suffixes(self) -> None:
+        for name in ("a.png", "b.NPZ", "job.out", "c.svg"):
+            self.assertTrue(paths.is_product(name), name)
+        for name in ("provenance.json", "input", "submit.sh", "plot.py"):
+            self.assertFalse(paths.is_product(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -539,9 +539,14 @@ def _cmd_paths(args: argparse.Namespace) -> int:
 
     rows = paths.layout()
     if args.json:
-        _print_json({"state_root_source": paths.STATE_ROOT_SOURCE, "paths": rows})
+        _print_json({
+            "state_root_source": paths.STATE_ROOT_SOURCE,
+            "data_root_source": paths.DATA_ROOT_SOURCE,
+            "paths": rows,
+        })
         return 0
     print(f"state root decided by: {paths.STATE_ROOT_SOURCE}")
+    print(f"data root decided by:  {paths.DATA_ROOT_SOURCE}")
     print(f"config file:           {paths.config_file()}")
     width = max(len(row["name"]) for row in rows)
     for row in rows:

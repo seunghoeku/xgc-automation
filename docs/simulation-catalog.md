@@ -405,6 +405,30 @@ Until the tools pull and push the catalog themselves (roadmap item 13 step
 4), `git pull` there before reserving or submitting and push right after on
 every checkout.
 
+### Data directory
+
+Analysis products never enter the catalog repository: PNG, NPZ, SVG, PDF,
+HDF5/NetCDF and pulled job `.out` logs (`tools/paths.PRODUCT_SUFFIXES`).
+They are regenerable from the remote output with the scripts that *are*
+kept, they do not diff, and they were the whole growth of the repository
+(130 MB of history on its first day, 95% images and arrays, at roughly
+100 MB a month). They live in the **data directory**, `data_dir` in
+`~/.config/xgc-automation/config.yaml` or `XGC_DATA_DIR` (default
+`<state root>/data`), with the **same relative layout** as the catalog:
+`<data_dir>/runs/master/run-<stamp>/summaries/a.png` sits beside the
+catalog's `runs/master/run-<stamp>/provenance.json`. Every writer passes its
+output path through `paths.product_target`, which redirects exactly those
+suffixes and leaves JSON, scripts and provenance where they are; the
+catalog's `.gitignore` is the backstop. Agents writing ad-hoc analysis
+products follow the same rule: products to the data directory, the script
+and a small JSON of the numbers to the catalog.
+
+The data directory is per machine (the Mac holds
+`~/Documents/Work/xgc-data/xgc-data-AI`; a cluster checkout keeps its own
+under scratch) and is synced on demand with `rsync`; the `.aca` campaign
+archive built on completion (`docs/campaign.md`) is the long-term home of
+reduced products on the remote side.
+
 ## CSV notebook
 
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept next

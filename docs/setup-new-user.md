@@ -106,6 +106,7 @@ checkout, set one thing:
 export XGC_CATALOG_DIR=~/xgc-catalog            # or, in
 # ~/.config/xgc-automation/config.yaml
 catalog_dir: ~/xgc-catalog
+data_dir: ~/xgc-data        # PNG/NPZ/logs, same layout, outside git (default <catalog>/data)
 ```
 
 Every state path follows; `machines.local.yaml` is read from the checkout if

@@ -71,6 +71,10 @@ Do not renumber them.
 ## Data Principles
 - XGC output is ADIOS2 (`.bp`) and can reach several TB. **Never download it
   all.** Reduce remotely to summary products, then pull only small amounts.
+- Pulled products (PNG, NPZ, SVG, job logs) go to the **data directory**
+  (`paths.product_target`, `data_dir` in the user config, `xgc-sim paths`),
+  never into the catalog repository; the script and a small JSON of the
+  numbers go to the catalog. (`docs/simulation-catalog.md`, "Data directory")
 - Every new simulation gets one **globally sequential `simulation_id`** from
   `kb/simulation_registry.yaml`, in one of two series: **production** physics
   runs are `n671pe`; **dev** test, debug, and algorithm-verification runs are

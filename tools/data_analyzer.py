@@ -794,8 +794,11 @@ def analyze_run(
 
     summary_dir = run_dir / "summaries"
     output_path = summary_dir / f"{product}.json"
+    # Images are products: they go to the data directory (same relative layout).
     plot_path = (
-        summary_dir / f"{product}.svg" if product == "oned_profiles" else None
+        paths.product_target(summary_dir / f"{product}.svg")
+        if product == "oned_profiles"
+        else None
     )
     existing_paths = [
         path
@@ -834,6 +837,7 @@ def analyze_run(
     )
     result.update({"saved": True, "output_path": str(output_path)})
     if plot_path is not None and plot_document is not None:
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
         plot_path.write_text(plot_document, encoding="utf-8")
         result["plot_path"] = str(plot_path)
     return result
