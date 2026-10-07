@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools import campaign as campaign_tool
+from tools import catalog_sync
 from tools import legacy_import
 from tools import refresh as refresh_tool
 from tools import run_adoption
@@ -298,6 +299,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_note(args: argparse.Namespace) -> int:
     record = catalog.set_note(args.record_id, args.note, catalog_dir=_catalog_dir(args))
     if args.json:
@@ -307,6 +309,7 @@ def _cmd_note(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_ai_note(args: argparse.Namespace) -> int:
     record = catalog.set_ai_note(args.record_id, args.ai_note, catalog_dir=_catalog_dir(args))
     if args.json:
@@ -316,6 +319,7 @@ def _cmd_ai_note(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_status(args: argparse.Namespace) -> int:
     record = catalog.update_record(
         args.record_id, {"status": args.status}, catalog_dir=_catalog_dir(args)
@@ -327,6 +331,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_archive(args: argparse.Namespace) -> int:
     record = catalog.set_archive(
         args.record_id,
@@ -364,6 +369,7 @@ def _cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_adopt(args: argparse.Namespace) -> int:
     payload = run_adoption.adopt_runs(
         runs_dir=Path(args.runs_dir) if args.runs_dir else None,
@@ -381,6 +387,7 @@ def _cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_adopt_remote(args: argparse.Namespace) -> int:
     from tools import remote_adoption
 
@@ -433,6 +440,7 @@ def _cmd_adopt_remote(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_refresh(args: argparse.Namespace) -> int:
     if args.dry_run:
         payload = refresh_tool.plan_refresh(
@@ -517,6 +525,7 @@ def _cmd_sync_sheet(args: argparse.Namespace) -> int:
     return 0
 
 
+@catalog_sync.synced(lambda result, args: f"xgc-sim {args.command} {getattr(args, 'record_id', None) or getattr(args, 'remote_dir', None) or getattr(args, 'machine', None) or ''}".rstrip())
 def _cmd_sync_notebook(args: argparse.Namespace) -> int:
     from tools import notebook_csv
 
@@ -586,6 +595,12 @@ def _global_options() -> argparse.ArgumentParser:
     value the main parser already stored.
     """
     shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument(
+        "--no-sync",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="do not git pull/commit/push the catalog repository around this command",
+    )
     shared.add_argument(
         "--json",
         action="store_true",
@@ -756,6 +771,8 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if getattr(args, "no_sync", False):
+        catalog_sync.disable_for_process()
     # The shared options use SUPPRESS so either position wins, which means an
     # unused option leaves no attribute behind at all.
     for name, default in (("json", False), ("catalog_dir", None)):

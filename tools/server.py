@@ -62,6 +62,7 @@ from tools import refresh as refresh_tool
 from tools import remote_gui as rg
 from tools import simulation_catalog as sc
 from tools import simulation_registry as sr
+from tools import catalog_sync
 from tools import ssh as ssh_transport
 
 mcp = FastMCP("xgc-tools")
@@ -381,7 +382,8 @@ def reserve_simulation_id(
     the same ``kind`` (``production`` or ``dev``) as the plan. A stale number
     is rejected rather than silently allocating a different ID.
     """
-    return sr.reserve_simulation_id(
+    pulled = catalog_sync.pull()
+    result = sr.reserve_simulation_id(
         machines,
         short_name,
         tags=tags,
@@ -389,9 +391,33 @@ def reserve_simulation_id(
         confirm=confirm,
         kind=kind,
     )
+    if not result.get("reserved"):
+        result["catalog_sync"] = {"pull": pulled}
+        return result
+    subject = f"reserve {result['simulation_id']}"
+    pushed = catalog_sync.commit_and_push(subject)
+    if pushed.get("rejected"):
+        # The other checkout reserved first and the registry counter conflicts.
+        # Taking the next free number silently would hand out an ID the human
+        # never approved, so undo this reservation and ask for a new plan.
+        dropped = catalog_sync.drop_unpushed_commit(subject)
+        plan = sr.plan_simulation_id(machines, short_name, tags=tags, kind=kind)
+        return {
+            "reserved": False,
+            "reason": (
+                f"another checkout reserved a number first; {result['simulation_id']} "
+                f"was withdrawn. The next {kind} number is now "
+                f"{plan['simulation_number']}: show it and reserve again."
+            ),
+            "plan": plan,
+            "catalog_sync": {"pull": pulled, "push": pushed, "undo": dropped},
+        }
+    result["catalog_sync"] = {"pull": pulled, "push": pushed}
+    return result
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"stage {k.get('simulation_id', '')}")
 def stage_simulation_case(
     case: str,
     simulation_id: str,
@@ -481,6 +507,7 @@ def simulation_stats() -> dict[str, Any]:
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: "refresh status" + (f" {k['record_id']}" if k.get("record_id") else "") + (f" on {k['machine']}" if k.get("machine") else ""))
 def refresh_simulations(
     machine: str | None = None,
     record_id: str | None = None,
@@ -507,6 +534,7 @@ def refresh_simulations(
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"campaign {k.get('record_id') or k.get('simulation_id') or ''}")
 def build_campaign(
     record_id: str,
     confirm: bool = False,
@@ -543,6 +571,7 @@ def campaign_status(record_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"adopt {str(k.get('remote_dir', '')).rstrip('/').rsplit('/', 1)[-1]} ({k.get('machine', '')})")
 def adopt_remote_run(
     machine: str,
     remote_dir: str,
@@ -578,6 +607,7 @@ def adopt_remote_run(
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"note {k.get('record_id', '')}")
 def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dict[str, Any]:
     """Write the human-owned note on a simulation. Requires confirmation.
 
@@ -598,6 +628,7 @@ def set_simulation_note(record_id: str, note: str, confirm: bool = False) -> dic
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"ai_note {k.get('record_id', '')}")
 def set_ai_note(record_id: str, ai_note: str) -> dict[str, Any]:
     """Write the agent's own note on a simulation. No confirmation needed.
 
@@ -674,6 +705,7 @@ def plan_case_promotion(archive_name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"draft case {k.get('name') or k.get('case') or ''}")
 def write_draft_case(
     archive_name: str,
     confirm: bool = False,
@@ -811,6 +843,7 @@ def validate_input(
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"submit {k.get('simulation_id') or (result.get('run_id') if isinstance(result, dict) else '')} on {k.get('machine', '')}")
 def submit_job(
     machine: str,
     confirm: bool = False,
@@ -887,6 +920,7 @@ def submit_job(
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"status {k.get('machine', '')} {k.get('job_id', '')}")
 def job_status(machine: str, job_id: str) -> dict[str, Any]:
     """Query a job's state, normalized to pending/running/completed/failed/cancelled.
 
@@ -897,6 +931,7 @@ def job_status(machine: str, job_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"cancel {k.get('machine', '')} {k.get('job_id', '')}")
 def cancel_job(machine: str, job_id: str, confirm: bool = False) -> dict[str, Any]:
     """Cancel a running or queued job. Requires explicit human confirmation."""
     return hr.cancel(machine, job_id, confirm=confirm)
@@ -913,6 +948,7 @@ def job_output(machine: str, run_id: str, max_bytes: int = 100_000) -> dict[str,
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"analysis {k.get('run_id') or k.get('simulation_id') or ''}")
 def analyze_run(
     machine: str,
     run_id: str,

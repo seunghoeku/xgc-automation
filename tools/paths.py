@@ -60,6 +60,22 @@ def config_file(env: Mapping[str, str] | None = None) -> Path:
     return Path(env.get(CONFIG_ENV_VAR) or DEFAULT_CONFIG_FILE).expanduser()
 
 
+def config_setting(key: str, default: Any = None, *, config: Path | None = None) -> Any:
+    """A raw value from the per-user config file (``None``/``default`` if absent)."""
+    path = config_file() if config is None else config
+    if not path.is_file():
+        return default
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return default
+    if not isinstance(data, dict) or key not in data:
+        return default
+    return data[key]
+
+
 def _config_value(path: Path, key: str) -> Path | None:
     """``key`` from the YAML config file as a path (relative to the file), or None."""
     if not path.is_file():

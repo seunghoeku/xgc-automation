@@ -401,9 +401,22 @@ allocations, checkouts and preferences, symlinked to
 provenance or input backups are made in the catalog repository; this one
 only carries code, documentation, machine facts and promoted cases.
 
-Until the tools pull and push the catalog themselves (roadmap item 13 step
-4), `git pull` there before reserving or submitting and push right after on
-every checkout.
+The tools keep the checkouts in step themselves (`tools/catalog_sync.py`):
+every write entry point, the MCP tools that change records and the `xgc-sim`
+commands that do, runs `git pull --rebase` on the catalog first and commits
+and pushes afterwards with a subject such as `reserve n695pe`, `submit n695pe
+on perlmutter`, `status perlmutter 59018634` or `ai_note n674po`. The outcome
+is attached to the tool result under `catalog_sync` and printed by the CLI.
+A sync failure never undoes or blocks the write; it is reported. It is on
+when the state root is a git work tree with an `origin` remote and is not the
+code checkout; `catalog_sync: true|false` in the config file forces it, and
+`xgc-sim --no-sync` skips it once.
+
+Records are one file per simulation, so two checkouts collide only on the
+registry counter. A rejected push is rebased once; when the rebase conflicts
+(both sides reserved the same number) `reserve_simulation_id` drops its own
+unpushed commit, pulls, and answers `reserved: false` with the number the
+series has moved to, instead of handing out a number the human never saw.
 
 ### Data directory
 

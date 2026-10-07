@@ -126,7 +126,9 @@ repository**, found through `XGC_CATALOG_DIR` or
 `~/.config/xgc-automation/config.yaml` (default: the checkout, gitignored
 there). State paths are taken from `tools/paths.py`, never rebuilt from
 `PROJECT_ROOT`; `xgc-sim paths` shows the resolved layout. Catalog writes are
-committed and pushed in the catalog repository, never here. A checkout on the
+committed and pushed in the catalog repository, never here; the write tools
+do that themselves (`tools/catalog_sync.py`: pull before, commit and push
+after, reported under `catalog_sync`). A checkout on the
 machine itself binds it with `auth.method: local` (`docs/ssh-setup.md`).
 (`docs/simulation-catalog.md`, "Catalog repository")
 
