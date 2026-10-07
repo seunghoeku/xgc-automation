@@ -40,8 +40,10 @@ from typing import Any
 
 from tools import sheet_sync
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-NOTEBOOK_PATH = PROJECT_ROOT / "kb" / "simulation_notebook.csv"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+NOTEBOOK_PATH = paths.NOTEBOOK_PATH  # follows XGC_CATALOG_DIR (tools/paths.py)
 
 
 class CsvWorksheet:

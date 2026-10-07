@@ -34,9 +34,11 @@ from tools import provenance as prov
 from tools import ssh
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNS_DIR = PROJECT_ROOT / "runs"
-SESSION_DIR = PROJECT_ROOT / ".cache" / "remote-gui"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+RUNS_DIR = paths.RUNS_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
+SESSION_DIR = paths.CACHE_DIR / "remote-gui"
 SESSION_ID_RE = re.compile(r"^gui-[A-Za-z0-9_.-]+$")
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 

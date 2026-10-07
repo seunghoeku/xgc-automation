@@ -35,6 +35,7 @@ All MCP tools are exposed from `tools/server.py`. The repository installs
 | Module | Role |
 |---|---|
 | `tools/ssh.py` | Every remote call. argv-list subprocess, ControlMaster for MFA hosts, sshproxy key + tool-owned `~/.ssh/xgc-cm/` socket for Perlmutter, and explicit `key` mode for generic public-key hosts. Connect timeout 60 s; existing-master channel probe 30 s. |
+| `tools/paths.py` | Resolves where shared files (checkout) and the user's state (`XGC_CATALOG_DIR`, `~/.config/xgc-automation/config.yaml`, default the checkout) live; every state constant in the other modules is initialised from it. `xgc-sim paths` prints the layout. |
 | `tools/machines.py` | Loads `machines.yaml` deep-merged under `machines.local.yaml`. `using_machines` supplies scoped explicit definitions for standalone consumers without reading repository configuration. `is_placeholder` tests unfilled fields. |
 | `tools/queue_menu.py` | Cache-only SwiftBar rendering: jobs, recent departures, start estimates, prioritized server state icons, and separate connection warnings. |
 | `tools/monitor_dist.py` | Exports the original package snapshot with a five-module allowlist and source hashes. Public package development/builds now use the independent `hpc-queue-monitor` repository. |

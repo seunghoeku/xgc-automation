@@ -93,6 +93,27 @@ that imports Flask, NumPy, Matplotlib, and ADIOS2. `gui.env_script` is optional.
 Run `uv run xgc-remote-gui plan ...` before opening a session; see
 `docs/remote-gui.md`.
 
+### Where your state lives (`XGC_CATALOG_DIR`)
+
+The repository is two things: shared code and documentation, and one
+researcher's state that the tools write (the catalog `kb/simulations/`, the
+registry, `runs/`, `input_backup/`, f_init and flow_match case logs, caches).
+By default the state lives inside the checkout. To keep it elsewhere, for
+example in a catalog directory shared between a laptop checkout and a cluster
+checkout, set one thing:
+
+```bash
+export XGC_CATALOG_DIR=~/xgc-catalog            # or, in
+# ~/.config/xgc-automation/config.yaml
+catalog_dir: ~/xgc-catalog
+```
+
+Every state path follows; `machines.local.yaml` is read from the checkout if
+it is there, else from the state directory. `xgc-sim paths` prints the
+resolved layout and marks what does not exist yet. `machines.yaml`,
+`templates/` and the baseline cases in `kb/cases/` always come from the
+checkout (`tools/paths.py`).
+
 If the checkout runs on the cluster itself (a clone on a login node), bind
 that machine with `auth.method: local` instead of an ssh alias; see
 `docs/ssh-setup.md`, "Running the automation on the machine itself".

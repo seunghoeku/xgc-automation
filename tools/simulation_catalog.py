@@ -43,12 +43,13 @@ from typing import Any, Iterable, Iterator
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Overridable so a second checkout, or a test, can point at its own catalog
-# without editing code. Every function also takes an explicit catalog_dir.
-CATALOG_DIR = Path(
-    os.environ.get("XGC_SIMULATION_CATALOG", PROJECT_ROOT / "kb" / "simulations")
-)
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+# Resolved by tools/paths.py (XGC_CATALOG_DIR, the config file, or the
+# repository; XGC_SIMULATION_CATALOG still overrides this one directory).
+# Every function also takes an explicit catalog_dir.
+CATALOG_DIR = paths.CATALOG_DIR
 
 SCHEMA_VERSION = 2
 

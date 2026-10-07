@@ -14,9 +14,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ARCHIVE_DIR = PROJECT_ROOT / "input_backup"
-CACHE_DIR = PROJECT_ROOT / ".cache"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+ARCHIVE_DIR = paths.INPUT_BACKUP_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
+CACHE_DIR = paths.CACHE_DIR
 # Both id series: n645pe (production physics runs) and d0001pe (dev test
 # runs). The series letter is kept so the two number sequences never mix.
 _NUMBERED_NAME_RE = re.compile(
@@ -159,7 +161,7 @@ def _machine_names(codes: list[str]) -> list[str]:
         "pe": "perlmutter", "po": "polaris", "au": "aurora", "do": "doudna",
         "fr": "frontier", "su": "summit", "st": "stellar", "fl": "flux", "sa": "stellarai",
     }
-    registry = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
+    registry = paths.REGISTRY_PATH
     try:
         import yaml
 

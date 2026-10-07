@@ -35,8 +35,10 @@ from typing import Any
 from tools import machines as m
 from tools import ssh
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CACHE_DIR = PROJECT_ROOT / ".cache"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+CACHE_DIR = paths.CACHE_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
 
 
 def _remote_python_for(machine: str, cfg: dict[str, Any]) -> str:

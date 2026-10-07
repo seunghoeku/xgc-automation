@@ -115,6 +115,14 @@ absorb the differences. **Higher-level logic must remain unaware of the machine
 type.** Never write personal values into committed files.
 (`docs/setup-new-user.md`)
 
+Shared files (code, docs, `machines.yaml`, `templates/`, `kb/cases/`) come
+from the checkout; the user's state (catalog, registry, `runs/`,
+`input_backup/`, case logs, caches) follows `XGC_CATALOG_DIR` or
+`~/.config/xgc-automation/config.yaml`, default the checkout. State paths are
+taken from `tools/paths.py`, never rebuilt from `PROJECT_ROOT`; `xgc-sim paths`
+shows the resolved layout. A checkout on the machine itself binds it with
+`auth.method: local` (`docs/ssh-setup.md`).
+
 ## Portability (macOS first, Linux compatible)
 - All remote work goes through `tools/ssh.py` (argv-list subprocess calls, no
   shell-string parsing, no BSD/GNU CLI differences).

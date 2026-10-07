@@ -37,8 +37,10 @@ from typing import Any, Iterable
 from tools import provenance as prov
 from tools import simulation_catalog as catalog
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNS_DIR = PROJECT_ROOT / "runs"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+RUNS_DIR = paths.RUNS_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
 
 # Scheduler smoke tests: real records, but not science. They are adopted only
 # on request, since they would otherwise clutter every search.

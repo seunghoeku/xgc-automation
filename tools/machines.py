@@ -27,9 +27,13 @@ from typing import Any
 import yaml
 
 # Project root = parent of the parent of this file (tools/machines.py)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MACHINES_FILE = PROJECT_ROOT / "machines.yaml"
-LOCAL_MACHINES_FILE = PROJECT_ROOT / "machines.local.yaml"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+MACHINES_FILE = paths.MACHINES_FILE
+# The personal overlay: the checkout's copy, else the one next to the state
+# (XGC_CATALOG_DIR); see tools/paths.py.
+LOCAL_MACHINES_FILE = paths.LOCAL_MACHINES_FILE
 _definitions: ContextVar[dict[str, Any] | None] = ContextVar("machines", default=None)
 
 

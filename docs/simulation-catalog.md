@@ -30,7 +30,9 @@ kb/simulations/<record_id>.yaml     one file per catalog item
 
 One file per catalog item, rather than one index, so that git history shows what
 changed about a given item instead of a single perpetually-conflicting
-file. Set `XGC_SIMULATION_CATALOG` to point elsewhere.
+file. The directory follows the state root chosen by `XGC_CATALOG_DIR` or
+`~/.config/xgc-automation/config.yaml` (`tools/paths.py`, `xgc-sim paths`);
+`XGC_SIMULATION_CATALOG` still overrides this one directory.
 
 The user-visible identity is the pair `simulation_tag + sub_tag`. Both values
 must match for two rows to be the same item. `simulation_tag` is the familiar

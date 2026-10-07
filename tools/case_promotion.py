@@ -31,17 +31,14 @@ import yaml
 
 from tools import input_archive
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
 # The researcher's run notebook. Another user can point the pipeline at their
 # own notebook (same shape: one sheet per year, shot#/description/code/note
 # columns) via the environment variable without editing code.
-NOTES_PATH = Path(
-    os.environ.get(
-        "XGC_SIMULATION_NOTEBOOK",
-        PROJECT_ROOT / "Other_data" / "simulation_note_XGC1.xlsx",
-    )
-)
-DRAFTS_DIR = PROJECT_ROOT / "kb" / "cases" / "drafts"
+NOTES_PATH = paths.HISTORICAL_NOTEBOOK  # XGC_SIMULATION_NOTEBOOK or <state root>/Other_data/...
+DRAFTS_DIR = paths.DRAFTS_DIR  # drafts are state; promoted cases in kb/cases/ are shared
 
 _SHOT_NUMBER_RE = re.compile(r"(?:^|[^0-9])(\d{2,4})(?:[^0-9]|$)")
 

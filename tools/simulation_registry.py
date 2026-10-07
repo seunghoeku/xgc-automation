@@ -33,8 +33,10 @@ from tools import input_builder
 from tools import machines as machine_config
 from tools import simulation_catalog as catalog
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-REGISTRY_PATH = PROJECT_ROOT / "kb" / "simulation_registry.yaml"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+REGISTRY_PATH = paths.REGISTRY_PATH  # follows XGC_CATALOG_DIR (tools/paths.py)
 _SIMULATION_ID_RE = re.compile(
     r"^(?:n[0-9]{3,}|d[0-9]{4,})([a-z]{2}(?:_[a-z]{2})*)$"
 )

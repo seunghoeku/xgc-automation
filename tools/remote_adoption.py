@@ -38,8 +38,10 @@ from tools import scheduler as sched
 from tools import simulation_catalog as catalog
 from tools import ssh
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ADOPTED_DIR = PROJECT_ROOT / "runs" / "adopted"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+ADOPTED_DIR = paths.ADOPTED_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
 
 # stdout files a job leaves behind: XGC's own redirected stdout (the
 # hand-written scripts do ``> xgc.out.$PBS_JOBID``), PBS ``<name>.o<id>``, and

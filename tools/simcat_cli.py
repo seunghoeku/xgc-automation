@@ -534,6 +534,23 @@ def _cmd_sync_notebook(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_paths(args: argparse.Namespace) -> int:
+    from tools import paths
+
+    rows = paths.layout()
+    if args.json:
+        _print_json({"state_root_source": paths.STATE_ROOT_SOURCE, "paths": rows})
+        return 0
+    print(f"state root decided by: {paths.STATE_ROOT_SOURCE}")
+    print(f"config file:           {paths.config_file()}")
+    width = max(len(row["name"]) for row in rows)
+    for row in rows:
+        marker = " " if row["exists"] else "!"
+        print(f"{marker} {row['name']:<{width}}  {row['kind']:<6}  {row['path']}")
+    print("(! = does not exist yet)")
+    return 0
+
+
 def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--machine")
     parser.add_argument("--status", choices=list(catalog.STATUSES))
@@ -722,6 +739,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     notebook_parser.add_argument("--confirm", action="store_true")
     notebook_parser.set_defaults(func=_cmd_sync_notebook)
+
+    paths_parser = add(
+        "paths",
+        help="show where shared files and this user's state resolve (XGC_CATALOG_DIR)",
+    )
+    paths_parser.set_defaults(func=_cmd_paths)
 
     return parser
 

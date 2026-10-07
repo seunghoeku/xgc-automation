@@ -24,8 +24,10 @@ from tools import machines as m
 from tools import provenance as prov
 from tools import ssh
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNS_DIR = PROJECT_ROOT / "runs"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+RUNS_DIR = paths.RUNS_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
 MAX_INVENTORY_BYTES = 2_000_000
 MAX_SCIENTIFIC_SUMMARY_BYTES = 4_000_000
 DEFAULT_MAX_ENTRIES = 1_000

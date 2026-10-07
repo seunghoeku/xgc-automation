@@ -21,7 +21,10 @@ import yaml
 
 from tools import machines
 
-CASES_DIR = Path(__file__).resolve().parent / "cases"
+from tools import paths  # noqa: E402
+
+# Case logs are per-user state and follow XGC_CATALOG_DIR (default: this package).
+CASES_DIR = paths.F_INIT_CASES_DIR
 
 # Defaults mirror the manual cbc6 procedure. A case file overrides any of them.
 DEFAULTS: dict[str, Any] = {

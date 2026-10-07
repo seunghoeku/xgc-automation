@@ -46,8 +46,10 @@ from . import machines as machine_config
 from . import scheduler as sched
 from . import ssh
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATE_DIR = PROJECT_ROOT / ".cache" / "queue-watch"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+STATE_DIR = paths.CACHE_DIR / "queue-watch"  # follows XGC_CATALOG_DIR (tools/paths.py)
 HISTORY_LIMIT = 5
 
 # How far ahead to warn about an expiring credential. Enough lead time for the

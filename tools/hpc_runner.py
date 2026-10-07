@@ -46,15 +46,18 @@ from tools import simulation_catalog as catalog
 from tools import simulation_registry as sim_registry
 from tools import ssh
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_DIR = PROJECT_ROOT / "templates"
-RUNS_DIR = PROJECT_ROOT / "runs"
+from tools import paths
+
+PROJECT_ROOT = paths.PROJECT_ROOT
+TEMPLATE_DIR = paths.TEMPLATE_DIR
+# State paths follow XGC_CATALOG_DIR (tools/paths.py); the defaults are the checkout.
+RUNS_DIR = paths.RUNS_DIR
 # Every submitted input is also appended here under the simulation's directory
 # name, the same layout as the historical archive (docs/input-archive.md).
-INPUT_BACKUP_DIR = PROJECT_ROOT / "input_backup"
+INPUT_BACKUP_DIR = paths.INPUT_BACKUP_DIR
 # Nodes that killed a job with a GPU/hardware fault; the GPU gate excludes
 # them before probing (templates/polaris.pbs.j2).
-BAD_NODES_FILE = PROJECT_ROOT / "kb" / "bad_nodes.yaml"
+BAD_NODES_FILE = paths.BAD_NODES_FILE
 
 
 class SubmissionError(RuntimeError):

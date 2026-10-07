@@ -21,8 +21,11 @@ from typing import Any
 
 import yaml
 
+from tools import paths  # noqa: E402
+
 PACKAGE_DIR = Path(__file__).resolve().parent
-CASES_DIR = PACKAGE_DIR / "cases"
+# Case logs are per-user state and follow XGC_CATALOG_DIR (default: this package).
+CASES_DIR = paths.FLOW_MATCH_CASES_DIR
 
 DEFAULTS: dict[str, Any] = {
     "machine": "perlmutter",
