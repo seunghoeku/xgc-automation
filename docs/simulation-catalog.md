@@ -442,6 +442,38 @@ under scratch) and is synced on demand with `rsync`; the `.aca` campaign
 archive built on completion (`docs/campaign.md`) is the long-term home of
 reduced products on the remote side.
 
+## Shot index
+
+Experimental inputs (profile files, equilibria, meshes, diagnostic exports)
+have the same two homes. The **files** go to the data directory,
+`<data_dir>/shots/<device>/<shot>/`, never into git. The **index** is one
+YAML per shot in the catalog repository, `kb/shots/<device>_<shot>.yaml`
+(`tools/shots.py`): for each file its path relative to the data directory,
+sha256 and size, `kind` (profile, equilibrium, mesh, diagnostic, other),
+`diagnostic` (the instrument or source, "CXRS system 3", "Thomson"),
+`quantity`, `columns` (the meaning and unit of every column), `origin`
+(the e-mail, paper or MDSplus tree it came from) and `used_by`.
+
+`used_by` is derived, never typed: every submission records the sha256 of
+each file the input references (`referenced_inputs.files`), and
+`xgc-sim shot link` (run automatically after `shot add`) joins the two by
+hash, so renaming a file never breaks the link between an experiment and
+the runs that used it.
+
+```bash
+xgc-sim shot add tcv 69271 ~/Downloads/ti_tcv69271_t1.1_NT.prf --kind profile \
+    --diagnostic "CXRS system 3" --quantity T_i \
+    --column psi_n="normalised poloidal flux" --column ti="ion temperature [eV]" \
+    --origin "TCV team e-mail, 2026-05" --description "NT discharge, PT pair 69508" --time-ms 1100
+xgc-sim shot list
+xgc-sim shot show tcv 69271
+xgc-sim shot link          # after adopting or importing runs
+```
+
+The MCP tools are `shot_index` (read) and `register_shot_file` (write,
+synced like every catalog write). The agent asks for column meanings and
+the diagnostic when they are not stated and never guesses them.
+
 ## CSV notebook
 
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept next

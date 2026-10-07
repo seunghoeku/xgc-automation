@@ -42,6 +42,8 @@ roadmap.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import os
 import socket
 import urllib.error
@@ -648,6 +650,67 @@ def set_ai_note(record_id: str, ai_note: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - the note is written either way
         notebook_state = {"synced": False, "error": str(exc)}
     return {"written": True, "notebook": notebook_state, **sc.summarize(record)}
+
+
+@mcp.tool()
+def shot_index(device: str | None = None, shot: str | None = None) -> dict[str, Any]:
+    """What experimental data is on file for a shot and which simulations used it.
+
+    Without arguments lists every indexed shot; with device and shot returns
+    that shot's full index: each file's path in the data directory, hash,
+    kind, diagnostic, the meaning and unit of every column, where it came
+    from, and ``used_by`` (simulations whose input references the same file,
+    matched by sha256). Read-only. (`docs/simulation-catalog.md`, "Shot index")
+    """
+    from tools import shots
+
+    if device and shot:
+        try:
+            return shots.load(device, shot)
+        except shots.ShotIndexError as exc:
+            return {"found": False, "error": str(exc)}
+    return {"shots": [shots.summarize(item) for item in shots.iter_shots()]}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"shot {k.get('device', '')} {k.get('shot', '')}: {Path(str(k.get('file', ''))).name}")
+def register_shot_file(
+    device: str,
+    shot: str,
+    file: str,
+    kind: str = "other",
+    diagnostic: str = "",
+    quantity: str = "",
+    columns: dict[str, str] | None = None,
+    origin: str = "",
+    note: str = "",
+    description: str | None = None,
+    time_ms: float | None = None,
+) -> dict[str, Any]:
+    """Register one experimental data file for a shot and remember what it is.
+
+    Copies the file into ``<data_dir>/shots/<device>/<shot>/`` and writes its
+    index entry (hash, kind, diagnostic, quantity, column meanings and
+    units, origin) into the catalog's ``kb/shots/<device>_<shot>.yaml``, then
+    links it to the simulations that reference it. ``columns`` maps a column
+    name to its meaning, e.g. ``{"ti": "ion temperature [eV], CXRS system 3"}``.
+    Ask the user for the meanings when they are not stated; never guess the
+    diagnostic.
+    """
+    from tools import shots
+
+    try:
+        entry = shots.register_file(
+            device, shot, file, kind=kind, diagnostic=diagnostic, quantity=quantity,
+            columns=columns, origin=origin, note=note,
+        )
+        if description is not None or time_ms is not None:
+            shots.describe(device, shot, description=description, time_ms=time_ms)
+        linked = shots.link()
+    except shots.ShotIndexError as exc:
+        return {"registered": False, "error": str(exc)}
+    key = f"{shots.shot_key(device, shot)}/{entry['name']}"
+    return {"registered": True, "entry": entry, "used_by": linked["linked"].get(key, [])}
 
 
 @mcp.tool()

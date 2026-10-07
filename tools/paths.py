@@ -189,6 +189,7 @@ HISTORICAL_NOTEBOOK = Path(
     os.environ.get("XGC_SIMULATION_NOTEBOOK")
     or STATE_ROOT / "Other_data" / "simulation_note_XGC1.xlsx"
 )
+SHOTS_DIR = KB_DIR / "shots"  # index of experimental shot data (files live in DATA_ROOT/shots)
 F_INIT_CASES_DIR = STATE_ROOT / "f_init" / "cases"
 FLOW_MATCH_CASES_DIR = STATE_ROOT / "flow_match" / "cases"
 
@@ -218,11 +219,13 @@ def layout() -> list[dict[str, Any]]:
         ("cases", CASES_DIR, "shared"),
         ("state_root", STATE_ROOT, "state"),
         ("data_root", DATA_ROOT, "data"),
+        ("shot_data", DATA_ROOT / "shots", "data"),
         ("catalog", CATALOG_DIR, "state"),
         ("registry", REGISTRY_PATH, "state"),
         ("notebook_csv", NOTEBOOK_PATH, "state"),
         ("bad_nodes", BAD_NODES_FILE, "state"),
         ("case_drafts", DRAFTS_DIR, "state"),
+        ("shots_index", SHOTS_DIR, "state"),
         ("runs", RUNS_DIR, "state"),
         ("adopted_runs", ADOPTED_DIR, "state"),
         ("input_backup", INPUT_BACKUP_DIR, "state"),

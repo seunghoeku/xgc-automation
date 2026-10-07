@@ -565,6 +565,53 @@ def _cmd_paths(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_columns(items: list[str] | None) -> dict[str, str]:
+    columns: dict[str, str] = {}
+    for item in items or []:
+        if "=" not in item:
+            raise SystemExit(f"--column expects name=meaning, got {item!r}")
+        name, meaning = item.split("=", 1)
+        columns[name.strip()] = meaning.strip()
+    return columns
+
+
+@catalog_sync.synced(lambda result, args: f"xgc-sim shot {args.shot_command} {getattr(args, 'device', '')} {getattr(args, 'shot', '')}".rstrip())
+def _cmd_shot(args: argparse.Namespace) -> int:
+    from tools import shots
+
+    try:
+        if args.shot_command == "add":
+            entry = shots.register_file(
+                args.device, args.shot, args.file, kind=args.kind, diagnostic=args.diagnostic or "",
+                quantity=args.quantity or "", columns=_parse_columns(args.column),
+                origin=args.origin or "", note=args.note or "", copy=not args.no_copy,
+            )
+            if args.description is not None or args.time_ms is not None:
+                shots.describe(args.device, args.shot, description=args.description, time_ms=args.time_ms)
+            linked = shots.link()
+            payload = {"registered": entry, "used_by": linked["linked"].get(
+                f"{shots.shot_key(args.device, args.shot)}/{entry['name']}", [])}
+        elif args.shot_command == "describe":
+            payload = shots.describe(args.device, args.shot, description=args.description,
+                                     time_ms=args.time_ms, note=args.note)
+        elif args.shot_command == "link":
+            payload = shots.link()
+        elif args.shot_command == "show":
+            payload = shots.load(args.device, args.shot)
+        else:  # list
+            payload = [shots.summarize(s) for s in shots.iter_shots()]
+    except shots.ShotIndexError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.json or args.shot_command in ("show", "add", "describe", "link"):
+        _print_json(payload)
+    else:
+        for row in payload:
+            users = ",".join(row["used_by"]) or "-"
+            print(f"{row['device']:<8} {str(row['shot']):<8} {row['files']:>3} file(s)  used by {users}  {row['description']}")
+    return 0
+
+
 def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--machine")
     parser.add_argument("--status", choices=list(catalog.STATUSES))
@@ -765,6 +812,43 @@ def _parser() -> argparse.ArgumentParser:
         help="show where shared files and this user's state resolve (XGC_CATALOG_DIR)",
     )
     paths_parser.set_defaults(func=_cmd_paths)
+
+    shot_parser = add(
+        "shot",
+        help="index of experimental shot data: files, column meanings, which simulations used them",
+    )
+    shot_commands = shot_parser.add_subparsers(dest="shot_command", required=True)
+
+    def shot_add(name: str, **kwargs: Any) -> argparse.ArgumentParser:
+        sub = shot_commands.add_parser(name, parents=[shared], **kwargs)
+        sub.set_defaults(func=_cmd_shot)
+        return sub
+
+    s_add = shot_add("add", help="register one file (copied into <data_dir>/shots/<device>/<shot>/)")
+    s_add.add_argument("device", help="tcv, d3d, asdexu, kstar, ...")
+    s_add.add_argument("shot")
+    s_add.add_argument("file")
+    s_add.add_argument("--kind", choices=("profile", "equilibrium", "mesh", "diagnostic", "other"), default="other")
+    s_add.add_argument("--diagnostic", help="instrument or source, e.g. 'CXRS system 3', 'Thomson'")
+    s_add.add_argument("--quantity", help="what the file holds, e.g. T_i, n_e, geqdsk")
+    s_add.add_argument("--column", action="append", metavar="NAME=MEANING",
+                       help="column meaning and unit; repeat per column")
+    s_add.add_argument("--origin", help="where it came from (e-mail, paper, MDSplus tree)")
+    s_add.add_argument("--note")
+    s_add.add_argument("--description", help="shot-level description")
+    s_add.add_argument("--time-ms", type=float, help="shot-level reference time")
+    s_add.add_argument("--no-copy", action="store_true", help="index the file where it is instead of copying")
+    s_desc = shot_add("describe", help="set shot-level description, time, note")
+    s_desc.add_argument("device")
+    s_desc.add_argument("shot")
+    s_desc.add_argument("--description")
+    s_desc.add_argument("--time-ms", type=float)
+    s_desc.add_argument("--note")
+    s_show = shot_add("show", help="one shot's index in full")
+    s_show.add_argument("device")
+    s_show.add_argument("shot")
+    shot_add("list", help="every indexed shot")
+    shot_add("link", help="recompute used_by from the catalog's input hashes")
 
     return parser
 

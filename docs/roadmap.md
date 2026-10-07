@@ -131,10 +131,12 @@ what was actually verified, and what is still open.
       5. Shot/experimental data and summary PNG/npz leave git: a data
          directory plus index YAML per shot (file hash, diagnostic, columns
          and units, which simulations used it) in the catalog repository.
-         Products half done 2026-10-07: `data_dir` / `XGC_DATA_DIR`,
-         `paths.product_target`, catalog `.gitignore`; 541 files (172 MB)
-         moved to the Mac's data directory, history rewrite pending. The shot
-         index is still open.
+         Done 2026-10-07: `data_dir` / `XGC_DATA_DIR`, `paths.product_target`,
+         catalog `.gitignore`, 541 files (172 MB) moved to the Mac's data
+         directory and the catalog history rewritten (130 MB -> 8 MB); shot
+         index `kb/shots/` with `xgc-sim shot` and the `shot_index` /
+         `register_shot_file` tools, `used_by` joined by sha256. Existing
+         shot files are registered as they come up, not in bulk.
       Keep YAML records as the source of truth; a SQLite index is a derived
       view for cross-catalog queries, never the master (binary diff, no merge).
       Personal paths still inside shared files (`pscratch/sd/s/sku` in

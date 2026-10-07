@@ -75,6 +75,11 @@ Do not renumber them.
   (`paths.product_target`, `data_dir` in the user config, `xgc-sim paths`),
   never into the catalog repository; the script and a small JSON of the
   numbers go to the catalog. (`docs/simulation-catalog.md`, "Data directory")
+- Experimental shot files are registered with `register_shot_file` /
+  `xgc-sim shot add` (file to the data directory, index with column
+  meanings and diagnostic to `kb/shots/`); ask for meanings, never guess
+  them. `shot_index` answers "what data do we have for shot N and who used
+  it". (`docs/simulation-catalog.md`, "Shot index")
 - Every new simulation gets one **globally sequential `simulation_id`** from
   `kb/simulation_registry.yaml`, in one of two series: **production** physics
   runs are `n671pe`; **dev** test, debug, and algorithm-verification runs are
