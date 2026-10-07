@@ -152,6 +152,21 @@ finds the repository relative to its own location and uses `.venv/bin/python`.
 If copying it to an existing plugin folder instead, set `XGC_AUTOMATION_ROOT`
 to the repository in the plugin's environment. No personal path is committed.
 
+SwiftBar stores that folder as an absolute path
+(`defaults read com.ameba.SwiftBar PluginDirectory`). When the checkout
+moves, the launchd agent's plist and this setting both have to follow, or
+the menu silently shows nothing while the poller keeps writing the cache
+(2026-10-07, checkout moved to `~/Documents/git/xgc-automation`):
+
+```bash
+defaults write com.ameba.SwiftBar PluginDirectory "$HOME/Documents/git/xgc-automation/templates/swiftbar"
+open -a SwiftBar
+```
+
+The poller's cache lives under the state root (`<catalog>/.cache/queue-watch`,
+`tools/paths.CACHE_DIR`), so the plugin and the agent must run from the same
+checkout and user config to see the same cache.
+
 Use a SwiftBar release containing the submenu refresh fix (available in
 2.1.2 beta 1 and later betas). SwiftBar 2.1.0/2.1.1 can disable server submenus
 when their titles or children change; restarting the app only temporarily
