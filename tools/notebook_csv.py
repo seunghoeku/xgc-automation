@@ -7,17 +7,28 @@ cached values of old formulas, and a binary workbook shows no diff in git.
 
 ``kb/simulation_notebook.csv`` replaces it going forward. It is the same view
 -- one row per simulation, the agent's ``ai_note`` and the human ``note``
-columns last -- but plain text,
-diffable, and regenerated from the catalog after every submission. It reuses
-``tools.sheet_sync`` unchanged: a CSV file is just another worksheet.
+columns last -- but plain text and regenerated from the catalog after every
+submission. It reuses ``tools.sheet_sync`` unchanged: a CSV file is just
+another worksheet.
 
     catalog (kb/simulations/*.yaml)  --push-->  kb/simulation_notebook.csv
     catalog                          <--pull--  note column only
 
+The CSV is a **derived file and is not tracked by git**: the catalog records
+are the source of truth and travel through git, the CSV is rebuilt from them
+on any checkout with ``xgc-sim sync-notebook --confirm`` (and by every
+submission and ``set_ai_note``). Committing it would make every submission on
+one machine conflict with every submission on another, for a file nobody
+edits by hand except one column.
+
 Edit the ``note`` cell of a row in any spreadsheet program, save as CSV, and
 the next sync (or the next submission) pulls it into the catalog record. Every
 other column is overwritten from the catalog; a hand-typed value there cannot
-be verified and does not survive.
+be verified and does not survive. A pull is only believed when the CSV is
+newer than the record file: a copy left behind from before a ``git pull``
+(or an older checkout on another machine) would otherwise overwrite a note
+written since with ``xgc-sim note``. Such rows are reported as
+``stale_notes`` and the catalog value is pushed over them.
 """
 
 from __future__ import annotations
@@ -65,10 +76,37 @@ class CsvWorksheet:
         tmp.replace(self.path)
 
 
+def _newer_than_record(csv_path: Path, catalog_dir: Path | None):
+    """A pull filter: believe the CSV's note only if the CSV is newer than the record.
+
+    git checkout gives a freshly pulled record a new mtime, so a CSV written
+    before the pull is correctly treated as stale for that row.
+    """
+    from tools import simulation_catalog as catalog
+
+    try:
+        csv_mtime = csv_path.stat().st_mtime
+    except OSError:
+        return lambda record_id: False
+
+    def newer(record_id: str) -> bool:
+        try:
+            record_mtime = catalog.record_path(record_id, catalog_dir=catalog_dir).stat().st_mtime
+        except (OSError, ValueError):
+            return True  # no record file to compare with; keep the old behaviour
+        return csv_mtime > record_mtime
+
+    return newer
+
+
 def plan(*, path: Path | None = None, catalog_dir: Path | None = None) -> dict[str, Any]:
     """Diff the catalog against the CSV. Writes nothing."""
-    worksheet = CsvWorksheet(path or NOTEBOOK_PATH)
-    return sheet_sync.plan_sync(worksheet=worksheet, catalog_dir=catalog_dir)
+    target = Path(path or NOTEBOOK_PATH)
+    return sheet_sync.plan_sync(
+        worksheet=CsvWorksheet(target),
+        catalog_dir=catalog_dir,
+        pull_filter=_newer_than_record(target, catalog_dir),
+    )
 
 
 def sync(
@@ -85,6 +123,7 @@ def sync(
         catalog_dir=catalog_dir,
         pull_notes=pull_notes,
         confirm=confirm,
+        pull_filter=_newer_than_record(target, catalog_dir),
     )
     payload["path"] = str(target)
     return payload

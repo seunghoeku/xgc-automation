@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 from tools import machines as machine_config
 from tools import simulation_catalog as catalog
@@ -265,11 +265,16 @@ def plan_sync(
     records: Iterable[dict[str, Any]] | None = None,
     catalog_dir: Path | None = None,
     pull_notes: bool = True,
+    pull_filter: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
     """Diff the catalog against the sheet. Writes nothing anywhere.
 
     Reports the rows that would be pushed and, separately, the notes a human
     changed in the browser that would be pulled back into the catalog.
+
+    ``pull_filter(record_id)`` may veto a pull for one row: a differing note
+    is then listed under ``stale_notes`` and the catalog value is pushed over
+    it. The CSV notebook uses it to ignore a copy older than the record.
     """
     summaries = (
         [catalog.summarize(record) for record in records]
@@ -284,6 +289,7 @@ def plan_sync(
     push_new: list[str] = []
     push_changed: list[str] = []
     note_pulls: list[dict[str, str]] = []
+    stale_notes: list[dict[str, str]] = []
 
     for summary in summaries:
         key = str(summary.get("record_id") or "").lower()
@@ -295,12 +301,16 @@ def plan_sync(
         sheet_note = row.get(HUMAN_COLUMN, "").strip()
         local_note = str(summary.get("note") or "").strip()
         if pull_notes and sheet_note and sheet_note != local_note:
-            # The human edited the browser copy; that wins for this one field.
-            note_pulls.append(
-                {"record_id": key, "sheet_note": sheet_note, "catalog_note": local_note}
-            )
-            summary = dict(summary)
-            summary["note"] = sheet_note
+            change = {"record_id": key, "sheet_note": sheet_note, "catalog_note": local_note}
+            if pull_filter is not None and not pull_filter(key):
+                # The copy is older than the record; the catalog wins and the
+                # push below overwrites the cell.
+                stale_notes.append(change)
+            else:
+                # The human edited the browser copy; that wins for this one field.
+                note_pulls.append(change)
+                summary = dict(summary)
+                summary["note"] = sheet_note
 
         if _row_for(summary) != [row.get(column, "") for column in COLUMNS]:
             push_changed.append(key)
@@ -313,11 +323,13 @@ def plan_sync(
         "push_new": push_new,
         "push_changed": push_changed,
         "note_pulls": note_pulls,
+        "stale_notes": stale_notes,
         "sheet_only": orphans,
         "counts": {
             "push_new": len(push_new),
             "push_changed": len(push_changed),
             "note_pulls": len(note_pulls),
+            "stale_notes": len(stale_notes),
             "sheet_only": len(orphans),
         },
         "writes": False,
@@ -330,6 +342,7 @@ def sync(
     catalog_dir: Path | None = None,
     pull_notes: bool = True,
     confirm: bool = False,
+    pull_filter: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
     """Pull human notes, then push the whole catalog to the sheet.
 
@@ -344,6 +357,7 @@ def sync(
         records=records,
         catalog_dir=catalog_dir,
         pull_notes=pull_notes,
+        pull_filter=pull_filter,
     )
     if not confirm:
         plan["synced"] = False

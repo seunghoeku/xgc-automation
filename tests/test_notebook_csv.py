@@ -97,3 +97,62 @@ class CsvNotebookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleCsvTests(unittest.TestCase):
+    """A CSV older than the record must not overwrite a newer catalog note."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.catalog_dir = self.root / "simulations"
+        self.path = self.root / "simulation_notebook.csv"
+        sc.create_record(
+            "n651po",
+            catalog_dir=self.catalog_dir,
+            machines=["polaris"],
+            short_name="dadt_ecbc_df",
+            directory_name="n651po_dadt_ecbc_df",
+            tags=["dadt"],
+        )
+        notebook_csv.sync(path=self.path, catalog_dir=self.catalog_dir, confirm=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _edit_csv_note(self, text: str) -> None:
+        with self.path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        column = rows[0].index("note")
+        rows[1][column] = text
+        with self.path.open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle, lineterminator="\n").writerows(rows)
+
+    def _set_mtimes(self, *, csv_time: float, record_time: float) -> None:
+        import os
+
+        os.utime(self.path, (csv_time, csv_time))
+        record = sc.record_path("n651po", catalog_dir=self.catalog_dir)
+        os.utime(record, (record_time, record_time))
+
+    def test_csv_newer_than_record_pulls_the_note(self) -> None:
+        self._edit_csv_note("typed in the spreadsheet")
+        self._set_mtimes(csv_time=2_000_000_000, record_time=1_000_000_000)
+        payload = notebook_csv.sync(path=self.path, catalog_dir=self.catalog_dir, confirm=True)
+        self.assertEqual(payload["pulled_notes"], ["n651po"])
+        self.assertEqual(payload["stale_notes"], [])
+        record = sc.read_record("n651po", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["note"], "typed in the spreadsheet")
+
+    def test_csv_older_than_record_is_stale_and_overwritten(self) -> None:
+        self._edit_csv_note("left over from before git pull")
+        sc.set_note("n651po", "written with xgc-sim note", catalog_dir=self.catalog_dir)
+        self._set_mtimes(csv_time=1_000_000_000, record_time=2_000_000_000)
+        payload = notebook_csv.sync(path=self.path, catalog_dir=self.catalog_dir, confirm=True)
+        self.assertEqual(payload["pulled_notes"], [])
+        self.assertEqual([item["record_id"] for item in payload["stale_notes"]], ["n651po"])
+        record = sc.read_record("n651po", catalog_dir=self.catalog_dir)
+        self.assertEqual(record["note"], "written with xgc-sim note")
+        with self.path.open(newline="", encoding="utf-8") as handle:
+            rows = {row["record_id"]: row for row in csv.DictReader(handle)}
+        self.assertEqual(rows["n651po"]["note"], "written with xgc-sim note")

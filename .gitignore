@@ -36,3 +36,9 @@ f_init/cases/**/*.png
 
 # Claude Code personal overrides (machine-specific paths)
 .claude/settings.local.json
+
+# Derived view of kb/simulations/*.yaml; rebuilt by every submission and by
+# `xgc-sim sync-notebook --confirm`. Tracking it made two machines conflict on
+# every submission (docs/simulation-catalog.md, "CSV notebook").
+kb/simulation_notebook.csv
+kb/simulation_notebook.csv.tmp

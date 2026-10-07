@@ -381,19 +381,37 @@ to be dropped because their cleaned shot tag repeated (`th337_2`, `j46s`, and
 
 ## CSV notebook
 
-`kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept inside
-the repository: one row per simulation, the same columns as the Google Sheet
-(`tools/sheet_sync.COLUMNS`, including `kind` to separate production runs from
-dev tests), the agent's `ai_note` and the human `note` columns last. It replaces the
-hand-kept `Other_data/simulation_note_XGC1.xlsx` going forward; that workbook
-stays as the historical notebook (rows through n656po) and is never written by
-automation, because openpyxl rewrites drop the cached values of its old
-formulas and a binary file shows no diff in git.
+`kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept next
+to it in the working tree: one row per simulation, the same columns as the
+Google Sheet (`tools/sheet_sync.COLUMNS`, including `kind` to separate
+production runs from dev tests), the agent's `ai_note` and the human `note`
+columns last. It replaces the hand-kept `Other_data/simulation_note_XGC1.xlsx`
+going forward; that workbook stays as the historical notebook (rows through
+n656po) and is never written by automation, because openpyxl rewrites drop the
+cached values of its old formulas and a binary file shows no diff in git.
+
+The CSV is a **derived file and is gitignored** (since 2026-10-07). The
+records in `kb/simulations/` are the source of truth and travel through git;
+the CSV is rebuilt from them. A fresh clone, or a checkout that has just
+pulled, materialises it with
+
+```bash
+xgc-sim sync-notebook --confirm
+```
+
+and every submission and `set_ai_note` rebuilds it anyway. It used to be
+committed; with the catalog written from more than one machine (the Mac and a
+remote checkout) that made every submission on one side a merge conflict on
+the other, for a whole-file rewrite nobody edits by hand except one column.
 
 The direction is the same as the sheet: machine facts are pushed from the
 catalog and overwrite the file; only `note` is pulled back. `ai_note` is
 push-only like every machine column: an edit to it in the CSV or the sheet is
-overwritten, because it belongs to the agent.
+overwritten, because it belongs to the agent. A pulled note is believed only
+when the CSV file is newer than the record file. A CSV left behind from before
+a `git pull` (git gives the pulled record a fresh mtime) would otherwise
+overwrite a note written since with `xgc-sim note` on another machine; such
+rows are reported as `stale_notes` and the catalog value is pushed over them.
 
 ### Human note and AI note
 
