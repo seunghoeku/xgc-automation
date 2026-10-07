@@ -87,7 +87,12 @@ def _manager_argv(case: cfg.Case, machine_cfg: dict[str, Any], archive: str, *cm
 
 
 def _run(target: ssh.SSHTarget, argv: list[str], timeout: float) -> str:
-    result = ssh.run(target, argv, timeout=timeout)
+    # `hpc_campaign manager` records its working directory as the replica's
+    # directory and the (absolute) file argument as its name; the remote server
+    # then opens <dir>/<name>. From the default SSH cwd that was
+    # /home/<user>//scratch/... and every remote .bp read failed ("Open failed"
+    # in adios2_remote_server's log, 2026-09-30). Run it from / instead.
+    result = ssh.run(target, argv, timeout=timeout, cwd="/")
     if not result.ok:
         tail = "\n".join(((result.stdout or "") + "\n" + (result.stderr or "")).splitlines()[-15:])
         raise CampaignError(f"{shlex.join(argv[:4])} ... failed (rc={result.returncode}):\n{tail}")
