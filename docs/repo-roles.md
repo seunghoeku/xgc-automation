@@ -8,7 +8,7 @@ xgc-automation's side in detail.
 | | XGC-Devel | xgc-automation |
 |---|---|---|
 | What it is | The XGC source code (Fortran/C++/Kokkos), shared with the whole XGC team | Simulation operations for this user: inputs, submissions, records, analysis |
-| Local path | `~/Documents/git/XGC-Devel` (worktree `XGC-Devel-dadt` on branch `dadt_prediction`) | `~/Documents/Work/AI_project/xgc-automation` |
+| Local path | `~/Documents/git/XGC-Devel` (worktree `XGC-Devel-dadt` on branch `dadt_prediction`) | `~/Documents/git/xgc-automation` |
 | Rules loaded from | its own `AGENTS.md` (coding rules) and `CLAUDE.local.md` (local build notes, not committed) | `AGENTS.md` here plus `docs/` |
 | Commit audience | upstream reviewers; every commit may be merged into the shared code | this user only |
 
