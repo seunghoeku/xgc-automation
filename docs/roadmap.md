@@ -104,6 +104,33 @@ what was actually verified, and what is still open.
       real SSH and SwiftBar on a second Mac;
       no PyPI release has been published. See `docs/queue-watch.md`.
 
+- [ ] 13. Multi-machine checkouts and the multi-user split — the repository
+      mixes shared code (`tools/`, `docs/`, `machines.yaml`, build docs,
+      `kb/cases/`) with one person's mutable state (`kb/simulations/`, the
+      registry, `runs/`, `input_backup/`, flow_match/f_init case logs), and
+      that state is now written from two checkouts (the Mac and stellar-ai,
+      `~/git/xgc-automation`, bound with `auth.method: local` since
+      2026-10-07; flux is secondary). Plan, in order:
+      1. ~~Make `kb/simulation_notebook.csv` a derived, untracked file and
+         protect notes against stale copies~~ (done 2026-10-07).
+      2. One setting (`XGC_CATALOG_DIR` or `~/.config/xgc-automation/`) for
+         every state path that `PROJECT_ROOT` resolves today (15 modules);
+         default stays the current layout.
+      3. Move the state into a per-user catalog repository
+         (`xgc-catalog-<user>`), history kept with `git filter-repo`; the
+         user's `USER.md` (accounts, allocations, preferences) lives there
+         and `AGENTS.md` imports it; shared repo ships `templates/USER.md.example`.
+      4. Catalog tools pull before writing, commit and push after; the only
+         contested writes are the registry counter (retry once on a rejected
+         push) since the CSV is gone.
+      5. Shot/experimental data and summary PNG/npz leave git: a data
+         directory plus index YAML per shot (file hash, diagnostic, columns
+         and units, which simulations used it) in the catalog repository.
+      Keep YAML records as the source of truth; a SQLite index is a derived
+      view for cross-catalog queries, never the master (binary diff, no merge).
+      Personal paths still inside shared files (`pscratch/sd/s/sku` in
+      docs/campaign.md, build-stellarai docs, f_init cases) become templated.
+
 ## Open questions
 
 1. **ohmic.pppl.gov API spec** — OpenAI-compatible? Authentication

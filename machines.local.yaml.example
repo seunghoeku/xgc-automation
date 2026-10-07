@@ -116,6 +116,8 @@ stellarai:
     method: key          # public key only, no Duo; office network or Princeton VPN
     batch_mode: false    # server adds an empty keyboard-interactive round (docs/ssh-setup.md)
     ssh_config_host: stellarai
+    # On a checkout that lives on stellar-ai itself use `method: local` instead
+    # of the three lines above: no ssh, commands run directly.
   paths:
     # scratch is a per-group fileset on STELLAR-AI, not per user
     scratch: /scratch/gpfs/PTHEORY/alice

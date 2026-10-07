@@ -270,6 +270,9 @@ stellarai:
     method: key
     batch_mode: false
     ssh_config_host: <ssh_alias>  # alias with IdentityFile + IdentitiesOnly
+    # A checkout of this repository running on stellar-ai itself sets
+    # `method: local` in its machines.local.yaml instead: commands run without
+    # ssh (docs/ssh-setup.md, "Running the automation on the machine itself").
   scheduler:
     type: slurm
     submit: sbatch

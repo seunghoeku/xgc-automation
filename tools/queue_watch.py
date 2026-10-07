@@ -355,7 +355,7 @@ def probe(machine: str) -> dict[str, Any]:
     except ssh.SSHError as error:
         return {"machine": machine, "pollable": False, "detail": str(error)}
 
-    if target.auth_method not in {"sshproxy", "key"}:
+    if target.auth_method not in {"sshproxy", "key", ssh.LOCAL_METHOD}:
         # A live master can still be unable to open a command channel: the
         # socket check only inspects the local process. This bounded probe is
         # the difference between "skipped, session is stale" and a poll that

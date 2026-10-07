@@ -93,6 +93,10 @@ that imports Flask, NumPy, Matplotlib, and ADIOS2. `gui.env_script` is optional.
 Run `uv run xgc-remote-gui plan ...` before opening a session; see
 `docs/remote-gui.md`.
 
+If the checkout runs on the cluster itself (a clone on a login node), bind
+that machine with `auth.method: local` instead of an ssh alias; see
+`docs/ssh-setup.md`, "Running the automation on the machine itself".
+
 ## 4. Data you will NOT have (and what still works)
 
 Two directories are the original researcher's personal science record and

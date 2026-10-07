@@ -194,6 +194,33 @@ ssh -O exit stellar
   ```
 - `polaris` was reached manually in 2026-07; the automation still requires
   the user-created MFA session and reuses its ControlMaster.
+
+## Running the automation on the machine itself (`auth.method: local`)
+
+A clone of this repository on a cluster login node (stellar-ai since
+2026-10-07, `~/git/xgc-automation` with `uv` in `~/.local/bin`) drives that
+machine without ssh. Its `machines.local.yaml` binds the machine with
+
+```yaml
+stellarai:
+  auth:
+    method: local
+```
+
+and `tools/ssh.py` then runs the same shell string through `bash -c`,
+writes files directly and copies with `cp -r`; `preflight` reports
+`local_checkout: true` and skips the port, socket and certificate checks.
+Nothing above the transport changes. Loopback ssh is not an option on
+stellar-ai: logins are authorised centrally and `~/.ssh/authorized_keys` is
+not consulted, so `ssh localhost` is refused. Other machines are not bound
+from that checkout yet (Perlmutter needs sshproxy from there, ALCF needs MFA
+sessions); `xgc-remote-gui` needs a real ssh tunnel and cannot serve a local
+target.
+
+Two checkouts write the same catalog, so until the catalog moves to its own
+repository (docs/roadmap.md item 13) the discipline is: `git pull` before
+reserving or submitting, commit and push right after. The notebook CSV is
+derived and untracked, so it never conflicts.
 - `aurora` (aurora.alcf.anl.gov, round-robin over the login nodes) uses the
   same ALCF MobilePASS+ MFA and the same ControlMaster contract as Polaris.
   Its filesystems are separate from Polaris (`/lus/flare/projects` vs

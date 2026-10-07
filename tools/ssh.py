@@ -24,6 +24,13 @@ than blocking on an interactive prompt. The one exception is a direct-key host
 with ``auth.batch_mode: false`` (stellar-ai), whose server answers the key with
 an empty keyboard-interactive round that BatchMode would refuse; that call is
 still non-interactive because the subprocess has no tty.
+
+``auth.method: local`` means the checkout runs on the machine itself (a clone
+of this repository on a cluster login node). ``run`` then executes the same
+shell string through ``bash -c`` without ssh, ``write_file`` writes the file,
+and ``pull``/``push`` copy with ``cp -r``. Every caller keeps the same API, so
+higher layers stay unaware of where they run (AGENTS.md, "Higher-level logic
+must remain unaware of the machine type").
 """
 
 from __future__ import annotations
@@ -76,6 +83,15 @@ class SSHTarget:
     host: str
     auth_method: str | None = None
     batch_mode: bool = True
+
+    @property
+    def is_local(self) -> bool:
+        """The checkout runs on this machine: no ssh, commands execute directly."""
+        return self.auth_method == LOCAL_METHOD
+
+
+LOCAL_METHOD = "local"
+LOCAL_HOST = "localhost"
 
 
 @dataclass
@@ -367,6 +383,10 @@ def _connect_timeout_options() -> list[str]:
 def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
     """Validate the configured authentication and return SSH CLI options."""
     resolved = _normalize_target(target)
+    if resolved.is_local:
+        # Nothing to connect to; callers that must ssh (remote GUI tunnels)
+        # cannot serve a local target and say so themselves.
+        return LOCAL_HOST, []
     if resolved.auth_method == "key":
         # Generic public-key hosts do not require an MFA master or certificate.
         if resolved.batch_mode:
@@ -453,7 +473,11 @@ def run(
         # a half-configured environment.
         remote = f"set -e; source {shlex.quote(env_script)} >/dev/null 2>&1; {remote}"
 
-    full = ["ssh", *options, host, remote]
+    if _normalize_target(ssh_host).is_local:
+        # Same shell string, same quoting, no transport.
+        full = ["bash", "-c", remote]
+    else:
+        full = ["ssh", *options, host, remote]
     try:
         proc = subprocess.run(full, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -481,6 +505,13 @@ def write_file(
     command line, which would break on quoting and hit ARG_MAX.
     """
     host, options = connection_options(ssh_host)
+
+    if _normalize_target(ssh_host).is_local:
+        try:
+            Path(remote_path).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            raise SSHError(f"failed to write {remote_path}: {exc}") from exc
+        return
 
     remote = f"cat > {shlex.quote(remote_path)}"
     full = ["ssh", *options, host, remote]
@@ -533,7 +564,10 @@ def pull(
     """
     host, options = connection_options(ssh_host)
 
-    argv = ["scp", *options, "-r", f"{host}:{remote_path}", local_path]
+    if _normalize_target(ssh_host).is_local:
+        argv = ["cp", "-r", remote_path, local_path]
+    else:
+        argv = ["scp", *options, "-r", f"{host}:{remote_path}", local_path]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -557,7 +591,10 @@ def push(
     """Copy a local file or directory to the remote host via scp."""
     host, options = connection_options(ssh_host)
 
-    argv = ["scp", *options, "-r", local_path, f"{host}:{remote_path}"]
+    if _normalize_target(ssh_host).is_local:
+        argv = ["cp", "-r", local_path, remote_path]
+    else:
+        argv = ["scp", *options, "-r", local_path, f"{host}:{remote_path}"]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -580,6 +617,9 @@ def host_for(machine_cfg: dict[str, Any]) -> SSHTarget:
     from . import machines as m
 
     auth = machine_cfg.get("auth", {})
+    if auth.get("method") == LOCAL_METHOD:
+        # The checkout runs on this machine; no alias or host is consulted.
+        return SSHTarget(LOCAL_HOST, LOCAL_METHOD, True)
     batch_mode = bool(auth.get("batch_mode", True))
     alias = auth.get("ssh_config_host")
     if alias and not m.is_placeholder(alias):

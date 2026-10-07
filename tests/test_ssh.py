@@ -185,5 +185,53 @@ class DirectKeyTransportTests(unittest.TestCase):
         self.assertEqual(target, ssh.SSHTarget("perlmutter", "sshproxy"))
 
 
+class LocalTransportTests(unittest.TestCase):
+    """``auth.method: local``: the checkout runs on the machine itself."""
+
+    def test_host_for_local_ignores_alias_and_host(self) -> None:
+        target = ssh.host_for(
+            {
+                "host": "stellarai-amd.princeton.edu",
+                "user": "alice",
+                "auth": {"method": "local", "ssh_config_host": "stellarai"},
+            }
+        )
+        self.assertEqual(target, ssh.SSHTarget("localhost", "local", True))
+        self.assertTrue(target.is_local)
+
+    def test_run_executes_without_ssh(self) -> None:
+        target = ssh.SSHTarget("localhost", "local")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = ssh.run(target, ["pwd"], cwd=tmp)
+            self.assertTrue(result.ok)
+            self.assertEqual(os.path.realpath(result.stdout.strip()), os.path.realpath(tmp))
+        self.assertFalse(ssh.run(target, ["false"]).ok)
+
+    def test_run_quotes_arguments_like_the_remote_path(self) -> None:
+        target = ssh.SSHTarget("localhost", "local")
+        result = ssh.run(target, ["printf", "%s", "two words; $HOME"], check=True)
+        self.assertEqual(result.stdout, "two words; $HOME")
+
+    def test_write_read_exists_and_pull_use_the_filesystem(self) -> None:
+        target = ssh.SSHTarget("localhost", "local")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "sub", "input")
+            ssh.mkdir_p(target, os.path.dirname(path))
+            ssh.write_file(target, path, "&sml_param\n/\n")
+            self.assertTrue(ssh.exists(target, path))
+            self.assertEqual(ssh.read_file(target, path), "&sml_param\n/\n")
+            copy = os.path.join(tmp, "copy")
+            ssh.pull(target, path, copy)
+            with open(copy, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "&sml_param\n/\n")
+            ssh.push(target, copy, os.path.join(tmp, "pushed"))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "pushed")))
+
+    def test_connection_options_need_no_session(self) -> None:
+        with patch.object(ssh, "control_socket_alive", side_effect=AssertionError("ssh used")):
+            host, options = ssh.connection_options(ssh.SSHTarget("localhost", "local"))
+        self.assertEqual((host, options), ("localhost", []))
+
+
 if __name__ == "__main__":
     unittest.main()

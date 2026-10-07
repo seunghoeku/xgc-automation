@@ -170,9 +170,12 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
         auth = cfg.get("auth", {})
         host = cfg.get("host")
 
-        # If host is not a placeholder, do a light SSH port (22) reachability check
+        # If host is not a placeholder, do a light SSH port (22) reachability check.
+        # A local checkout (auth.method: local) runs on the machine itself: no
+        # port, socket or certificate to check.
+        is_local = auth.get("method") == ssh_transport.LOCAL_METHOD
         ssh_ok = None
-        if host and not m.is_placeholder(host):
+        if host and not m.is_placeholder(host) and not is_local:
             ssh_ok = _tcp_reachable(host, 22)
 
         # MFA machines require a live ControlMaster. NERSC sshproxy machines
@@ -182,7 +185,9 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
         certificate = None
         direct_key = None
         ssh_alias = auth.get("ssh_config_host")
-        if ssh_alias and not m.is_placeholder(ssh_alias):
+        if is_local:
+            pass
+        elif ssh_alias and not m.is_placeholder(ssh_alias):
             if auth.get("method") == "sshproxy":
                 certificate = ssh_transport.certificate_status(ssh_alias)
                 if certificate is None:
@@ -253,6 +258,7 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
             "host": host,
             "scheduler": cfg.get("scheduler", {}).get("type"),
             "auth_method": auth.get("method"),
+            "local_checkout": is_local,
             "mfa": bool(auth.get("mfa")),
             "ssh_port_22_reachable": ssh_ok,
             "control_master": control,
