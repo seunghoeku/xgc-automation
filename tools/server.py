@@ -168,6 +168,9 @@ def preflight(machine: str | None = None) -> dict[str, Any]:
 
         unfilled = _check_placeholders(cfg)
         auth = cfg.get("auth", {})
+        if auth.get("method") == ssh_transport.LOCAL_METHOD:
+            # A local checkout never uses the ssh alias or the remote host name.
+            unfilled = [f for f in unfilled if f not in ("auth.ssh_config_host", "host", "user")]
         host = cfg.get("host")
 
         # If host is not a placeholder, do a light SSH port (22) reachability check.
