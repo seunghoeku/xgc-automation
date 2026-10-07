@@ -173,6 +173,25 @@ ssh -O exit stellar
 - `flux.pppl.gov` is on the internal network (172.16.99.x) — requires PPPL VPN or
   on-site access.
 - `stellar.princeton.edu` is reachable externally.
+- `stellarai-amd.princeton.edu` (machine `stellarai`) is reachable only from the
+  Princeton/PPPL office network or the Princeton VPN; from elsewhere the TCP
+  connection is reset at the SSH banner. It authenticates with the public key
+  alone (no Duo), so it needs no ControlMaster session: `auth.method: key`.
+  The server follows the key with an empty keyboard-interactive round (partial
+  success, zero prompts); OpenSSH's `BatchMode=yes` refuses that round and
+  reports `Permission denied (keyboard-interactive)`, so the machine sets
+  `auth.batch_mode: false` and `tools/ssh.py` omits BatchMode for it (still
+  non-interactive: no tty, command timeout). A plain `ssh stellarai hostname`
+  is the quick check; a `BatchMode=yes` test is not a valid check for this host.
+  Alias (2026-10-01):
+
+  ```
+  Host stellarai stellarai-amd.princeton.edu
+    HostName stellarai-amd.princeton.edu
+    User <princeton_username>
+    IdentityFile ~/.ssh/id_rsa
+    IdentitiesOnly yes
+  ```
 - `polaris` was reached manually in 2026-07; the automation still requires
   the user-created MFA session and reuses its ControlMaster.
 - `aurora` (aurora.alcf.anl.gov, round-robin over the login nodes) uses the

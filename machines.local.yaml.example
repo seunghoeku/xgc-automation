@@ -113,6 +113,8 @@ stellar:
 stellarai:
   user: alice
   auth:
+    method: key          # public key only, no Duo; office network or Princeton VPN
+    batch_mode: false    # server adds an empty keyboard-interactive round (docs/ssh-setup.md)
     ssh_config_host: stellarai
   paths:
     # scratch is a per-group fileset on STELLAR-AI, not per user

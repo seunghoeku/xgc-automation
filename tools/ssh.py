@@ -20,7 +20,10 @@ All remote execution and file transfer goes through here. Two invariants:
    through tools" rule honest (absolute rule 2).
 
 BatchMode=yes is set on every call so that a missing socket fails fast rather
-than blocking on an interactive prompt.
+than blocking on an interactive prompt. The one exception is a direct-key host
+with ``auth.batch_mode: false`` (stellar-ai), whose server answers the key with
+an empty keyboard-interactive round that BatchMode would refuse; that call is
+still non-interactive because the subprocess has no tty.
 """
 
 from __future__ import annotations
@@ -60,10 +63,19 @@ class SSHError(RuntimeError):
 
 @dataclass(frozen=True)
 class SSHTarget:
-    """Resolved SSH host plus the configured authentication method."""
+    """Resolved SSH host plus the configured authentication method.
+
+    ``batch_mode`` is False only for a direct-key host whose server runs an
+    empty keyboard-interactive round after the public key (stellar-ai does:
+    partial success, zero prompts). ``BatchMode=yes`` makes OpenSSH refuse
+    that round ("Permission denied (keyboard-interactive)"), so the call runs
+    without it. Nothing becomes interactive: a real prompt still fails,
+    because the subprocess has no tty, and the command timeout still applies.
+    """
 
     host: str
     auth_method: str | None = None
+    batch_mode: bool = True
 
 
 @dataclass
@@ -357,8 +369,17 @@ def connection_options(target: str | SSHTarget) -> tuple[str, list[str]]:
     resolved = _normalize_target(target)
     if resolved.auth_method == "key":
         # Generic public-key hosts do not require an MFA master or certificate.
+        if resolved.batch_mode:
+            key_options = _direct_key_options()
+        else:
+            # Empty keyboard-interactive round after the key (see SSHTarget).
+            key_options = [
+                "-o", "IdentitiesOnly=yes",
+                "-o", "PreferredAuthentications=publickey,keyboard-interactive",
+                "-o", "PasswordAuthentication=no",
+            ]
         return resolved.host, [
-            *_direct_key_options(),
+            *key_options,
             "-o", "ControlMaster=no", "-o", "ControlPath=none",
             *_connect_timeout_options(),
         ]
@@ -559,9 +580,10 @@ def host_for(machine_cfg: dict[str, Any]) -> SSHTarget:
     from . import machines as m
 
     auth = machine_cfg.get("auth", {})
+    batch_mode = bool(auth.get("batch_mode", True))
     alias = auth.get("ssh_config_host")
     if alias and not m.is_placeholder(alias):
-        return SSHTarget(alias, auth.get("method"))
+        return SSHTarget(alias, auth.get("method"), batch_mode)
 
     user, host = machine_cfg.get("user"), machine_cfg.get("host")
     if not host:
@@ -569,4 +591,4 @@ def host_for(machine_cfg: dict[str, Any]) -> SSHTarget:
     if m.is_placeholder(user):
         user = None  # fall back to the local username rather than "<...>@host"
     target = f"{user}@{host}" if user else host
-    return SSHTarget(target, auth.get("method"))
+    return SSHTarget(target, auth.get("method"), batch_mode)

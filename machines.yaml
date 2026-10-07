@@ -263,9 +263,13 @@ stellarai:
   host: stellarai-amd.princeton.edu
   user: <princeton_username>
   auth:
-    method: ssh_controlmaster    # Duo MFA once per ControlPersist window
-    ssh_config_host: <ssh_alias>
-    mfa: true
+    # Public-key login, no Duo (unlike stellar), no ControlMaster needed; reachable
+    # only from the Princeton/PPPL office network or the Princeton VPN. The server
+    # follows the key with an empty keyboard-interactive round, which OpenSSH's
+    # BatchMode refuses, hence batch_mode false (docs/ssh-setup.md, "stellar-ai").
+    method: key
+    batch_mode: false
+    ssh_config_host: <ssh_alias>  # alias with IdentityFile + IdentitiesOnly
   scheduler:
     type: slurm
     submit: sbatch
