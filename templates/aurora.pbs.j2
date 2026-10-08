@@ -42,6 +42,14 @@ source "{{ env_script }}"
 {% for mod in modules %}
 module load {{ mod }}
 {% endfor %}
+{% if mpich_lib %}
+# Newer MPICH than the PE default, picked up through the library path:
+# `module swap mpich/...` makes Lmod unload Kokkos, PETSc and ADIOS2, and the
+# binary's RUNPATH yields to LD_LIBRARY_PATH (same MPICH ABI). The default
+# 87e2045 leaks device memory every particle shift (d0048au); 51a9474 does not
+# (d0067au, d0068au).
+export LD_LIBRARY_PATH="{{ mpich_lib }}:${LD_LIBRARY_PATH:-}"
+{% endif %}
 
 export OMP_NUM_THREADS={{ cpus_per_task or 1 }}
 export OMP_PROC_BIND=spread
@@ -53,6 +61,16 @@ export OMP_STACKSIZE="${OMP_STACKSIZE:-1G}"
 # (XGC's Aurora cmake config passes -DUSE_GPU_AWARE_MPI=On).
 export MPIR_CVAR_ENABLE_GPU={{ 1 if gpu_aware_mpi else 0 }}
 export MPIR_CVAR_ALLTOALLV_PAIRWISE_NEW=1
+{% if not gpu_ipc %}
+# No intra-node GPU IPC: same-node GPU messages are staged through the host.
+# With IPC the 2048-node particle shift hung in a Level Zero copy between GPUs
+# g and g+4 (d0058au, d0065au), and the shift ran ~10x slower at 512 nodes
+# (9.44 vs 1.83 s/step, d0068au vs d0071au). 2147483647 = INT_MAX, so no
+# message is large enough for IPC; REPEAT_ADDR=0 stops the repeated-buffer
+# trigger as well.
+export MPIR_CVAR_CH4_IPC_GPU_P2P_THRESHOLD=2147483647
+export MPIR_CVAR_CH4_IPC_MAP_REPEAT_ADDR=0
+{% endif %}
 # Lets XGC's device-memory usage report query the GPUs (Level Zero sysman).
 export ZES_ENABLE_SYSMAN=1
 # gpu_tile_compact.sh and --gpu-bind=list:<gpu>.<tile> both assume the
@@ -76,6 +94,9 @@ echo "daos_work_dir={{ daos.work_dir }} mounted=$(mount | grep -c dfuse)"
 {% endif %}
 echo "host=$(hostname) job=${PBS_JOBID:-none} nodes={{ nodes }} start=$(date -Is)"
 echo "ranks={{ total_ranks }} ranks_per_node={{ ntasks_per_node }} threads_per_rank=${OMP_NUM_THREADS}"
+{% if xgc_exe %}
+echo "libmpi=$(ldd "{{ xgc_exe }}" | grep -o '/[^ ]*/libmpi\.so\.[0-9]*' || true)"
+{% endif %}
 
 {% if xgc_exe %}
 {% if ntasks_per_node == 12 %}

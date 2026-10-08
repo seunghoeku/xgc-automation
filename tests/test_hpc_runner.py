@@ -619,6 +619,31 @@ class AuroraPlanTests(unittest.TestCase):
 
         self.assertIn("export MPIR_CVAR_ENABLE_GPU=0", plan.script)
 
+    def test_aurora_default_keeps_gpu_ipc_and_pe_mpich(self) -> None:
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("aurora", run_id="run-aurora-ipc")
+
+        self.assertNotIn("MPIR_CVAR_CH4_IPC_GPU_P2P_THRESHOLD", plan.script)
+        self.assertNotIn("LD_LIBRARY_PATH", plan.script)
+
+    def test_aurora_newer_mpich_and_no_gpu_ipc_when_configured(self) -> None:
+        lib = "/opt/aurora/26.181.0/x/mpich-5.0.0.aurora_test.51a9474-abc/lib"
+        self.cfg["xgc"]["mpich_lib"] = lib
+        self.cfg["xgc"]["gpu_ipc"] = False
+        with patch.object(hr.m, "get_machine", return_value=self.cfg):
+            plan = hr.prepare_submission("aurora", run_id="run-aurora-noipc")
+
+        lines = plan.script.splitlines()
+        self.assertIn(f'export LD_LIBRARY_PATH="{lib}:${{LD_LIBRARY_PATH:-}}"', lines)
+        # The library path must follow the env script, which loads the modules.
+        source = next(i for i, l in enumerate(lines) if l.startswith("source "))
+        ldpath = lines.index(f'export LD_LIBRARY_PATH="{lib}:${{LD_LIBRARY_PATH:-}}"')
+        self.assertLess(source, ldpath)
+        self.assertIn("export MPIR_CVAR_CH4_IPC_GPU_P2P_THRESHOLD=2147483647", lines)
+        self.assertIn("export MPIR_CVAR_CH4_IPC_MAP_REPEAT_ADDR=0", lines)
+        self.assertIn("export MPIR_CVAR_ENABLE_GPU=1", lines)
+        self.assertTrue(any(l.startswith('echo "libmpi=') for l in lines))
+
     def test_aurora_hello_world_uses_plain_mpiexec(self) -> None:
         with patch.object(hr.m, "get_machine", return_value=self.cfg):
             plan = hr.prepare_submission(

@@ -136,6 +136,23 @@ Keep `MPIR_CVAR_ENABLE_GPU=1`: the build is GPU-aware
 the March scripts. Hand-submitted jobs are not in the catalog; use section 3
 when the run should be findable later.
 
+MPICH and GPU IPC (2026-10-08 scaling study, dev runs d0048au-d0071au, master
+e46d1eef): the rendered script prepends the newer MPICH (`xgc.mpich_lib` in
+`machines.yaml`, pmodels 51a9474) to `LD_LIBRARY_PATH` after the env script,
+and turns intra-node GPU IPC off (`xgc.gpu_ipc: false`):
+
+```bash
+export MPIR_CVAR_CH4_IPC_GPU_P2P_THRESHOLD=2147483647   # INT_MAX: no message uses IPC
+export MPIR_CVAR_CH4_IPC_MAP_REPEAT_ADDR=0
+```
+
+With the PE default MPICH (87e2045) and IPC on, device memory grew ~0.9
+GB/rank/step at 2 nodes and the 2048-node particle shift hung in a Level Zero
+IPC copy between GPUs g and g+4; IPC on was also ~5x slower per step at 512
+nodes (9.44 vs 1.83 s/step). `module swap` to another MPICH unloads Kokkos,
+PETSc and ADIOS2, hence the library path. Hand-written scripts need the same
+three lines; the job log prints the `libmpi` actually loaded.
+
 ## 5. DAOS: what the job does and what you must do
 
 What the rendered script does for you:
