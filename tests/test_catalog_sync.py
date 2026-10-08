@@ -90,6 +90,24 @@ class TwoCheckoutsTests(unittest.TestCase):
         self.assertTrue((self.b / "kb" / "x.yaml").exists())
 
 
+class SyncedDecoratorTests(unittest.TestCase):
+    def test_message_sees_positional_arguments_by_name(self) -> None:
+        from unittest.mock import patch
+
+        seen: dict[str, object] = {}
+
+        @catalog_sync.synced(lambda result, **k: seen.update(k) or f"ai_note {k['record_id']}")
+        def tool(record_id: str, text: str = "") -> dict:
+            return {"written": True}
+
+        with patch.object(catalog_sync, "pull", return_value={"enabled": True, "pulled": True}), \
+             patch.object(catalog_sync, "commit_and_push", return_value={"enabled": True, "pushed": True}) as push:
+            result = tool("n674po", "hello")  # positional, as FastMCP may call it
+        self.assertEqual(seen["record_id"], "n674po")
+        push.assert_called_once_with("ai_note n674po")
+        self.assertEqual(result["catalog_sync"]["push"]["pushed"], True)
+
+
 class WroteHeuristicTests(unittest.TestCase):
     def test_plan_only_and_refused_results_do_not_commit(self) -> None:
         self.assertFalse(catalog_sync._wrote({"reserved": False, "plan": {}}))

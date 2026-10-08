@@ -25,6 +25,7 @@ is not the code checkout itself; ``catalog_sync: true|false`` in
 from __future__ import annotations
 
 import functools
+import inspect
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,11 +182,19 @@ def synced(message: Callable[..., str] | str):
     """
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+        signature = inspect.signature(fn)
+
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             pulled = pull()
             result = fn(*args, **kwargs)
-            subject = message(result, *args, **kwargs) if callable(message) else message
+            # Callers (FastMCP, the CLI) may pass arguments positionally; the
+            # message function always sees them by name.
+            try:
+                named = dict(signature.bind_partial(*args, **kwargs).arguments)
+            except TypeError:
+                named = dict(kwargs)
+            subject = message(result, **named) if callable(message) else message
             if subject and _wrote(result):
                 pushed = commit_and_push(subject)
             else:
