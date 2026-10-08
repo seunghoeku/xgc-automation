@@ -57,3 +57,6 @@ input_backup/
 f_init/cases/
 flow_match/cases/
 Other_data/
+
+# dated copies of the personal overlay left by hand edits; local only
+machines.local.yaml.bak*
