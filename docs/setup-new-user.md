@@ -152,6 +152,68 @@ The simulation catalog (`kb/simulations/`) starts empty and fills itself as
 you reserve numbers and submit jobs, so it needs none of the above. See
 `docs/simulation-catalog.md`, including the optional Google Sheets mirror.
 
+### 4a. Your own catalog repository (required)
+
+Every user needs a **catalog repository of their own**: the directory the
+tools write to (records, registry, provenance, input backups, case logs,
+`USER.md`), kept in git so a laptop and a cluster checkout stay in step
+(`docs/simulation-catalog.md`, "Catalog repository"). The original author's
+catalog, [xgc-catalog](https://github.com/seunghoeku/xgc-catalog), is **not**
+shared state you join: it holds one person's simulation numbers and notes.
+Two ways to set yours up; the first is recommended.
+
+**Option A, a separate repository (recommended).**
+
+```bash
+git init ~/git/xgc-catalog-<you> && cd ~/git/xgc-catalog-<you>
+mkdir -p kb/simulations
+cp <xgc-automation>/templates/USER.md.example USER.md     # fill it in
+printf 'kb/simulation_notebook.csv\n.cache/\n*.png\n*.npz\n*.out\n*.svg\n*.bp\n' > .gitignore
+git add -A && git commit -m "catalog: start" && git remote add origin <your private remote> && git push -u origin main
+mkdir -p ~/.config/xgc-automation
+printf 'catalog_dir: ~/git/xgc-catalog-<you>\ndata_dir: ~/xgc-data\n' > ~/.config/xgc-automation/config.yaml
+ln -s ~/git/xgc-catalog-<you>/USER.md ~/.config/xgc-automation/USER.md
+xgc-sim paths                       # state_root must be your repository
+```
+
+Your numbering starts at `n001<code>` / `d0001<code>` in your own registry;
+numbers are sequential **within one catalog** and two users' catalogs may
+both contain an `n001pe`. That is intended: catalogs are personal, and
+nothing merges them. The tools pull before every write and push after it,
+so set the remote before the first reservation.
+
+**Option B, a directory per user inside one shared catalog repository.**
+If a group prefers one repository, each user takes a subdirectory and points
+`catalog_dir` at it:
+
+```yaml
+catalog_dir: ~/git/xgc-catalog-group/users/<you>     # own registry, own numbering
+```
+
+Every state path (registry, records, `runs/`, `input_backup/`) lives under
+that directory, so each user has an independent sequence and only ever
+writes their own files; `git pull --rebase` merges the rest. The whole
+repository is cloned by everyone, so keep products out of it (the
+`.gitignore` above) or it grows with the group. The original author's state
+can sit at the repository root or under `users/sku/` alike; move it with
+`git mv` and update `catalog_dir` if you adopt this layout.
+
+**Using the original catalog as reference data.** Clone it read-only and
+search it without making it your state:
+
+```bash
+git clone https://github.com/seunghoeku/xgc-catalog.git ~/git/xgc-catalog-sku
+xgc-sim --catalog-dir ~/git/xgc-catalog-sku/kb/simulations search "TCV negative triangularity"
+xgc-sim --catalog-dir ~/git/xgc-catalog-sku/kb/simulations show n675pe
+```
+
+Its records, notes, `input_backup/` and `runs/*/provenance.json` tell you
+which inputs and builds produced which results; its `kb/shots/` index says
+what experimental files were used. The validated baselines promoted from it
+are already in this repository's `kb/cases/` and need no catalog at all. Do
+not point `catalog_dir` at the clone: your reservations would then continue
+someone else's numbering.
+
 ## 5. Using the validated baselines (kb/cases/)
 
 Each case YAML records where its author validated it (`case_dir`,

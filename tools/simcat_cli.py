@@ -657,7 +657,7 @@ def _global_options() -> argparse.ArgumentParser:
     shared.add_argument(
         "--catalog-dir",
         default=argparse.SUPPRESS,
-        help="override kb/simulations (testing)",
+        help="read another catalog's kb/simulations (e.g. a clone of someone else's) instead of your own",
     )
     return shared
 

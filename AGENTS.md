@@ -130,7 +130,10 @@ from the checkout; the user's state (catalog, registry, `runs/`,
 repository**, found through `XGC_CATALOG_DIR` or
 `~/.config/xgc-automation/config.yaml` (default: the checkout, gitignored
 there). State paths are taken from `tools/paths.py`, never rebuilt from
-`PROJECT_ROOT`; `xgc-sim paths` shows the resolved layout. Catalog writes are
+`PROJECT_ROOT`; `xgc-sim paths` shows the resolved layout. Each user has
+their own catalog repository and numbering (`docs/setup-new-user.md`, 4a);
+the original author's catalog is reference data, never a new user's state.
+Catalog writes are
 committed and pushed in the catalog repository, never here; the write tools
 do that themselves (`tools/catalog_sync.py`: pull before, commit and push
 after, reported under `catalog_sync`). A checkout on the

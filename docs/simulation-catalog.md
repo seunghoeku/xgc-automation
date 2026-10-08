@@ -394,6 +394,14 @@ them. The tools find the catalog through `XGC_CATALOG_DIR` or
 `xgc-sim paths`); `machines.local.yaml` stays in each checkout because it
 differs per machine.
 
+Each user has their own catalog repository, and with it their own
+registry and numbering; two catalogs may both hold an `n001pe` and nothing
+merges them. A group that wants one repository gives each user a
+subdirectory (`catalog_dir: .../users/<name>`), which has the same effect.
+Another user's catalog is read with `xgc-sim --catalog-dir <clone>/kb/simulations`
+and never pointed to as one's own state. Setup for a new user:
+`docs/setup-new-user.md`, section 4a.
+
 The catalog repository also holds `USER.md`, the person's accounts,
 allocations, checkouts and preferences, symlinked to
 `~/.config/xgc-automation/USER.md` and imported by `AGENTS.md`;
