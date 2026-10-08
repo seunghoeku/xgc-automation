@@ -394,13 +394,16 @@ them. The tools find the catalog through `XGC_CATALOG_DIR` or
 `xgc-sim paths`); `machines.local.yaml` stays in each checkout because it
 differs per machine.
 
-Each user has their own catalog repository, and with it their own
-registry and numbering; two catalogs may both hold an `n001pe` and nothing
-merges them. A group that wants one repository gives each user a
-subdirectory (`catalog_dir: .../users/<name>`), which has the same effect.
-Another user's catalog is read with `xgc-sim --catalog-dir <clone>/kb/simulations`
-and never pointed to as one's own state. Setup for a new user:
-`docs/setup-new-user.md`, section 4a.
+The layout inside a catalog repository is one directory per user named
+after the GitHub id, `users/<id>/`, and `catalog_dir` points at that
+directory (the original author's is `users/seunghoeku/`). Each user
+directory has its own registry and numbering; two users may both hold an
+`n001pe` and nothing merges them. A user normally has a repository of their
+own (option A); a group may share one repository with a directory per user
+(option B), and a directory started as A joins a B repository by copying.
+Another user's catalog is read with
+`xgc-sim --catalog-dir <clone>/users/<id>/kb/simulations` and never pointed to
+as one's own state. Setup: `docs/setup-new-user.md`, section 4a.
 
 The catalog repository also holds `USER.md`, the person's accounts,
 allocations, checkouts and preferences, symlinked to

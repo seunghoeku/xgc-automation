@@ -45,6 +45,17 @@ class TwoCheckoutsTests(unittest.TestCase):
         plain.mkdir()
         self.assertFalse(catalog_sync.enabled(plain))
 
+    def test_state_root_may_be_a_directory_inside_the_repository(self) -> None:
+        user_dir = self.a / "users" / "alice"
+        (user_dir / "kb").mkdir(parents=True)
+        self.assertEqual(catalog_sync.repo_root(user_dir), self.a.resolve())
+        self.assertTrue(catalog_sync.enabled(user_dir))
+        (user_dir / "kb" / "n001.yaml").write_text("status: reserved\n")
+        pushed = catalog_sync.commit_and_push("reserve n001", root=user_dir)
+        self.assertTrue(pushed["pushed"], pushed)
+        catalog_sync.pull(self.b)
+        self.assertTrue((self.b / "users" / "alice" / "kb" / "n001.yaml").exists())
+
     def test_write_on_one_checkout_reaches_the_other(self) -> None:
         (self.a / "kb" / "n001.yaml").write_text("status: reserved\n")
         pushed = catalog_sync.commit_and_push("reserve n001", root=self.a)
@@ -52,6 +63,16 @@ class TwoCheckoutsTests(unittest.TestCase):
         pulled = catalog_sync.pull(self.b)
         self.assertTrue(pulled["pulled"], pulled)
         self.assertTrue((self.b / "kb" / "n001.yaml").exists())
+
+    def test_waiting_hand_made_commits_are_pushed(self) -> None:
+        (self.a / "README.md").write_text("by hand\n")
+        _git(self.a, "add", "-A")
+        _git(self.a, "commit", "-q", "-m", "hand edit")
+        result = catalog_sync.commit_and_push("tool write", root=self.a)
+        self.assertFalse(result["committed"])
+        self.assertTrue(result["pushed"], result)
+        catalog_sync.pull(self.b)
+        self.assertTrue((self.b / "README.md").exists())
 
     def test_nothing_to_commit_is_reported_not_failed(self) -> None:
         result = catalog_sync.commit_and_push("noop", root=self.a)

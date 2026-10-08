@@ -116,7 +116,9 @@ what was actually verified, and what is still open.
       2. ~~One setting (`XGC_CATALOG_DIR` or `~/.config/xgc-automation/`)
          for every state path that `PROJECT_ROOT` resolved (15 modules);
          default stays the current layout~~ (done 2026-10-07: `tools/paths.py`,
-         `xgc-sim paths`).
+         `xgc-sim paths`). Catalog layout fixed 2026-10-08 as
+         `users/<github-id>/` per user, so one repository per user (A) and
+         one group repository (B) are the same layout.
       3. ~~Move the state into a per-user catalog repository, history kept
          with `git filter-repo`; the user's `USER.md` (accounts, allocations,
          preferences) lives there and `AGENTS.md` imports it; shared repo

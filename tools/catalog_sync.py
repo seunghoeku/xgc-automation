@@ -74,9 +74,17 @@ def disable_for_process() -> None:
 
 
 def repo_root(root: Path | None = None) -> Path | None:
-    """The catalog repository's work tree, or None when the state is not one."""
-    candidate = paths.STATE_ROOT if root is None else Path(root)
-    return candidate if (candidate / ".git").exists() else None
+    """The git work tree holding the state root, or None if there is none.
+
+    The state root may be the repository itself or a directory inside it
+    (``users/<name>/`` in a group catalog, docs/setup-new-user.md 4a), so
+    walk up to the nearest ``.git``.
+    """
+    candidate = (paths.STATE_ROOT if root is None else Path(root)).resolve()
+    for directory in (candidate, *candidate.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
 
 
 def enabled(root: Path | None = None) -> bool:
@@ -88,7 +96,7 @@ def enabled(root: Path | None = None) -> bool:
     repo = repo_root(root)
     if repo is None:
         return False
-    if root is None and repo.resolve() == paths.PROJECT_ROOT.resolve() and setting is not True:
+    if root is None and repo == paths.PROJECT_ROOT.resolve() and setting is not True:
         # State still inside the code checkout: never auto-commit there.
         return False
     return _git(repo, "remote", "get-url", "origin", timeout=10).ok
@@ -123,6 +131,18 @@ def commit_and_push(message: str, root: Path | None = None) -> dict[str, Any]:
     if not add.ok:
         return {"enabled": True, "committed": False, "detail": add.detail}
     if _git(repo, "diff", "--cached", "--quiet").ok:
+        # Nothing new here, but a commit made by hand (a README edit, a note
+        # typed in the record) may still be waiting; push it so the other
+        # checkout sees it.
+        ahead = _git(repo, "rev-list", "--count", "@{u}..HEAD", timeout=30)
+        if ahead.ok and ahead.stdout.strip() not in ("", "0"):
+            push = _git(repo, "push", "-q")
+            return {
+                "enabled": True,
+                "committed": False,
+                "pushed": push.ok,
+                "detail": f"pushed {ahead.stdout.strip()} waiting commit(s)" if push.ok else push.detail,
+            }
         return {"enabled": True, "committed": False, "pushed": False, "detail": "nothing to commit"}
     commit = _git(repo, "commit", "-q", "-m", message)
     if not commit.ok:

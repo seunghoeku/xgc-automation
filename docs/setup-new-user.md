@@ -162,18 +162,25 @@ catalog, [xgc-catalog](https://github.com/seunghoeku/xgc-catalog), is **not**
 shared state you join: it holds one person's simulation numbers and notes.
 Two ways to set yours up; the first is recommended.
 
+Both options use the **same layout**, one directory per user named after
+the GitHub id, `users/<id>/`, with `catalog_dir` pointing at that directory
+rather than at the repository root. A catalog started as option A can then
+join a group repository later by copying its `users/<id>/` directory, with
+no renumbering and nothing to move.
+
 **Option A, a separate repository (recommended).**
 
 ```bash
-git init ~/git/xgc-catalog-<you> && cd ~/git/xgc-catalog-<you>
-mkdir -p kb/simulations
-cp <xgc-automation>/templates/USER.md.example USER.md     # fill it in
-printf 'kb/simulation_notebook.csv\n.cache/\n*.png\n*.npz\n*.out\n*.svg\n*.bp\n' > .gitignore
+ME=<your github id>
+git init ~/git/xgc-catalog && cd ~/git/xgc-catalog
+mkdir -p users/$ME/kb/simulations
+cp <xgc-automation>/templates/USER.md.example users/$ME/USER.md     # fill it in
+printf 'simulation_notebook.csv\n.cache/\n*.png\n*.npz\n*.out\n*.svg\n*.bp\n*.bak*\n' > .gitignore
 git add -A && git commit -m "catalog: start" && git remote add origin <your private remote> && git push -u origin main
 mkdir -p ~/.config/xgc-automation
-printf 'catalog_dir: ~/git/xgc-catalog-<you>\ndata_dir: ~/xgc-data\n' > ~/.config/xgc-automation/config.yaml
-ln -s ~/git/xgc-catalog-<you>/USER.md ~/.config/xgc-automation/USER.md
-xgc-sim paths                       # state_root must be your repository
+printf "catalog_dir: ~/git/xgc-catalog/users/$ME\ndata_dir: ~/xgc-data\n" > ~/.config/xgc-automation/config.yaml
+ln -s ~/git/xgc-catalog/users/$ME/USER.md ~/.config/xgc-automation/USER.md
+xgc-sim paths                       # state_root must be users/$ME inside your repository
 ```
 
 Your numbering starts at `n001<code>` / `d0001<code>` in your own registry;
@@ -183,28 +190,29 @@ nothing merges them. The tools pull before every write and push after it,
 so set the remote before the first reservation.
 
 **Option B, a directory per user inside one shared catalog repository.**
-If a group prefers one repository, each user takes a subdirectory and points
-`catalog_dir` at it:
+If a group prefers one repository, each user takes `users/<id>/` in it and
+points `catalog_dir` there:
 
 ```yaml
-catalog_dir: ~/git/xgc-catalog-group/users/<you>     # own registry, own numbering
+catalog_dir: ~/git/xgc-catalog/users/<id>     # own registry, own numbering
 ```
 
 Every state path (registry, records, `runs/`, `input_backup/`) lives under
 that directory, so each user has an independent sequence and only ever
-writes their own files; `git pull --rebase` merges the rest. The whole
-repository is cloned by everyone, so keep products out of it (the
-`.gitignore` above) or it grows with the group. The original author's state
-can sit at the repository root or under `users/sku/` alike; move it with
-`git mv` and update `catalog_dir` if you adopt this layout.
+writes their own files; `git pull --rebase` (which the tools run around
+every write) merges the rest. The whole repository is cloned by everyone,
+so products must stay out of it (the `.gitignore` above) or it grows with
+the group. The original author's repository already has this layout
+(`users/seunghoeku/`); to work inside it, contact Seung-Hoe Ku
+(sku@pppl.gov) for write access and a directory.
 
 **Using the original catalog as reference data.** Clone it read-only and
 search it without making it your state:
 
 ```bash
-git clone https://github.com/seunghoeku/xgc-catalog.git ~/git/xgc-catalog-sku
-xgc-sim --catalog-dir ~/git/xgc-catalog-sku/kb/simulations search "TCV negative triangularity"
-xgc-sim --catalog-dir ~/git/xgc-catalog-sku/kb/simulations show n675pe
+git clone https://github.com/seunghoeku/xgc-catalog.git ~/git/xgc-catalog-seunghoeku
+xgc-sim --catalog-dir ~/git/xgc-catalog-seunghoeku/users/seunghoeku/kb/simulations search "TCV negative triangularity"
+xgc-sim --catalog-dir ~/git/xgc-catalog-seunghoeku/users/seunghoeku/kb/simulations show n675pe
 ```
 
 Its records, notes, `input_backup/` and `runs/*/provenance.json` tell you

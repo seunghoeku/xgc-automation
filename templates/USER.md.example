@@ -1,8 +1,9 @@
 # USER.md: who this catalog belongs to
 
-Copy this file to the root of your catalog repository (the directory
-`XGC_CATALOG_DIR` or `catalog_dir` in `~/.config/xgc-automation/config.yaml`
-points at), fill it in, and symlink it to `~/.config/xgc-automation/USER.md`.
+Copy this file to your user directory in your catalog repository
+(`users/<github-id>/`, the directory `XGC_CATALOG_DIR` or `catalog_dir` in
+`~/.config/xgc-automation/config.yaml` points at), fill it in, and symlink
+it to `~/.config/xgc-automation/USER.md`.
 The agent instructions (`AGENTS.md`) import it from there, so the shared
 repository never carries personal values.
 
