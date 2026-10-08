@@ -132,7 +132,10 @@ repository**, found through `XGC_CATALOG_DIR` or
 there). State paths are taken from `tools/paths.py`, never rebuilt from
 `PROJECT_ROOT`; `xgc-sim paths` shows the resolved layout. Each user has
 their own catalog directory `users/<github-id>/` and numbering, normally
-in a repository of their own (`docs/setup-new-user.md`, 4a);
+in a repository of their own; the layout is defined here
+(`tools/catalog_init.py`, created only with `xgc-sim init-catalog`) and is
+identical for every user so that catalogs merge by copying user directories
+(`docs/setup-new-user.md`, 4a);
 the original author's catalog is reference data, never a new user's state.
 Catalog writes are
 committed and pushed in the catalog repository, never here; the write tools

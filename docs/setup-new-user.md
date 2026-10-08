@@ -168,19 +168,32 @@ rather than at the repository root. A catalog started as option A can then
 join a group repository later by copying its `users/<id>/` directory, with
 no renumbering and nothing to move.
 
+The layout is **defined by xgc-automation** (`tools/catalog_init.py`), not
+assembled by hand: `xgc-sim init-catalog` creates it, and `xgc-sim paths`
+reports `layout: canonical (users/<id>)` or says what is off. Use the
+command rather than copying directories so that your catalog and everyone
+else's stay identical down to the `.gitignore` and the seeded registry
+(same machine codes, counters at 1).
+
 **Option A, a separate repository (recommended).**
 
 ```bash
-ME=<your github id>
-git init ~/git/xgc-catalog && cd ~/git/xgc-catalog
-mkdir -p users/$ME/kb/simulations
-cp <xgc-automation>/templates/USER.md.example users/$ME/USER.md     # fill it in
-printf 'simulation_notebook.csv\n.cache/\n*.png\n*.npz\n*.out\n*.svg\n*.bp\n*.bak*\n' > .gitignore
-git add -A && git commit -m "catalog: start" && git remote add origin <your private remote> && git push -u origin main
-mkdir -p ~/.config/xgc-automation
-printf "catalog_dir: ~/git/xgc-catalog/users/$ME\ndata_dir: ~/xgc-data\n" > ~/.config/xgc-automation/config.yaml
-ln -s ~/git/xgc-catalog/users/$ME/USER.md ~/.config/xgc-automation/USER.md
-xgc-sim paths                       # state_root must be users/$ME inside your repository
+uv run xgc-sim init-catalog <your github id> \
+    --repo ~/git/xgc-catalog --data-dir ~/xgc-data \
+    --remote git@github.com:<you>/xgc-catalog.git      # a private repository you created
+```
+
+This creates `~/git/xgc-catalog` as a git repository with `.gitignore`,
+`README.md` and `users/<id>/` (all state subdirectories, a registry starting
+at `n001` / `d0001`, `USER.md` from the template), commits it, adds the
+remote, writes `~/.config/xgc-automation/config.yaml` (`catalog_dir`,
+`data_dir`, `catalog_sync`) and links `~/.config/xgc-automation/USER.md`.
+It is idempotent and never overwrites a file that exists. Then:
+
+```bash
+$EDITOR ~/git/xgc-catalog/users/<id>/USER.md
+git -C ~/git/xgc-catalog push -u origin main
+uv run xgc-sim paths                 # layout: canonical (users/<id>)
 ```
 
 Your numbering starts at `n001<code>` / `d0001<code>` in your own registry;

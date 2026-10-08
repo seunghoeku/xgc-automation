@@ -401,6 +401,10 @@ directory has its own registry and numbering; two users may both hold an
 `n001pe` and nothing merges them. A user normally has a repository of their
 own (option A); a group may share one repository with a directory per user
 (option B), and a directory started as A joins a B repository by copying.
+The layout is defined by xgc-automation (`tools/catalog_init.py`) and
+created only with `xgc-sim init-catalog <github-id>`, which also seeds the
+registry (counters at 1, the canonical machine codes) and the `.gitignore`;
+`xgc-sim paths` reports whether the configured state root follows it.
 Another user's catalog is read with
 `xgc-sim --catalog-dir <clone>/users/<id>/kb/simulations` and never pointed to
 as one's own state. Setup: `docs/setup-new-user.md`, section 4a.

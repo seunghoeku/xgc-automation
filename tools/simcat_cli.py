@@ -543,20 +543,57 @@ def _cmd_sync_notebook(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_init_catalog(args: argparse.Namespace) -> int:
+    from tools import catalog_init
+
+    try:
+        payload = catalog_init.init_catalog(
+            args.github_id,
+            repo=Path(args.repo).expanduser(),
+            data_dir=Path(args.data_dir).expanduser() if args.data_dir else None,
+            remote=args.remote,
+            write_config=not args.no_config,
+            force_config=args.force_config,
+        )
+    except catalog_init.CatalogInitError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _print_json(payload)
+        return 0
+    print(f"catalog:   {payload['repo']}")
+    print(f"user dir:  {payload['user_dir']}   (catalog_dir)")
+    print(f"data dir:  {payload['data_dir']}")
+    for item in payload["created"]:
+        print(f"  + {item}")
+    for item in payload["kept"]:
+        print(f"  = {item} (kept)")
+    print("next:")
+    for step in payload["next_steps"]:
+        print(f"  - {step}")
+    return 0
+
+
 def _cmd_paths(args: argparse.Namespace) -> int:
-    from tools import paths
+    from tools import catalog_init, paths
 
     rows = paths.layout()
+    check = catalog_init.layout_check()
     if args.json:
         _print_json({
             "state_root_source": paths.STATE_ROOT_SOURCE,
             "data_root_source": paths.DATA_ROOT_SOURCE,
+            "layout": check,
             "paths": rows,
         })
         return 0
     print(f"state root decided by: {paths.STATE_ROOT_SOURCE}")
     print(f"data root decided by:  {paths.DATA_ROOT_SOURCE}")
     print(f"config file:           {paths.config_file()}")
+    if check["canonical"]:
+        print(f"layout:                canonical (users/{check['user']})")
+    else:
+        print(f"layout:                NOT canonical: {check['detail']}")
     width = max(len(row["name"]) for row in rows)
     for row in rows:
         marker = " " if row["exists"] else "!"
@@ -812,6 +849,18 @@ def _parser() -> argparse.ArgumentParser:
         help="show where shared files and this user's state resolve (XGC_CATALOG_DIR)",
     )
     paths_parser.set_defaults(func=_cmd_paths)
+
+    init_parser = add(
+        "init-catalog",
+        help="create your catalog in the canonical layout (users/<github-id>/) and point the tools at it",
+    )
+    init_parser.add_argument("github_id", help="your GitHub id; names your directory users/<id>/")
+    init_parser.add_argument("--repo", default="~/git/xgc-catalog", help="catalog repository (default ~/git/xgc-catalog)")
+    init_parser.add_argument("--data-dir", help="products directory outside git (default ~/xgc-data)")
+    init_parser.add_argument("--remote", help="git remote URL to add as origin")
+    init_parser.add_argument("--no-config", action="store_true", help="do not write ~/.config/xgc-automation/config.yaml")
+    init_parser.add_argument("--force-config", action="store_true", help="overwrite an existing config file and USER.md link")
+    init_parser.set_defaults(func=_cmd_init_catalog)
 
     shot_parser = add(
         "shot",

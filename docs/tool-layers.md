@@ -35,6 +35,7 @@ All MCP tools are exposed from `tools/server.py`. The repository installs
 | Module | Role |
 |---|---|
 | `tools/ssh.py` | Every remote call. argv-list subprocess, ControlMaster for MFA hosts, sshproxy key + tool-owned `~/.ssh/xgc-cm/` socket for Perlmutter, and explicit `key` mode for generic public-key hosts. Connect timeout 60 s; existing-master channel probe 30 s. |
+| `tools/catalog_init.py` | Defines the catalog layout (`users/<github-id>/`, seeded registry, `.gitignore`) and creates it: `xgc-sim init-catalog`; `layout_check` behind `xgc-sim paths`. Identical for every user so catalogs merge by copying user directories. |
 | `tools/paths.py` | Resolves where shared files (checkout) and the user's state (`XGC_CATALOG_DIR`, `~/.config/xgc-automation/config.yaml`, default the checkout) live; every state constant in the other modules is initialised from it. `xgc-sim paths` prints the layout. |
 | `tools/machines.py` | Loads `machines.yaml` deep-merged under `machines.local.yaml`. `using_machines` supplies scoped explicit definitions for standalone consumers without reading repository configuration. `is_placeholder` tests unfilled fields. |
 | `tools/queue_menu.py` | Cache-only SwiftBar rendering: jobs, recent departures, start estimates, prioritized server state icons, and separate connection warnings. |
