@@ -1262,9 +1262,10 @@ def preview(mesh_id: str, *, meshes_dir: Path | None = None, data_root: Path | N
     mid = sum(ys) / len(ys)
     axes[1].set_ylim(mid - w, mid + w)
     axes[1].set_title("outboard edge")
-    axes[2].set_xlim(min(xs) + 0.2 * span, min(xs) + 0.8 * span)
-    axes[2].set_ylim(zmin - 0.1 * w, zmin + 1.5 * w)
-    axes[2].set_title("lower region")
+    r_at_zmin = xs[ys.index(zmin)]
+    axes[2].set_xlim(r_at_zmin - 1.2 * w, r_at_zmin + 1.2 * w)
+    axes[2].set_ylim(zmin - 0.2 * w, zmin + 1.6 * w)
+    axes[2].set_title("lower region (around min Z)")
     out = data_root / "meshes" / mesh_id / f"{mesh_id}_preview.png"
     fig.tight_layout()
     fig.savefig(out, dpi=150)
