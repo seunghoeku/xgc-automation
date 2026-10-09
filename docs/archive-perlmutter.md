@@ -138,7 +138,9 @@ Run from the user's own Perlmutter session, never from automation.
    the small provenance files into the catalog's `runs/<class>/<run_id>/remote_files/`,
    confirm with the user, `rm -rf` the directory and the restart copy.
    The catalog repository holds only text provenance, figures and small
-   reduced data: **about 20 MB per simulation at most**. No `.bp` products
+   reduced data: **about 20 MB per simulation**, up to 50 MB when the
+   files warrant it, and anything beyond that only with the user's
+   explicit permission. No `.bp` products
    are copied off the machine when the directory is deleted; the tape
    archive is their copy. (Inputs, logs, submit scripts, timing files and
    analysis scripts fit; `xgc.oneddiag.bp` and the mesh do not.)
