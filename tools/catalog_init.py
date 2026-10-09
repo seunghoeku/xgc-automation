@@ -46,6 +46,7 @@ LAYOUT_DIRS = (
     "kb/simulations",
     "kb/shots",
     "kb/meshes",
+    "kb/archives",
     "kb/cases/drafts",
     "runs",
     "input_backup",
@@ -89,7 +90,7 @@ between catalogs without renumbering or path changes:
       USER.md                   accounts, checkouts, preferences (imported by the agent)
       kb/simulations/<id>.yaml  one record per simulation
       kb/simulation_registry.yaml  this user's simulation_id counters
-      kb/shots/, kb/meshes/, kb/cases/drafts/, runs/, input_backup/, f_init/cases/, flow_match/cases/
+      kb/shots/, kb/meshes/, kb/archives/, kb/cases/drafts/, runs/, input_backup/, f_init/cases/, flow_match/cases/
 
 Products (PNG, NPZ, logs) and the notebook CSV stay out of git; see
 xgc-automation docs/simulation-catalog.md ("Catalog repository", "Data directory").

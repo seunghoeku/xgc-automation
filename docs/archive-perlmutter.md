@@ -151,6 +151,15 @@ archive      /home/s/sku/n674pe_d3d_qh_em.tar   est. 4.3 TB   name OK?
 
 Nothing runs until the user answers each `?`.
 
+## What is already on tape
+
+`xgc-sim hpss perlmutter` prints the parsed HPSS listing kept in the catalog
+(`kb/archives/perlmutter_hpss.yaml`, refreshed with `--refresh`), and
+`xgc-sim show <id>` shows a record's tape entries. Check it before archiving
+so a simulation is not put on tape twice, and refresh it after a transfer so
+the new archive is indexed and linked (`docs/simulation-catalog.md`, "Tape
+index").
+
 ## Not yet done
 
 - `tools/` do not drive `htar`; the record is written after a manual

@@ -114,7 +114,9 @@ Do not renumber them.
 - Finished output goes to tape under the rules in `docs/archive-perlmutter.md`
   (one simulation directory = one `htar` archive named after it, `restart_dir`
   moved out first, exclusions and thinning only after asking, `d`-series and
-  failed runs not by default) and is recorded with `xgc-sim archive`.
+  failed runs not by default) and is recorded with `xgc-sim archive`; what is
+  already on tape is the index `kb/archives/<machine>_hpss.yaml`
+  (`xgc-sim hpss`, tool `hpss_index`), joined to records by number.
 - One simulation spans many scheduler jobs, because long runs are sized to hit
   the wall clock and restart from a checkpoint. Status is derived from the
   whole restart chain, and a timed-out job leaves it **`interrupted`**

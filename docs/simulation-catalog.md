@@ -661,4 +661,31 @@ xgc-sim archive n645pe --system hpss --path /home/s/sku/n645pe.tar
 ```
 
 The value is that the number-to-tape mapping stops living in someone's memory.
-Driving the transfer is deliberately out of scope for now.
+Driving the transfer is deliberately out of scope for now; the rules for what
+goes to tape and how are in `docs/archive-perlmutter.md`.
+
+### Tape index
+
+The other direction, "what is on tape", is `tools/hpss_index.py`. It runs
+`hsi ls -lR` on a machine, parses the listing into
+`kb/archives/<machine>_hpss.yaml` (every file with size, date, whether an
+`htar` index sits beside it; ADIOS2 `.bp` directories folded into one entry)
+and matches each archive to records by the tag at the front of its name:
+`n498pe_...tar` -> `n498pe` exactly, a bare `n540_...tar` -> every `n540*`
+record, `co433_...tar` -> the notebook record `co433`. A suffixed name never
+matches another machine's record (`n498po_...` is not `n498pe`).
+
+```bash
+xgc-sim hpss perlmutter                   # print the saved index
+xgc-sim hpss perlmutter --refresh         # hsi on the login node, rewrite and commit the index
+xgc-sim hpss perlmutter --link            # plan: records without archive.path and exactly one archive
+xgc-sim hpss perlmutter --link --confirm  # write those archive paths; status untouched
+```
+
+`xgc-sim show <id>` lists the record's tape entries under `tape`, flagging
+any that differ from `archive.path`. Records matched by two or more archives
+(a copy under `OLCF/` and one at the root, a `_failed` variant, several step
+ranges) are reported as ambiguous and left for a human to settle with
+`xgc-sim archive`. The MCP tool is `hpss_index` (read by default;
+`refresh`/`link` + `confirm` write). First run 2026-10-09: 404 archives,
+278 TB, 234 records linked, 34 ambiguous.

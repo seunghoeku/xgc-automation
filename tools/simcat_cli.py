@@ -15,6 +15,9 @@ functions; this is the same system with a keyboard instead of a model.
     xgc-sim sync-notebook --confirm
     xgc-sim adopt-remote polaris /grand/.../n648po_dAdt_ecbc --confirm
     xgc-sim campaign n645pe               # plan the HPC-Campaign archive
+    xgc-sim hpss perlmutter               # list the tape index (kb/archives/)
+    xgc-sim hpss perlmutter --refresh     # hsi ls -lR on the machine, rewrite the index
+    xgc-sim hpss perlmutter --link --confirm   # copy unambiguous tape paths into records
     xgc-sim campaign n645pe --confirm     # start it on the login node
     xgc-sim campaign n645pe --status      # collect the result
 
@@ -112,6 +115,11 @@ def _print_show(payload: dict[str, Any]) -> None:
     archive = record.get("archive") or {}
     if archive.get("path") or archive.get("system"):
         print(f"  {'archive':<13} {archive.get('system')}: {archive.get('path')}")
+    from tools import hpss_index
+
+    for entry in hpss_index.entries_for(str(record.get("record_id"))):
+        flag = "" if entry["path"] == archive.get("path") else "  (not in archive.path)"
+        print(f"  {'tape':<13} {entry['machine']}:{entry['path']}  {hpss_index.human_size(entry['size'])}  {entry['modified']}{flag}")
 
     legacy = record.get("legacy")
     if isinstance(legacy, dict):
@@ -328,6 +336,58 @@ def _cmd_status(args: argparse.Namespace) -> int:
         _print_json(catalog.summarize(record))
     else:
         print(f"{record['record_id']}: status -> {record['status']}")
+    return 0
+
+
+def _hpss_message(result: Any, args: argparse.Namespace) -> str:
+    if getattr(args, "link", False) and getattr(args, "confirm", False):
+        return f"xgc-sim hpss {args.machine} --link"
+    if getattr(args, "refresh", False):
+        return f"xgc-sim hpss {args.machine} --refresh"
+    return ""
+
+
+@catalog_sync.synced(_hpss_message)
+def _cmd_hpss(args: argparse.Namespace) -> int:
+    from tools import hpss_index
+
+    try:
+        if args.refresh:
+            text = Path(args.from_file).read_text(encoding="utf-8") if args.from_file else None
+            result = hpss_index.refresh(args.machine, text=text)
+            totals = result["totals"]
+            print(f"{args.machine}: {totals['archives']} archives, {hpss_index.human_size(totals['bytes'])}, "
+                  f"{totals['matched']} entries matched to records, {totals['unmatched']} unmatched -> {result['path']}")
+        index = hpss_index.load_index(args.machine)
+    except hpss_index.HPSSIndexError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.link:
+        plan = hpss_index.link_plan(index)
+        if args.json:
+            _print_json(plan)
+        else:
+            for item in plan:
+                mark = "link     " if item["action"] == "link" else "AMBIGUOUS"
+                print(f"  {mark} {item['record_id']:<10} {item['status'] or '':<12} " + "; ".join(item["archives"]))
+            print(f"{sum(i['action'] == 'link' for i in plan)} to link, "
+                  f"{sum(i['action'] == 'ambiguous' for i in plan)} ambiguous (left for a human)")
+        if args.confirm:
+            linked = hpss_index.apply_links(plan, catalog_dir=_catalog_dir(args))
+            print(f"linked {len(linked)} record(s)")
+        else:
+            print("plan only; add --confirm to write archive.path into the records")
+        return 0
+    if not args.refresh or args.json:
+        rows = hpss_index.summarize(index)
+        if args.json:
+            _print_json({"machine": index["machine"], "fetched_at": index["fetched_at"], "totals": index["totals"], "entries": rows})
+        else:
+            print(f"{index['machine']} {index['system']} {index.get('root')}  fetched {index['fetched_at']}")
+            for row in rows:
+                print(f"  {hpss_index.human_size(row['size']):>10}  {row['modified']}  {row['records']:<12} {row['path']}")
+            t = index["totals"]
+            print(f"{t['archives']} archives, {hpss_index.human_size(t['bytes'])}; {t['matched']} matched, {t['unmatched']} unmatched")
     return 0
 
 
@@ -815,6 +875,14 @@ def _parser() -> argparse.ArgumentParser:
     archive_parser.add_argument("--system", default="hpss")
     archive_parser.add_argument("--path", required=True)
     archive_parser.set_defaults(func=_cmd_archive)
+
+    hpss_parser = add("hpss", help="tape (HPSS) index of a machine, joined to the records")
+    hpss_parser.add_argument("machine")
+    hpss_parser.add_argument("--refresh", action="store_true", help="run hsi ls -lR on the machine and rewrite kb/archives/<machine>_hpss.yaml")
+    hpss_parser.add_argument("--from-file", help="with --refresh: parse this saved hsi listing instead of connecting")
+    hpss_parser.add_argument("--link", action="store_true", help="plan copying unambiguous tape paths into records without archive.path")
+    hpss_parser.add_argument("--confirm", action="store_true", help="with --link: write the plan")
+    hpss_parser.set_defaults(func=_cmd_hpss)
 
     stats_parser = add("stats", help="catalog counts by status/machine/origin")
     stats_parser.set_defaults(func=_cmd_stats)

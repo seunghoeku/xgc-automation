@@ -676,6 +676,53 @@ def shot_index(device: str | None = None, shot: str | None = None) -> dict[str, 
 
 
 @mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"hpss index {k.get('machine', '')}{' --link' if k.get('link') and k.get('confirm') else ''}")
+def hpss_index(
+    machine: str,
+    refresh: bool = False,
+    link: bool = False,
+    confirm: bool = False,
+    record_id: str | None = None,
+) -> dict[str, Any]:
+    """What is on tape (HPSS) for a machine, joined to the simulation records.
+
+    ``refresh=True`` runs ``hsi ls -lR`` on the machine and rewrites
+    ``kb/archives/<machine>_hpss.yaml`` (takes a few minutes; the catalog
+    commit happens here). Without it the saved index is read. ``record_id``
+    narrows the answer to that record's tape entries. ``link=True`` plans
+    copying each unambiguous tape path into the record's ``archive`` field
+    (records without one, exactly one archive matching the number) and
+    ``confirm=True`` writes it; status is never changed. Ambiguous matches
+    are reported for a human. (`docs/archive-perlmutter.md`)
+    """
+    from tools import hpss_index as index_tool
+
+    try:
+        if refresh:
+            index_tool.refresh(machine)
+        index = index_tool.load_index(machine)
+    except (index_tool.HPSSIndexError, ssh_transport.SSHError) as exc:
+        return {"written": False, "error": str(exc)}
+    out: dict[str, Any] = {
+        "written": bool(refresh),
+        "machine": machine,
+        "fetched_at": index.get("fetched_at"),
+        "totals": index.get("totals"),
+    }
+    if record_id:
+        out["entries"] = [e for e in index.get("entries", []) if record_id in e.get("records", [])]
+    else:
+        out["entries"] = index_tool.summarize(index)
+    if link:
+        plan = index_tool.link_plan(index)
+        out["link_plan"] = plan
+        if confirm:
+            out["linked"] = index_tool.apply_links(plan)
+            out["written"] = True
+    return out
+
+
+@mcp.tool()
 @catalog_sync.synced(lambda result, *a, **k: f"shot {k.get('device', '')} {k.get('shot', '')}: {Path(str(k.get('file', ''))).name}")
 def register_shot_file(
     device: str,

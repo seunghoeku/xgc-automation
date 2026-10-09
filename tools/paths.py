@@ -191,6 +191,7 @@ HISTORICAL_NOTEBOOK = Path(
 )
 SHOTS_DIR = KB_DIR / "shots"  # index of experimental shot data (files live in DATA_ROOT/shots)
 MESHES_DIR = KB_DIR / "meshes"  # mesh recipes and records (equilibria, outputs live in DATA_ROOT/meshes)
+ARCHIVES_DIR = KB_DIR / "archives"  # parsed tape (HPSS) listings per machine, joined to records
 F_INIT_CASES_DIR = STATE_ROOT / "f_init" / "cases"
 FLOW_MATCH_CASES_DIR = STATE_ROOT / "flow_match" / "cases"
 
@@ -229,6 +230,7 @@ def layout() -> list[dict[str, Any]]:
         ("shots_index", SHOTS_DIR, "state"),
         ("meshes_index", MESHES_DIR, "state"),
         ("mesh_data", DATA_ROOT / "meshes", "data"),
+        ("archives_index", ARCHIVES_DIR, "state"),
         ("runs", RUNS_DIR, "state"),
         ("adopted_runs", ADOPTED_DIR, "state"),
         ("input_backup", INPUT_BACKUP_DIR, "state"),
