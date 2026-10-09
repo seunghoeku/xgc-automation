@@ -273,6 +273,24 @@ def _step_number(name: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _fetch_input_text(host: ssh.SSHTarget, remote_dir: str) -> tuple[str, str]:
+    """The run's namelist: ``input``, or XGC's own echo ``fort.input.used``.
+
+    A hand run whose ``input`` was removed still has the echo of the namelist
+    XGC read; it is adopted from that, and the record says so. XGC copies
+    comment bytes verbatim, so the echo may not be UTF-8: latin-1 decodes
+    every byte and leaves the namelist itself intact.
+    """
+    base = remote_dir.rstrip("/")
+    fetched = ssh.run(host, ["cat", f"{base}/input"], timeout=60)
+    if fetched.ok and fetched.stdout.strip():
+        return fetched.stdout, "input"
+    fetched = ssh.run(
+        host, ["bash", "-c", f"iconv -f latin1 -t utf-8 {shlex.quote(base + '/fort.input.used')}"], timeout=60
+    )
+    return (fetched.stdout if fetched.ok else ""), "fort.input.used"
+
+
 def inspect_remote_run(machine: str, remote_dir: str) -> dict[str, Any]:
     """Read everything the adoption needs from the machine. Modifies nothing."""
     cfg = m.get_machine(machine)
@@ -286,8 +304,7 @@ def inspect_remote_run(machine: str, remote_dir: str) -> dict[str, Any]:
         )
     # The input is fetched on its own so the bytes (and therefore the hash)
     # are exactly the remote file's, not a reconstruction from a listing.
-    fetched = ssh.run(host, ["cat", f"{remote_dir.rstrip('/')}/input"], timeout=60)
-    input_text = fetched.stdout if fetched.ok else ""
+    input_text, input_source = _fetch_input_text(host, remote_dir)
     if not input_text.strip():
         raise RemoteAdoptionError(f"{remote_dir} has no input file; nothing to adopt")
     stdout_names = [n for n in sections.get("STDOUT", []) if n.strip()]
@@ -348,6 +365,7 @@ def inspect_remote_run(machine: str, remote_dir: str) -> dict[str, Any]:
         "remote_dir": remote_dir,
         "directory_name": remote_dir.rstrip("/").rsplit("/", 1)[-1],
         "input_text": input_text,
+        "input_source": input_source,
         "input_sha256": hashlib.sha256(input_text.encode("utf-8")).hexdigest(),
         "runs": runs,
         "job_script": {"name": script_name, "text": script_text} if script_text else None,
@@ -577,8 +595,7 @@ def adopt_remote(
 def _input_text_from_plan(machine: str, remote_dir: str, inspection: dict[str, Any]) -> str:
     """The plan strips the input text from its report; read it back once."""
     cfg = m.get_machine(machine)
-    result = ssh.run(ssh.host_for(cfg), ["cat", f"{remote_dir.rstrip('/')}/input"], timeout=60)
-    text = result.stdout if result.ok else ""
+    text, _source = _fetch_input_text(ssh.host_for(cfg), remote_dir)
     if hashlib.sha256(text.encode("utf-8")).hexdigest() != inspection.get("input_sha256"):
         raise RemoteAdoptionError(
             "the remote input changed between planning and writing; rerun the adoption"

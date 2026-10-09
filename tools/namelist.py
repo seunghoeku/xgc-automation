@@ -538,7 +538,9 @@ def referenced_input_files(text: str) -> dict[str, Any]:
             continue
         name = match.group(1).lower()
         values = re.findall(r"'([^']*)'|\"([^\"]*)\"", match.group(2))
-        names = [a or b for a, b in values if (a or b).strip()]
+        # fort.input.used pads strings to their declared length; the name is
+        # the stripped value.
+        names = [(a or b).strip() for a, b in values if (a or b).strip()]
         if not names:
             continue
         if name == INPUT_FILE_DIR_PARAMETER:
