@@ -111,6 +111,10 @@ Do not renumber them.
   fresh checkout (`docs/simulation-catalog.md`, "Reproduction evidence" and
   "CSV notebook"). `Other_data/simulation_note_XGC1.xlsx` is historical and
   never written by automation.
+- Finished output goes to tape under the rules in `docs/archive-perlmutter.md`
+  (one simulation directory = one `htar` archive named after it, `restart_dir`
+  moved out first, exclusions and thinning only after asking, `d`-series and
+  failed runs not by default) and is recorded with `xgc-sim archive`.
 - One simulation spans many scheduler jobs, because long runs are sized to hit
   the wall clock and restart from a checkpoint. Status is derived from the
   whole restart chain, and a timed-out job leaves it **`interrupted`**
@@ -199,6 +203,7 @@ submission. Full rules and handoffs: `docs/repo-roles.md`.
 | Mesh generation: recipes, TOMMS runs on the mesh machine, deployments | `docs/mesh-generation.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
 | HPC-Campaign `.aca` archive built when a simulation completes | `docs/campaign.md` |
+| Tape archive rules (HPSS, what is included, naming, restart files) | `docs/archive-perlmutter.md` |
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |
 | Standalone SwiftBar monitor distribution | [hpc-queue-monitor](https://github.com/seunghoeku/hpc-queue-monitor); checkout integration in `docs/queue-watch.md` |
 | Non-Maxwellian `f_init` procedure (optional; load only when asked) | `f_init/README.md`, skill `f-init` |

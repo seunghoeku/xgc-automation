@@ -154,4 +154,7 @@ what was actually verified, and what is still open.
    KB?~~ Answered: yes — `input_backup/` plus the simulation notebook feed the
    case promotion pipeline (item 10); five baselines promoted.
 4. Should we also use the Superfacility API for job submission?
-5. Output data volume and scratch cleanup policy.
+5. ~~Output data volume and scratch cleanup policy.~~ Answered for Perlmutter:
+   `docs/archive-perlmutter.md` (HPSS via `htar`, restart files separate,
+   exclusions only after asking). Tooling (`plan_archive` from the remote
+   inventory) and the ALCF/stellar-ai sections are still open.
