@@ -137,6 +137,11 @@ Run from the user's own Perlmutter session, never from automation.
 7. **Only then clean scratch**, following the existing deletion rule: save
    the small provenance files into the catalog's `runs/<class>/<run_id>/remote_files/`,
    confirm with the user, `rm -rf` the directory and the restart copy.
+   The catalog repository holds only text provenance, figures and small
+   reduced data: **about 20 MB per simulation at most**. No `.bp` products
+   are copied off the machine when the directory is deleted; the tape
+   archive is their copy. (Inputs, logs, submit scripts, timing files and
+   analysis scripts fit; `xgc.oneddiag.bp` and the mesh do not.)
 
 ## Checklist the agent presents before anything is created
 
