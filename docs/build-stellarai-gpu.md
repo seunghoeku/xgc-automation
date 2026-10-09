@@ -1,6 +1,10 @@
 # Building XGC on the STELLAR-AI GPU partition (`XGC_PLATFORM=stellarai`)
 
-Status 2026-09-29: dependency stack installed. `xgc` and `xgca` built from
+Status 2026-10-09: upstream PR
+[PrincetonUniversity/XGC-Devel#2815](https://github.com/PrincetonUniversity/XGC-Devel/pull/2815)
+(branch `stellar-ai-gpu-setup`) carries the platform files; the stellar-ai
+checkout below still tracks the older `stellarai-gpu` branch until it merges.
+2026-09-29: dependency stack installed. `xgc` and `xgca` built from
 XGC-Devel branch `stellarai-gpu` @ `b3fa2c9b1` with `XGC_PLATFORM=stellarai`;
 `--info` reports the GPU version with the CUDA Kokkos backend. First
 compute-node run: d0030sa (job 332, 1 node) runs with one GPU per rank.
@@ -153,24 +157,18 @@ resolves the CUDA libraries there. Jobs source the env file, which puts
   (`quickstart/runlines/stellarai.sh`). Check the GPU-to-socket mapping with
   `nvidia-smi topo -m` on a compute node once they are up; the run line assumes
   GPUs 0-3 sit on socket 0.
-- **Inter-node traffic uses only `mlx5_11`** (`UCX_NET_DEVICES=mlx5_11:1` in
-  the env file, XGC-Devel `c29e1646d`). Each GPU node has 13 HCAs. On
-  2026-09-29, `sai-n01g3` had its GPU-rail NDR HCAs (`mlx5_0/3/9/12`) stuck in
-  `INIT`, while the other GPU nodes had them `ACTIVE`. With UCX's default
-  device choice, any message to or from that node never completed. The 8-node
-  jobs 333 and 334 spun at 100% CPU without output, first in hcoll's
-  `MPI_Init` allreduce, then (with hcoll off) in the first `MPI_Gather`
-  (`taskmap_write`). A two-rank ping-pong between n01g3 and n01g4 fails with
-  the default and with `mlx5_4`, and passes with `mlx5_11` (32.8 GB/s). An
-  8-node, 64-rank allreduce also passes with `mlx5_11`. `mlx5_11` (NDR 400G,
-  `ib11`) is `ACTIVE` on every GPU node. Check the HCA states with
-  `cat /sys/class/infiniband/*/ports/1/state` before lifting the restriction:
-  it forgoes the multi-rail bandwidth. The test program is
-  `/scratch/gpfs/PTHEORY/seungku/Software/mpitest/pp.c`.
-- hcoll is also disabled (`OMPI_MCA_coll_hcoll_enable=0`, `70fc0b0a0`). Its
+- `UCX_NET_DEVICES=mlx5_11:1` is **no longer set** (removed 2026-10-09, PR #2815).
+  It was a workaround for 2026-09-29, when `sai-n01g3` had its GPU-rail NDR
+  HCAs (`mlx5_0/3/9/12`) stuck in `INIT` and multi-node jobs 333/334 hung in
+  `MPI_Init` / the first `MPI_Gather` with UCX's default device choice. The
+  system has been fixed since, so UCX's default multi-rail selection is used.
+  If a multi-node job hangs at start again, check
+  `cat /sys/class/infiniband/*/ports/1/state` on the allocated nodes; the
+  ping-pong test program is `/scratch/gpfs/PTHEORY/seungku/Software/mpitest/pp.c`.
+- hcoll is still disabled (`OMPI_MCA_coll_hcoll_enable=0`, `70fc0b0a0`). Its
   hang was the same network problem, but Open MPI's own collectives are the
-  simpler default. Both settings are in the GPU env file only; the CPU env
-  file is unchanged.
+  simpler default. The setting is in the GPU env file only; the CPU env file
+  is unchanged.
 - GPU-aware MPI is off (the XGC default). `ompi_info` on vis2 lists the `cuda`
   MPI extension but only the `null` accelerator component; check on a compute
   node before trying `USE_GPU_AWARE_MPI`.
