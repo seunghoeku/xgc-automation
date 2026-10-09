@@ -75,6 +75,11 @@ Do not renumber them.
   (`paths.product_target`, `data_dir` in the user config, `xgc-sim paths`),
   never into the catalog repository; the script and a small JSON of the
   numbers go to the catalog. (`docs/simulation-catalog.md`, "Data directory")
+- Meshes are catalogued the same way: a record and its recipe (`xgc_mesh_in`
+  plus surf/dpol/limiter) in `kb/meshes/`, equilibria and pulled outputs in
+  the data directory, `used_by` joined by hash. `tomms_meshgen` runs only
+  through `generate_mesh` after the plan is confirmed; a mesh made by hand is
+  picked up by `import_meshes`. (`docs/mesh-generation.md`)
 - Experimental shot files are registered with `register_shot_file` /
   `xgc-sim shot add` (file to the data directory, index with column
   meanings and diagnostic to `kb/shots/`); ask for meanings, never guess
@@ -191,6 +196,7 @@ submission. Full rules and handoffs: `docs/repo-roles.md`.
 | Building XGC per machine | `docs/build-stellar.md`, `docs/build-stellarai.md`, `docs/build-stellarai-gpu.md`, `docs/build-polaris.md`, `docs/build-aurora.md` |
 | Aurora day to day: submit, DAOS container, reading results | `docs/aurora-operations.md` |
 | Historical input archive and case promotion | `docs/input-archive.md` |
+| Mesh generation: recipes, TOMMS runs on the mesh machine, deployments | `docs/mesh-generation.md` |
 | Remote XGC_GUI Monitor | `docs/remote-gui.md` |
 | HPC-Campaign `.aca` archive built when a simulation completes | `docs/campaign.md` |
 | Unattended queue polling from a local timer | `docs/queue-watch.md` |

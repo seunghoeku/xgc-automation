@@ -649,6 +649,76 @@ def _cmd_shot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_mesh_plan(plan: dict[str, Any]) -> None:
+    print(f"mesh {plan['mesh_id']} from {plan['base']} on {plan['machine']}: {plan['work_dir']}")
+    print(f"tomms: {plan['tomms'].get('exe')} ({plan['tomms'].get('version')})")
+    print("parameter changes vs base:")
+    for key, (before, after) in plan["parameters_diff"].items():
+        print(f"  {key:<34} {before!s:>24} -> {after}")
+    print("inputs:")
+    for item in plan["stage"]:
+        print(f"  {item['role']:<12} {item['name']:<40} {item['from']}")
+    if plan["missing"]:
+        print(f"MISSING: {plan['missing']}")
+    print(f"command: {plan['command']}")
+    print(plan["note"])
+
+
+@catalog_sync.synced(lambda result, args: f"xgc-sim mesh {args.mesh_command} {getattr(args, 'mesh_id', '') or ''}".rstrip())
+def _cmd_mesh(args: argparse.Namespace) -> int:
+    from tools import meshes
+    from tools import ssh
+
+    cmd = args.mesh_command
+    try:
+        if cmd == "import":
+            payload = meshes.import_from_remote(
+                args.machine, root=args.root, since=args.since,
+                copy_equilibrium=not args.no_equilibrium, dry_run=args.dry_run,
+            )
+        elif cmd == "list":
+            payload = meshes.search(args.query or "", device=args.device, status=args.status)
+        elif cmd == "show":
+            payload = meshes.load(args.mesh_id)
+        elif cmd == "link":
+            payload = meshes.link()
+        elif cmd == "note":
+            payload = meshes.annotate(
+                args.mesh_id, note=args.note, ai_note=args.ai_note, description=args.description,
+                device=args.device, shot=args.shot, status=args.status,
+            )
+        elif cmd == "generate":
+            plan = meshes.plan_generation(
+                args.mesh_id, base=args.base, overrides=_parse_columns(args.set),
+                machine=args.machine, description=args.description or "",
+            )
+            if args.confirm:
+                payload = meshes.start_generation(plan, confirm=True, replace=args.replace)
+            else:
+                if not args.json:
+                    _print_mesh_plan(plan)
+                    return 0
+                payload = plan
+        elif cmd == "status":
+            payload = meshes.check_generation(args.mesh_id)
+        elif cmd == "preview":
+            payload = meshes.preview(args.mesh_id, max_bytes=int(args.max_mb) << 20)
+        else:  # deploy
+            payload = meshes.deploy(args.mesh_id, args.machine, args.directory, confirm=args.confirm)
+    except (meshes.MeshIndexError, ssh.SSHError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.json or cmd != "list":
+        _print_json(payload)
+    else:
+        for row in payload:
+            users = ",".join(row["used_by"]) or "-"
+            print(f"{row['mesh_id']:<50} {row['status']:<8} {str(row['device']):<7} {str(row['shot'] or ''):<8} "
+                  f"nphi={str(row['planes'] or '?'):<4} nodes={str(row['nodes'] or '?'):<8} "
+                  f"{(row['generated_at'] or '')[:10]:<10} {row['attribution'] or '':<14} used by {users}")
+    return 0
+
+
 def _add_filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--machine")
     parser.add_argument("--status", choices=list(catalog.STATUSES))
@@ -898,6 +968,57 @@ def _parser() -> argparse.ArgumentParser:
     s_show.add_argument("shot")
     shot_add("list", help="every indexed shot")
     shot_add("link", help="recompute used_by from the catalog's input hashes")
+
+    mesh_parser = add(
+        "mesh",
+        help="mesh recipes and records: what each mesh was made from, TOMMS runs, deployments, which simulations used it",
+    )
+    mesh_commands = mesh_parser.add_subparsers(dest="mesh_command", required=True)
+
+    def mesh_add(name: str, **kwargs: Any) -> argparse.ArgumentParser:
+        sub = mesh_commands.add_parser(name, parents=[shared], **kwargs)
+        sub.set_defaults(func=_cmd_mesh)
+        return sub
+
+    m_import = mesh_add("import", help="catalogue the meshes in a machine's mesh work tree (machines.yaml <machine>.mesh.root)")
+    m_import.add_argument("--machine", help="machine with mesh.root (default: the first one that has it)")
+    m_import.add_argument("--root", help="override the work tree to scan")
+    m_import.add_argument("--since", default="2y", help="only directories touched since: 2y, 90d, YYYY-MM-DD, or 'all'")
+    m_import.add_argument("--no-equilibrium", action="store_true", help="record equilibria by hash only, do not copy them into the data directory")
+    m_import.add_argument("--dry-run", action="store_true", help="scan and report, write nothing")
+    m_list = mesh_add("list", help="every mesh record")
+    m_list.add_argument("query", nargs="?", default="")
+    m_list.add_argument("--device")
+    m_list.add_argument("--status", choices=("ok", "failed", "running", "unknown"))
+    m_show = mesh_add("show", help="one mesh record in full")
+    m_show.add_argument("mesh_id")
+    mesh_add("link", help="recompute used_by from the catalog's input hashes")
+    m_note = mesh_add("note", help="set the human fields of a record (note, description, device/shot corrections, status)")
+    m_note.add_argument("mesh_id")
+    m_note.add_argument("--note")
+    m_note.add_argument("--ai-note")
+    m_note.add_argument("--description")
+    m_note.add_argument("--device")
+    m_note.add_argument("--shot")
+    m_note.add_argument("--status", choices=("ok", "failed", "running", "unknown"))
+    m_gen = mesh_add("generate", help="plan (and with --confirm start) a tomms_meshgen run from an existing record's recipe")
+    m_gen.add_argument("mesh_id", help="name of the new mesh; also the output file prefix")
+    m_gen.add_argument("--base", required=True, help="existing mesh record whose recipe is the starting point")
+    m_gen.add_argument("--set", action="append", metavar="KEY=VALUE", help="xgc_mesh_in override; repeat per key")
+    m_gen.add_argument("--machine")
+    m_gen.add_argument("--description")
+    m_gen.add_argument("--confirm", action="store_true", help="stage the recipe and start tomms_meshgen (after reviewing the plan)")
+    m_gen.add_argument("--replace", action="store_true", help="reuse an existing work directory")
+    m_status = mesh_add("status", help="poll a running generation; records the outputs when it has finished")
+    m_status.add_argument("mesh_id")
+    m_prev = mesh_add("preview", help="pull node+ele into the data directory and draw the mesh (needs matplotlib)")
+    m_prev.add_argument("mesh_id")
+    m_prev.add_argument("--max-mb", type=int, default=200, help="refuse to pull outputs larger than this")
+    m_dep = mesh_add("deploy", help="copy the outputs to a simulation machine and verify the hashes there")
+    m_dep.add_argument("mesh_id")
+    m_dep.add_argument("machine")
+    m_dep.add_argument("directory")
+    m_dep.add_argument("--confirm", action="store_true")
 
     return parser
 

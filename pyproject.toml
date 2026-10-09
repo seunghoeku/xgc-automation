@@ -17,6 +17,11 @@ sheets = [
     "gspread>=6.0",
     "google-auth>=2.28",
 ]
+# Mesh preview (docs/mesh-generation.md): draw node/ele files locally.
+mesh = [
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+]
 # Rotation-input matching loop (flow_match/README.md): local profile arithmetic.
 flow-match = [
     "numpy>=1.26",

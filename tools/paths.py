@@ -190,6 +190,7 @@ HISTORICAL_NOTEBOOK = Path(
     or STATE_ROOT / "Other_data" / "simulation_note_XGC1.xlsx"
 )
 SHOTS_DIR = KB_DIR / "shots"  # index of experimental shot data (files live in DATA_ROOT/shots)
+MESHES_DIR = KB_DIR / "meshes"  # mesh recipes and records (equilibria, outputs live in DATA_ROOT/meshes)
 F_INIT_CASES_DIR = STATE_ROOT / "f_init" / "cases"
 FLOW_MATCH_CASES_DIR = STATE_ROOT / "flow_match" / "cases"
 
@@ -226,6 +227,8 @@ def layout() -> list[dict[str, Any]]:
         ("bad_nodes", BAD_NODES_FILE, "state"),
         ("case_drafts", DRAFTS_DIR, "state"),
         ("shots_index", SHOTS_DIR, "state"),
+        ("meshes_index", MESHES_DIR, "state"),
+        ("mesh_data", DATA_ROOT / "meshes", "data"),
         ("runs", RUNS_DIR, "state"),
         ("adopted_runs", ADOPTED_DIR, "state"),
         ("input_backup", INPUT_BACKUP_DIR, "state"),

@@ -140,3 +140,13 @@ common:
     credentials: ~/.config/xgc/sheet-service-account.json
     spreadsheet_id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
     worksheet: simulations
+
+# flux (PPPL): no XGC runs; TOMMS mesh generation (docs/mesh-generation.md).
+# flux:
+#   user: <pppl_username>
+#   auth:
+#     method: ssh_controlmaster
+#     ssh_config_host: flux
+#     mfa: true
+#   mesh:
+#     root: /p/epsi/<pppl_username>/rpi_grid   # one directory per mesh

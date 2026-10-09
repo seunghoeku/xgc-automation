@@ -489,6 +489,20 @@ The MCP tools are `shot_index` (read) and `register_shot_file` (write,
 synced like every catalog write). The agent asks for column meanings and
 the diagnostic when they are not stated and never guesses them.
 
+## Mesh index
+
+Meshes have the same two homes and the same hash join. `kb/meshes/<mesh_id>.yaml`
+records what a mesh was made from (the `xgc_mesh_in` parameters, with the
+recipe and its small inputs copied beside the record under
+`kb/meshes/<mesh_id>/`), the equilibrium and output hashes, how the recipe was
+attributed to the outputs when imported from a work tree, the TOMMS run that
+produced it, deployments to simulation machines, and `used_by`, derived from
+`referenced_inputs.files` exactly as for shot files. Equilibria and pulled
+outputs live in `<data_dir>/meshes/`. `xgc-sim mesh import|list|show|note|
+generate|status|preview|deploy|link`; MCP `mesh_index`, `import_meshes`,
+`generate_mesh`, `mesh_status`, `preview_mesh`, `deploy_mesh`,
+`annotate_mesh`. The procedure and the record layout: `docs/mesh-generation.md`.
+
 ## CSV notebook
 
 `kb/simulation_notebook.csv` is the spreadsheet view of the catalog kept next

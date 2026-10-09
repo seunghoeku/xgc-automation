@@ -344,6 +344,23 @@ flux:
     partition: <partition>
     nodes: 1
     walltime: "00:10:00"
+  # Mesh generation (docs/mesh-generation.md). Flux runs no XGC; it is where
+  # TOMMS (tomms_meshgen, Simmetrix licensed) is installed for PPPL users.
+  # tomms_meshgen runs on the login node, detached, reading `xgc_mesh_in` from
+  # the working directory. The user's mesh work tree is `mesh.root` in the
+  # overlay (tools/meshes.py).
+  mesh:
+    root: <path/to/mesh/work>    # one subdirectory per mesh (e.g. /p/epsi/<user>/rpi_grid)
+    tomms:
+      exe: /p/epsi/rpi/install/TOMMS/2025_11_19/bin/tomms_meshgen
+      # Shell lines run before tomms_meshgen in a login shell (`bash -l`):
+      # the modules the 2025_11_19 build was linked against (ifport from
+      # intel/2023.2.0; the Simmetrix module exports the license server).
+      env:
+        - module load intel/2023.2.0 openmpi/4.1.6-intel-2023.2.0 simmodsuite/2025.0-250217-dev
+        - export OMP_NUM_THREADS=1
+      license: /usr/pppl/Simmetrix/simmodsuite.lic   # SimLic value in xgc_mesh_in
+      installs: /p/epsi/rpi/install/TOMMS            # dated builds, newest also 2026_09_22
 
 # Shared settings
 common:

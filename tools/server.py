@@ -35,6 +35,9 @@ Tools implemented so far:
   - plan_remote_gui : resolve and validate an XGC_GUI Monitor target
   - launch_remote_gui : start a remote Monitor and local SSH tunnel
   - remote_gui_status / stop_remote_gui : manage launcher-owned GUI sessions
+  - shot_index / register_shot_file : experimental shot data index
+  - mesh_index / import_meshes / generate_mesh / mesh_status / preview_mesh /
+    deploy_mesh / annotate_mesh : mesh recipes, TOMMS runs, deployments
 
 Scientific data products and provenance hardening will be added following the
 roadmap.
@@ -711,6 +714,164 @@ def register_shot_file(
         return {"registered": False, "error": str(exc)}
     key = f"{shots.shot_key(device, shot)}/{entry['name']}"
     return {"registered": True, "entry": entry, "used_by": linked["linked"].get(key, [])}
+
+
+@mcp.tool()
+def mesh_index(
+    mesh_id: str | None = None,
+    query: str = "",
+    device: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """What meshes are on record, what each was made from, and which simulations used it.
+
+    Without ``mesh_id`` lists records (filtered by free text, device, status);
+    with it returns the full record: the ``xgc_mesh_in`` parameters, the
+    recipe files kept in the catalog (``kb/meshes/<id>/``), the equilibrium,
+    the output hashes, how the recipe was attributed to the outputs
+    (``recipe.attribution``; ``ambiguous`` means the human must settle it),
+    deployments and ``used_by``. See docs/mesh-generation.md.
+    """
+    from tools import meshes
+
+    if mesh_id:
+        try:
+            record = meshes.load(mesh_id)
+        except meshes.MeshIndexError as exc:
+            return {"error": str(exc)}
+        try:
+            record["xgc_mesh_in"] = (meshes.recipe_dir(mesh_id) / meshes.RECIPE_NAME).read_text(encoding="utf-8")
+        except OSError:
+            pass
+        return record
+    return {"meshes": meshes.search(query, device=device, status=status)}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"mesh import {k.get('machine') or ''} since {k.get('since') or 'all'}".replace("  ", " "))
+def import_meshes(
+    machine: str | None = None,
+    root: str | None = None,
+    since: str | None = "2y",
+    copy_equilibrium: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Catalogue the meshes in a machine's mesh work tree (``<machine>.mesh.root``).
+
+    One record per output triple (``.node/.ele/.flx.aif``), with the
+    ``xgc_mesh_in`` variant that produced it attributed by deterministic rules
+    and copied into the catalog with its surf/dpol/limiter files; equilibria
+    are copied into the data directory (``copy_equilibrium``), outputs are
+    recorded by hash only. ``since`` limits the scan (``2y``, ``90d``, a
+    date, or ``all``). ``dry_run`` reports without writing. Idempotent.
+    """
+    from tools import meshes
+
+    try:
+        return meshes.import_from_remote(
+            machine, root=root, since=None if since in (None, "all") else since,
+            copy_equilibrium=copy_equilibrium, dry_run=dry_run,
+        )
+    except (meshes.MeshIndexError, ssh_transport.SSHError) as exc:
+        return {"writes": False, "error": str(exc)}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"mesh generate {k.get('mesh_id', '')}")
+def generate_mesh(
+    mesh_id: str,
+    base: str,
+    overrides: dict[str, str] | None = None,
+    machine: str | None = None,
+    description: str = "",
+    confirm: bool = False,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Plan, and after confirmation start, a ``tomms_meshgen`` run on the mesh machine.
+
+    ``base`` is an existing mesh record; ``overrides`` set ``xgc_mesh_in``
+    keys (``{"num_phi_planes": "128"}``). Without ``confirm`` the plan is
+    returned and nothing is written anywhere: show the parameter diff, the
+    inputs to stage and the command, and ask. With ``confirm`` the recipe is
+    staged under ``mesh.root/<mesh_id>/`` and tomms_meshgen starts detached
+    on the login node (no scheduler); poll with ``mesh_status``.
+    """
+    from tools import meshes
+
+    try:
+        plan = meshes.plan_generation(mesh_id, base=base, overrides=overrides, machine=machine, description=description)
+        if not confirm:
+            return plan
+        return meshes.start_generation(plan, confirm=True, replace=replace)
+    except (meshes.MeshIndexError, ssh_transport.SSHError) as exc:
+        return {"writes": False, "error": str(exc)}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"mesh status {k.get('mesh_id', '')}")
+def mesh_status(mesh_id: str) -> dict[str, Any]:
+    """Poll a generation started with ``generate_mesh``; when tomms_meshgen has
+    exited, hash the outputs, close the record (``ok``/``failed``) and link it."""
+    from tools import meshes
+
+    try:
+        return meshes.check_generation(mesh_id)
+    except (meshes.MeshIndexError, ssh_transport.SSHError) as exc:
+        return {"writes": False, "error": str(exc)}
+
+
+@mcp.tool()
+def preview_mesh(mesh_id: str, max_mb: int = 200) -> dict[str, Any]:
+    """Pull node+ele into the data directory (if under ``max_mb``) and draw the
+    mesh: whole domain, outboard edge, lower region. Returns the PNG path for
+    the human to check the axis, the wall approach and the X-point."""
+    from tools import meshes
+
+    try:
+        return meshes.preview(mesh_id, max_bytes=max_mb << 20)
+    except (meshes.MeshIndexError, ssh_transport.SSHError) as exc:
+        return {"writes": False, "error": str(exc)}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"mesh deploy {k.get('mesh_id', '')} to {k.get('machine', '')}")
+def deploy_mesh(mesh_id: str, machine: str, directory: str, confirm: bool = False) -> dict[str, Any]:
+    """Copy a mesh's outputs to ``machine:directory`` and verify the hashes there.
+
+    Without ``confirm`` returns the plan (files, size, route). The deployment
+    is recorded so a staged input can reference the files and the hash join
+    links the run back to the mesh.
+    """
+    from tools import meshes
+
+    try:
+        return meshes.deploy(mesh_id, machine, directory, confirm=confirm)
+    except (meshes.MeshIndexError, ssh_transport.SSHError) as exc:
+        return {"writes": False, "error": str(exc)}
+
+
+@mcp.tool()
+@catalog_sync.synced(lambda result, *a, **k: f"mesh note {k.get('mesh_id', '')}")
+def annotate_mesh(
+    mesh_id: str,
+    note: str | None = None,
+    ai_note: str | None = None,
+    description: str | None = None,
+    device: str | None = None,
+    shot: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Set a mesh record's human fields. ``note`` only with wording the user
+    approved; ``ai_note`` is the agent's own. ``device``/``shot`` correct an
+    inferred value (recorded as set by the user)."""
+    from tools import meshes
+
+    try:
+        record = meshes.annotate(mesh_id, note=note, ai_note=ai_note, description=description,
+                                 device=device, shot=shot, status=status)
+    except meshes.MeshIndexError as exc:
+        return {"written": False, "error": str(exc)}
+    return {"written": True, "record": meshes.summarize(record)}
 
 
 @mcp.tool()
