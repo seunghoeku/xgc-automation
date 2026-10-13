@@ -44,6 +44,7 @@ from typing import Any, Iterable, Iterator
 import yaml
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 # Resolved by tools/paths.py (XGC_CATALOG_DIR, the config file, or the
@@ -566,6 +567,7 @@ def update_record(
     return record
 
 
+@catalog_sync.synced(lambda result, **k: f"note {k.get('record_id', '')}")
 def set_note(
     record_id: str,
     note: str,
@@ -581,6 +583,7 @@ def set_note(
     )
 
 
+@catalog_sync.synced(lambda result, **k: f"ai_note {k.get('record_id', '')}")
 def set_ai_note(
     record_id: str,
     ai_note: str,
@@ -595,6 +598,7 @@ def set_ai_note(
     )
 
 
+@catalog_sync.synced(lambda result, **k: f"archive {k.get('record_id', '')}")
 def set_archive(
     record_id: str,
     *,

@@ -149,9 +149,12 @@ identical for every user so that catalogs merge by copying user directories
 (`docs/setup-new-user.md`, 4a);
 the original author's catalog is reference data, never a new user's state.
 Catalog writes are
-committed and pushed in the catalog repository, never here; the write tools
-do that themselves (`tools/catalog_sync.py`: pull before, commit and push
-after, reported under `catalog_sync`). A checkout on the
+committed and pushed in the catalog repository, never here; the library
+write functions do that themselves whoever calls them, MCP tool, CLI, or a
+script (`tools/catalog_sync.py`: pull before, commit and push after,
+reported under `catalog_sync`). Restart sessions after moving a checkout
+or changing `catalog_dir`, since a running MCP server keeps its start-time
+paths. A checkout on the
 machine itself binds it with `auth.method: local` (`docs/ssh-setup.md`).
 (`docs/simulation-catalog.md`, "Catalog repository")
 

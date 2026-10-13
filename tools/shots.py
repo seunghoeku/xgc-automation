@@ -32,6 +32,7 @@ from typing import Any, Iterable, Iterator
 import yaml
 
 from tools import paths
+from tools import catalog_sync
 from tools import simulation_catalog as catalog
 
 SCHEMA_VERSION = 1
@@ -111,6 +112,7 @@ def _new_index(device: str, shot: int | str) -> dict[str, Any]:
     }
 
 
+@catalog_sync.synced(lambda result, **k: f"shot {k.get('device', '')} {k.get('shot', '')}: describe")
 def describe(
     device: str,
     shot: int | str,
@@ -135,6 +137,7 @@ def describe(
     return data
 
 
+@catalog_sync.synced(lambda result, **k: f"shot {k.get('device', '')} {k.get('shot', '')}: {Path(str(k.get('source', ''))).name}")
 def register_file(
     device: str,
     shot: int | str,

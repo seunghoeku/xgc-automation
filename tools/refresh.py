@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import campaign
+from tools import catalog_sync
 from tools import hpc_runner
 from tools import machines as machine_config
 from tools import scheduler as sched
@@ -186,6 +187,7 @@ def plan_refresh(
     }
 
 
+@catalog_sync.synced(lambda result, **k: "refresh status" + (f" {k['record_id']}" if k.get("record_id") else "") + (f" on {k['machine']}" if k.get("machine") else ""))
 def refresh(
     *,
     catalog_dir: Path | None = None,

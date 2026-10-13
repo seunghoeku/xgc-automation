@@ -34,6 +34,7 @@ from tools import machines as machine_config
 from tools import simulation_catalog as catalog
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 REGISTRY_PATH = paths.REGISTRY_PATH  # follows XGC_CATALOG_DIR (tools/paths.py)
@@ -239,7 +240,50 @@ def reserve_simulation_id(
     confirm: bool = False,
     kind: str = "production",
 ) -> dict[str, Any]:
-    """Reserve the next number of one series after explicit human confirmation."""
+    """Reserve the next number of one series after explicit human confirmation.
+
+    The catalog repository is pulled first and the reservation committed and
+    pushed right after (tools/catalog_sync.py), whoever calls this: the MCP
+    tool, the CLI, flow_match, or a script. If the push is rejected because
+    another checkout took the same number, the reservation is withdrawn and
+    the caller is told the number the series moved to, since a number the
+    human never saw must not be handed out silently (absolute rule 1).
+    """
+    pulled = catalog_sync.pull()
+    result = _reserve_simulation_id(
+        machines, short_name, tags=tags, expected_number=expected_number, confirm=confirm, kind=kind
+    )
+    if not result.get("reserved"):
+        result["catalog_sync"] = {"pull": pulled}
+        return result
+    subject = f"reserve {result['simulation_id']}"
+    pushed = catalog_sync.commit_and_push(subject)
+    if pushed.get("rejected"):
+        dropped = catalog_sync.drop_unpushed_commit(subject)
+        plan = plan_simulation_id(machines, short_name, tags=tags, kind=kind)
+        return {
+            "reserved": False,
+            "reason": (
+                f"another checkout reserved a number first; {result['simulation_id']} "
+                f"was withdrawn. The next {plan['kind']} number is now "
+                f"{plan['simulation_number']}: show it and reserve again."
+            ),
+            "plan": plan,
+            "catalog_sync": {"pull": pulled, "push": pushed, "undo": dropped},
+        }
+    result["catalog_sync"] = {"pull": pulled, "push": pushed}
+    return result
+
+
+def _reserve_simulation_id(
+    machines: str | Iterable[str],
+    short_name: str = "",
+    *,
+    tags: Iterable[str] | None = None,
+    expected_number: int | None = None,
+    confirm: bool = False,
+    kind: str = "production",
+) -> dict[str, Any]:
     kind = normalize_kind(kind)
     plan = plan_simulation_id(machines, short_name, tags=tags, kind=kind)
     if not confirm:
@@ -377,6 +421,7 @@ def simulation_directory(simulation_id: str, machine: str | None = None) -> dict
     }
 
 
+@catalog_sync.synced(lambda result, **k: f"stage {k.get('simulation_id', '')} ({k.get('case', '')})")
 def stage_simulation_case(
     case: str,
     simulation_id: str,

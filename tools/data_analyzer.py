@@ -25,6 +25,7 @@ from tools import provenance as prov
 from tools import ssh
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 RUNS_DIR = paths.RUNS_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
@@ -752,6 +753,7 @@ def _oned_profiles_svg(payload: dict[str, Any]) -> str:
     return "\n".join(parts) + "\n"
 
 
+@catalog_sync.synced(lambda result, **k: f"analysis {k.get('run_id', '')} ({k.get('product', '')})")
 def analyze_run(
     machine: str,
     run_id: str,

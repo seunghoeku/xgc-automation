@@ -129,6 +129,28 @@ class SyncedDecoratorTests(unittest.TestCase):
         self.assertEqual(result["catalog_sync"]["push"]["pushed"], True)
 
 
+class GuardTests(unittest.TestCase):
+    def test_patched_state_paths_outside_the_repository_disable_sync(self) -> None:
+        from unittest.mock import patch
+
+        from tools import simulation_catalog as sc
+
+        with patch.object(catalog_sync, "_disabled_for_process", False), \
+             patch.object(sc, "CATALOG_DIR", Path(tempfile.gettempdir()) / "elsewhere"):
+            self.assertFalse(catalog_sync.enabled())
+
+    def test_process_disable_does_not_affect_explicit_roots(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "/nowhere.git"], check=True)
+            with patch.object(catalog_sync, "_disabled_for_process", True):
+                self.assertTrue(catalog_sync.enabled(repo))
+                self.assertFalse(catalog_sync.enabled())
+
+
 class WroteHeuristicTests(unittest.TestCase):
     def test_plan_only_and_refused_results_do_not_commit(self) -> None:
         self.assertFalse(catalog_sync._wrote({"reserved": False, "plan": {}}))

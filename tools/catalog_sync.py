@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import inspect
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +36,10 @@ from tools import paths
 
 GIT_TIMEOUT_SECONDS = 90.0
 _disabled_for_process = False
+# Depth of nested synced calls on this thread: refresh() calls status() per
+# run, submit() rewrites the notebook, and so on. Only the outermost call
+# pulls and commits, so one operation is one commit.
+_depth = threading.local()
 
 
 @dataclass
@@ -87,18 +92,54 @@ def repo_root(root: Path | None = None) -> Path | None:
     return None
 
 
+def _writes_go_to_the_repository(repo: Path) -> bool:
+    """Do the live module constants still point inside the catalog repository?
+
+    Tests patch ``simulation_catalog.CATALOG_DIR``, ``simulation_registry.
+    REGISTRY_PATH`` and ``hpc_runner.RUNS_DIR`` to temporary directories; a
+    write there must never pull from or commit to the real catalog.
+    """
+    import sys
+
+    for module, attr in (
+        ("tools.simulation_catalog", "CATALOG_DIR"),
+        ("tools.simulation_registry", "REGISTRY_PATH"),
+        ("tools.hpc_runner", "RUNS_DIR"),
+    ):
+        loaded = sys.modules.get(module)
+        value = getattr(loaded, attr, None) if loaded is not None else None
+        if value is None:
+            continue
+        try:
+            Path(value).resolve().relative_to(repo)
+        except ValueError:
+            return False
+    return True
+
+
 def enabled(root: Path | None = None) -> bool:
-    if _disabled_for_process:
-        return False
-    setting = paths.config_setting("catalog_sync", "auto") if root is None else "auto"
-    if setting is False or (isinstance(setting, str) and setting.lower() in {"false", "off", "no"}):
-        return False
+    """Whether sync applies: for the configured catalog (``root=None``) or an explicit one.
+
+    ``disable_for_process`` and the config setting govern only the configured
+    catalog; an explicit ``root`` (tests, tooling) is judged on its own.
+    """
+    if root is None:
+        if _disabled_for_process:
+            return False
+        setting = paths.config_setting("catalog_sync", "auto")
+        if setting is False or (isinstance(setting, str) and setting.lower() in {"false", "off", "no"}):
+            return False
+    else:
+        setting = "auto"
     repo = repo_root(root)
     if repo is None:
         return False
-    if root is None and repo == paths.PROJECT_ROOT.resolve() and setting is not True:
-        # State still inside the code checkout: never auto-commit there.
-        return False
+    if root is None:
+        if repo == paths.PROJECT_ROOT.resolve() and setting is not True:
+            # State still inside the code checkout: never auto-commit there.
+            return False
+        if not _writes_go_to_the_repository(repo):
+            return False
     return _git(repo, "remote", "get-url", "origin", timeout=10).ok
 
 
@@ -206,14 +247,28 @@ def synced(message: Callable[..., str] | str):
 
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            pulled = pull()
-            result = fn(*args, **kwargs)
             # Callers (FastMCP, the CLI) may pass arguments positionally; the
             # message function always sees them by name.
             try:
                 named = dict(signature.bind_partial(*args, **kwargs).arguments)
             except TypeError:
                 named = dict(kwargs)
+            depth = getattr(_depth, "value", 0)
+            # A call on an explicit foreign catalog (tests, reading someone
+            # else's clone) is not a write to our own repository.
+            foreign = named.get("catalog_dir") is not None
+            if depth > 0 or foreign:
+                _depth.value = depth + 1
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    _depth.value = depth
+            _depth.value = 1
+            try:
+                pulled = pull()
+                result = fn(*args, **kwargs)
+            finally:
+                _depth.value = 0
             subject = message(result, **named) if callable(message) else message
             if subject and _wrote(result):
                 pushed = commit_and_push(subject)

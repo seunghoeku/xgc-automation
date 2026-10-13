@@ -39,6 +39,7 @@ from tools import simulation_catalog as catalog
 from tools import ssh
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 ADOPTED_DIR = paths.ADOPTED_DIR  # follows XGC_CATALOG_DIR (tools/paths.py)
@@ -501,6 +502,7 @@ def plan_remote_adoption(
     }
 
 
+@catalog_sync.synced(lambda result, **k: f"adopt {str(k.get('remote_dir', '')).rstrip('/').rsplit('/', 1)[-1]} ({k.get('machine', '')})")
 def adopt_remote(
     machine: str,
     remote_dir: str,

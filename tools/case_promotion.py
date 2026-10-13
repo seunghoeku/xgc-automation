@@ -32,6 +32,7 @@ import yaml
 from tools import input_archive
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 # The researcher's run notebook. Another user can point the pipeline at their
@@ -674,6 +675,7 @@ def plan_case_promotion(archive_name: str) -> dict[str, Any]:
     }
 
 
+@catalog_sync.synced(lambda result, **k: f"draft case {k.get('archive_name', '')}")
 def write_draft_case(
     archive_name: str,
     *,

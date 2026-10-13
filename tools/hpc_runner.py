@@ -47,6 +47,7 @@ from tools import simulation_registry as sim_registry
 from tools import ssh
 
 from tools import paths
+from tools import catalog_sync
 
 PROJECT_ROOT = paths.PROJECT_ROOT
 TEMPLATE_DIR = paths.TEMPLATE_DIR
@@ -1248,6 +1249,7 @@ def _store_provenance_field(run_id: str, key: str, value: Any) -> None:
 SUBMIT_TIMEOUT_SECONDS = 300.0
 
 
+@catalog_sync.synced(lambda result, **k: f"submit {(k.get('kwargs') or {}).get('simulation_id') or (result.get('run_id') if isinstance(result, dict) else '') or ''} on {k.get('machine', '')}".replace("submit  on", "submit on"))
 def submit(
     machine: str,
     *,
@@ -1427,6 +1429,7 @@ def _is_dev_simulation(simulation: dict[str, Any] | None) -> bool:
     return catalog.record_kind(str(simulation.get("simulation_id") or "")) == "dev"
 
 
+@catalog_sync.synced(lambda result, **k: f"status {k.get('machine', '')} {k.get('job_id', '')}")
 def status(machine: str, job_id: str) -> dict[str, Any]:
     """Query job state, normalized across schedulers.
 
@@ -1644,6 +1647,7 @@ def _record_observed_state(
     return result
 
 
+@catalog_sync.synced(lambda result, **k: f"cancel {k.get('machine', '')} {k.get('job_id', '')}")
 def cancel(machine: str, job_id: str, *, confirm: bool = False) -> dict[str, Any]:
     """Cancel a job. Requires confirmation, like submission."""
     if not confirm:

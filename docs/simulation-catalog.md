@@ -416,12 +416,26 @@ allocations, checkouts and preferences, symlinked to
 provenance or input backups are made in the catalog repository; this one
 only carries code, documentation, machine facts and promoted cases.
 
-The tools keep the checkouts in step themselves (`tools/catalog_sync.py`):
-every write entry point, the MCP tools that change records and the `xgc-sim`
-commands that do, runs `git pull --rebase` on the catalog first and commits
-and pushes afterwards with a subject such as `reserve n695pe`, `submit n695pe
-on perlmutter`, `status perlmutter 59018634` or `ai_note n674po`. The outcome
-is attached to the tool result under `catalog_sync` and printed by the CLI.
+The tools keep the checkouts in step themselves (`tools/catalog_sync.py`).
+The sync is attached to the **library functions that write**, not only to
+the MCP tools and `xgc-sim` commands in front of them: `reserve_simulation_id`,
+`stage_simulation_case`, `hpc_runner.submit/status/cancel`, `refresh.refresh`,
+`adopt_remote`, `set_note/set_ai_note/set_archive`, `analyze_run`,
+`campaign.build`, `write_draft_case` and the shot index. A script or
+`flow_match` calling these directly therefore syncs too (2026-10-13: a run
+reserved and submitted from a Python one-liner had sat uncommitted until
+this change). Each operation runs `git pull --rebase` on the catalog first
+and commits and pushes afterwards with a subject such as `reserve n695pe`,
+`submit n695pe on perlmutter`, `status perlmutter 59018634` or
+`ai_note n674po`; nested calls (a refresh polling many runs) make one
+commit. The outcome is attached to the result under `catalog_sync` and
+printed by the CLI. Writes that bypass the library, editing a record by
+hand or copying files in, are picked up by the next synced operation,
+which commits everything the catalog's `.gitignore` lets through.
+
+An MCP server keeps the paths it resolved at start. After moving a checkout
+or changing `catalog_dir`, restart the sessions that run one; a server
+started from a path that no longer exists writes nowhere useful.
 A sync failure never undoes or blocks the write; it is reported. It is on
 when the state root is a git work tree with an `origin` remote and is not the
 code checkout; `catalog_sync: true|false` in the config file forces it, and

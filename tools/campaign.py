@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from tools import machines as m
+from tools import catalog_sync
 from tools import simulation_catalog as catalog
 from tools import ssh
 
@@ -549,6 +550,7 @@ def follow_up(
     return results
 
 
+@catalog_sync.synced(lambda result, **k: f"campaign {k.get('record_id', '')}")
 def build(
     record_id: str,
     *,
