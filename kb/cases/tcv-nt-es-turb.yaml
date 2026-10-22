@@ -1,0 +1,242 @@
+# TCV negative-triangularity XGC1 electrostatic edge turbulence — the n675pe
+# baseline of the 2026-09/10 NT/PT matched-FSA campaign (n675pe-n699pe).
+#
+# Promoted from the catalog record n675pe (origin: automation) on 2026-10-22.
+# Values are recorded from the input that ran steps 1001-2000 (job 58981108,
+# devel202609 569054a0). The baseline directory holds input/adios2cfg.xml/
+# petsc.rc copied from the run directory plus BASELINE_PROVENANCE.txt; the
+# mesh, equilibrium and profile files stay in input_file_dir.
+
+name: tcv-nt-es-turb
+description: >
+  TCV shot 69271 negative-triangularity XGC1 electrostatic edge/SOL turbulence
+  case: total-f kinetic electrons and deuterium, half torus (16 planes),
+  collisions off, no neutrals or sources, regular sheath (mode 1), the
+  MatchedProjection flux-surface-average solver and the ne00 Poisson
+  predictor of devel202609. Reference for the NT/PT triangularity comparison
+  (PT twin n676pe uses the tcv69508 mesh and equilibrium) and for the
+  collisional (n692pe/n693pe), 32-plane (n694pe) and SOL-gradient
+  (n695pe/n696pe) variants.
+
+machine: perlmutter
+case_dir: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-nt-es-turb
+input_file_dir: /pscratch/sd/s/sku/XGC_inputs   # referenced as ../XGC_inputs/ from the run directory
+
+provenance:
+  simulation_id: n675pe
+  catalog_record: kb/simulations/n675pe.yaml
+  runtime_case_dir: /pscratch/sd/s/sku/n675pe_tcv_nt_totalf_es_rhs_ne00_matched_fsa
+  archive_file: input_backup/n675pe_tcv_nt_totalf_es_rhs_ne00_matched_fsa
+  curated_baseline:
+    path: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-nt-es-turb
+    files: [input, adios2cfg.xml, petsc.rc, BASELINE_PROVENANCE.txt]
+    note: "Input-only baseline; the 2000-step output stays in the run directory."
+  runtime_input:
+    sha256: a5c6f5afd389c06404cc7e2a48853af823f17f9cda9d5dd16390f7bca3c7f2f7
+    steps_1_1000_sha256: 24da86338558d975fea80e12b58879fc0373a939e495af0f67209655dba6a055
+    note: >
+      Steps 1-1000 ran with sml_fsa_method='Matched' (fb02185f);
+      569054a0 renamed it to sml_field_solver_fsa_method='MatchedProjection'
+      and the baseline carries the new name.
+  source:
+    checkout: /pscratch/sd/s/sku/XGC-Devel_devel202609
+    branch: devel202609
+    commit: 569054a016893f6441ea656f88b4d74e13c92966
+    executable: /pscratch/sd/s/sku/XGC-Devel_devel202609/bin/bin/xgc
+    machines_local_build: devel202609_gpu
+  related_simulations:
+    - {id: n676pe, change: "PT twin: tcv69508_nphi160_pt_may_26_2026 mesh, tcv69508_t1.1_PT.eqd"}
+    - {id: n692pe, change: "NT with col_mode=4"}
+    - {id: n693pe, change: "PT with col_mode=4, sml_monte_num 5e8"}
+    - {id: n694pe, change: "NT with sml_nphi_total=32"}
+    - {id: n695pe, change: "n694pe with SOL-gradient density profile"}
+    - {id: n699pe, change: "NT without the n=0 field (sml_00_efield=.false.)"}
+
+validated:
+  date: 2026-09-30
+  machine: perlmutter
+  xgc_commit: 569054a016893f6441ea656f88b4d74e13c92966
+  input_sha256: a5c6f5afd389c06404cc7e2a48853af823f17f9cda9d5dd16390f7bca3c7f2f7
+  dryrun: ACCEPTED           # login-node dryrun before each submission (field_model_source: xgc --dryrun)
+  n_ranks: 512
+  runtime_tested: true
+  runtime_evidence:
+    - job_id: 58871316
+      state: COMPLETED
+      exit_code: "0:0"
+      elapsed: "02:35:00"
+      steps: "1-1000"
+      commit: fb02185f979f280e38452d7fee4f8022b53b4766
+    - job_id: 58981108
+      state: COMPLETED
+      exit_code: "0:0"
+      steps: "1001-2000"
+      commit: 569054a016893f6441ea656f88b4d74e13c92966
+  final_checkpoint_step: 2000
+
+physics:
+  model: electrostatic
+  flavor: XGC1
+  device: "TCV shot 69271 at 1.1 s, negative triangularity"
+  delta_f: false
+  boundary: edge              # sml_bounce=0, inpsi=0, outpsi=1.12, private flux to 0.92
+  sheath:
+    mode: 1
+    adjust: true
+    initial_potential_factor: 3.0
+    adjust_factor: 1.0
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF}
+  toroidal:
+    nphi_total: 16
+    wedge_n: 2
+  radial_domain: {inpsi: 0.0, outpsi: 1.12}
+  field_solver:
+    fsa_method: MatchedProjection       # sml_field_solver_fsa_method; needs sml_iter_solver_precond_type=0
+    poisson_predictor_ne00: true        # sml_poisson_predictor_ne00, tau 0.2
+    mode_select_mode: 0                 # no toroidal mode filter beyond the wedge
+  extras:
+    collisions: off (col_mode=0)
+    neutrals: off
+    sources: off (src_* blocks present but sml_source=.false.)
+    n0_field: on (sml_00_efield=.true.)
+
+numerics:
+  dt: 2.5e-3                  # toroidal transit times
+  mstep_per_submission: 1000  # sml_mstep counts steps per run; 2000 reached in two submissions
+  ncycle_half: 20
+  restart: true               # harmless for a fresh start (no timestep.dat)
+  restart_write_period: 500
+  num_per_vertex: [10000, 10000]
+  f0_grid: {nmu: 30, nvp: 18, smu_max: 4.0, vp_max: 4.0}
+  f0_update: {f0g: true, alpha: 0.002, df0g_transfer: PersistentRetainedDf0g}
+  monte_num: 5.0e7
+
+resource_measured:
+  machine: perlmutter
+  constraint: gpu
+  account: m4552
+  qos: regular
+  nodes: 128
+  ranks: 512
+  ranks_per_node: 4
+  gpus_per_node: 4
+  cpus_per_task: 32
+  walltime_requested: "04:00:00"
+  note: >
+    1000 steps took about 2 h 35 m at 128 nodes (9.3 s/step); a 32-node
+    timing test (d0010pe) ran at 28 s/step. The restart used a 4 h request.
+
+input_files:
+  mesh:
+    - tcv69271_nphi160_pt_may_26_2026.node
+    - tcv69271_nphi160_pt_may_26_2026.ele
+    - tcv69271_nphi160_pt_may_26_2026.flx.aif
+  equilibrium: tcv69271_t1.1_NT.eqd
+  profiles:
+    density: ne_tcv69271_t1.1_NT.prf
+    temp_electron: te_tcv69271_t1.1_NT.prf
+    temp_ion: ti_tcv69271_t1.1_NT.prf
+  other: [adios2cfg.xml, petsc.rc]
+  verified_present_on_perlmutter: true
+
+output_products_observed:
+  - xgc.oneddiag.bp
+  - xgc.3d.*.bp (period 10)
+  - xgc.f3d.*.bp (period 10)
+  - xgc.f0.*.bp (period 100)
+  - restart checkpoints every 500 steps through 2000
+
+notes:
+  - >
+    sml_mstep counts steps per submission: the baseline's 1000 means "advance
+    1000 steps from wherever timestep.dat says", so a 2000-step continuation is
+    a second submission of the same input (skip_dryrun=True for an unchanged
+    restart, per the project rule).
+  - >
+    sml_field_solver_fsa_method='MatchedProjection' exists from devel202609
+    569054a0 on; older binaries know it as sml_fsa_method='Matched'. Either
+    name refuses sml_iter_solver_precond_type=1, so keep 0.
+  - >
+    Collisions are off here on purpose (the NT/PT comparison first ran
+    collisionless). The col_mode=4 twins (n692pe/n693pe) show ~4x weaker
+    turbulence and ~12 s/step; switch col_mode to 4 as an override, not by
+    editing the baseline.
+  - >
+    The PT twin (n676pe) collapsed at gstep 330-340 in its first attempt
+    (iden overflow, phi=0) and was rerun with sml_monte_num=5e8; the NT
+    baseline never needed that.
+  - >
+    Separatrix transport analysis (n675pe ai_note, 2026-10-05): e dphi/Te
+    falls from 3.3 % at psi 0.95 to 2.1 % at 0.99 and the E_r well (-23 kV/m
+    at psi 0.99) is the ion diamagnetic field; the 0.95-0.98 flux drop is
+    E_r shear, the 0.98-1.0 drop is not (n699pe).
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: TCV device
+      patterns: ['\bTCV\b', '\b69271\b']
+    - label: negative triangularity or triangularity comparison
+      patterns: ['\bnegative[\s-]*triangularity\b', '\bNT\b', '\btriangularity\b']
+    - label: electrostatic
+      patterns: ['\belectrostatic\b']
+    - label: edge or SOL turbulence
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '\bpedestal\b', '\bseparatrix\b']
+    - label: XGC1 turbulence
+      patterns: ['\bXGC1\b', '\bturbulence\b', '\bturbulent\b']
+    - label: total-f markers
+      patterns: ['\btotal[\s-]*f\b', '\bfull[\s-]*f\b']
+    - label: collisionless
+      patterns: ['\bcollisionless\b', '\bcollisions?\s+off\b']
+  exclusions:
+    - label: electromagnetic
+      patterns: ['\belectromagnetic\b', '\bEM\b']
+      reason: this baseline is electrostatic
+    - label: XGCa or neoclassical
+      patterns: ['\bXGCa\b', '\bneoclassical\b']
+      reason: this is an XGC1 turbulence case; use tcv-xgca-sheath for XGCa
+    - label: Gyraze surrogate
+      patterns: ['\bGyraze\b', '\bsurrogate\b']
+      reason: the regular sheath model is used; the Gyraze campaign is n641pe (XGCa)
+    - label: core-only turbulence
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b']
+      reason: this is an edge/SOL case (sml_bounce=0, outpsi=1.12)
+    - label: delta-f
+      patterns: ['\bdelta[\s-]*f\b']
+      reason: this baseline uses TotalF markers
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b',
+                 '\bASDEX\b', '\bST[\s-]?40\b', '\bNSTX\b', '\bJET\b', '\bC[\s-]?Mod\b']
+      reason: this baseline is TCV geometry; other devices need their own case
+  baseline_parameters:
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.12
+    sml_outpsi_priv1: 0.92
+    sml_dt: 2.5e-3
+    sml_mstep: 1000
+    sml_ncycle_half: 20
+    sml_nphi_total: 16
+    sml_wedge_n: 2
+    sml_sheath_mode: 1
+    sml_sheath_init_pot_factor: 3.0
+    sml_sheath_adjust_factor: 1.0
+    sml_field_solver_fsa_method: MatchedProjection
+    sml_iter_solver_precond_type: 0
+    sml_poisson_predictor_ne00: true
+    sml_restart: true
+    sml_restart_write_period: 500
+    ptl_num_per_vertex: [10000, 10000]
+    col_mode: 0
+    sml_neutral: false
+    sml_source: false
+  warnings:
+    - >
+      Sized for 128 GPU nodes (512 ranks, 10000 markers per vertex per
+      species); a smaller allocation needs fewer markers or more wall time
+      (28 s/step at 32 nodes).
+    - >
+      The PT twin needs the tcv69508 mesh, equilibrium and the same profile
+      set; swap sml_node_file/sml_ele_file/sml_surf_file/eq_filename together.

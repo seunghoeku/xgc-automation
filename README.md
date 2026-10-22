@@ -43,12 +43,14 @@ builds) lives in gitignored overlays.
 
 `physics_advisor` matches a natural-language physics request to facts and
 exclusions recorded in `kb/cases/`. It never invents numerical values. The
-knowledge base currently holds five validated baselines (`ecbc` core ES
-delta-f, `st40-heatload` edge heat-load, `asdex-imode` edge I-mode,
-`kstar-rmp` RMP turbulence, `tcv-xgca-sheath` XGCa sheath); requests outside
-their recorded physics (e.g. electromagnetic turbulence, ELM crashes, other
-devices) are reported as unsupported rather than forced onto the closest
-case.
+knowledge base holds one validated baseline per purpose (`ecbc` core ES
+delta-f, `ecbc-low-beta-n6-ci` EM linear growth, `dadt-ecbc-em` EM core
+total-f for dA/dt data, `st40-heatload` edge heat-load, `asdex-imode` edge
+I-mode, `kstar-rmp` RMP turbulence, `tcv-xgca-sheath` XGCa sheath,
+`tcv-nt-es-turb` ES edge turbulence, `d3d-qh-em-turb` EM edge turbulence,
+`xgc1example-stellarai` build smoke test); requests outside their recorded
+physics (e.g. ELM crashes, other devices) are reported as unsupported rather
+than forced onto the closest case.
 
 The returned case and explicit overrides flow through `plan_input` for XGC
 metadata validation and a human-readable diff before anything can be written.

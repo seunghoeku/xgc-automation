@@ -29,11 +29,12 @@ class PhysicsAdvisorTests(unittest.TestCase):
 
     def test_rejects_electromagnetic_edge_request(self) -> None:
         result = pa.advise(
-            "Electromagnetic edge-SOL turbulence with collisions enabled."
+            "Electromagnetic edge-SOL turbulence with collisions enabled on ITER."
         )
 
-        # Electromagnetic disqualifies every case in the KB (ecbc is a core
-        # electrostatic case; st40-heatload is electrostatic too).
+        # Electromagnetic disqualifies the electrostatic cases (ecbc is a core
+        # electrostatic case; st40-heatload is electrostatic too) and ITER
+        # disqualifies the only EM edge baseline (d3d-qh-em-turb, DIII-D).
         self.assertEqual(result["status"], "unsupported")
         self.assertNotIn("selected_case", result)
         self.assertTrue(result["candidates"])
@@ -42,6 +43,27 @@ class PhysicsAdvisorTests(unittest.TestCase):
         ecbc = next(c for c in result["candidates"] if c["case"] == "ecbc")
         self.assertTrue(any("electrostatic" in r for r in ecbc["excluded"]))
         self.assertTrue(any("core case" in r for r in ecbc["excluded"]))
+
+    def test_recommends_d3d_em_edge_case(self) -> None:
+        result = pa.advise(
+            "Electromagnetic edge-SOL turbulence with collisions enabled."
+        )
+
+        self.assertEqual(result["status"], "recommended")
+        self.assertEqual(result["selected_case"]["name"], "d3d-qh-em-turb")
+        self.assertEqual(result["selected_case"]["machine"], "polaris")
+        self.assertTrue(
+            result["proposal"]["baseline_parameters"]["sml_electromagnetic"]
+        )
+
+    def test_recommends_tcv_electrostatic_edge_turbulence_case(self) -> None:
+        result = pa.advise(
+            "TCV negative-triangularity electrostatic edge turbulence, total-f."
+        )
+
+        self.assertEqual(result["status"], "recommended")
+        self.assertEqual(result["selected_case"]["name"], "tcv-nt-es-turb")
+        self.assertEqual(result["selected_case"]["machine"], "perlmutter")
 
     def test_asks_for_detail_when_no_signal_matches(self) -> None:
         result = pa.advise("I want to study a plasma problem.")

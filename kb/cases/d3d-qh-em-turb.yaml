@@ -1,0 +1,280 @@
+# DIII-D QH-mode electromagnetic edge turbulence — the n674po Polaris
+# baseline (port of the Aurora n660au campaign).
+#
+# Promoted from the catalog record n674po (origin: automation) on 2026-10-22.
+# The case is run in two phases with two inputs kept side by side in the
+# baseline directory:
+#   input              phase 1, neoclassical relaxation (sml_no_turb, col_mode 0),
+#                      the file that completed as job 7659599 (fresh start)
+#   input.phase2_turb  phase 2, electromagnetic turbulence restarted from the
+#                      phase-1 checkpoint (the file behind jobs 7709109-7725078)
+# Values below are recorded from those two files.
+
+name: d3d-qh-em-turb
+description: >
+  DIII-D shot 184833 (4800 ms) QH-mode electromagnetic XGC1 edge/SOL
+  turbulence case: total-f kinetic electrons, deuterium and carbon on the
+  137205-vertex d3d-184833.04800_xgc1_Nov2025 mesh, half torus (16 planes),
+  explicit mixed-variable EM with the IntegralFeedback pullback, collisions,
+  recycling neutrals, heat and torque sources, regular sheath. Run as a
+  two-phase chain: neoclassical relaxation (phase 1) then the turbulence
+  restart (phase 2). Only validated EM edge baseline; the EM core cases are
+  dadt-ecbc-em and ecbc-low-beta-n6-ci.
+
+machine: polaris
+case_dir: /grand/TokamakProfile/shku/cases/d3d_qh_em_turb
+input_file_dir: /grand/TokamakProfile/shku/XGC_inputs   # referenced as ../XGC_inputs/ from the run directory
+
+provenance:
+  simulation_id: n674po
+  catalog_record: kb/simulations/n674po.yaml
+  runtime_case_dir: /grand/TokamakProfile/shku/n674po_d3d_qh_em_turb
+  archive_file: input_backup/n674po_d3d_qh_em_turb.Oct07   # phase 2; Sep25.bak2 is phase 1
+  origin_campaign: "Aurora n660au_d3d_qh_em_turb (DAOS), ported 2026-09-21"
+  curated_baseline:
+    path: /grand/TokamakProfile/shku/cases/d3d_qh_em_turb
+    files: [input, input.phase2_turb, adios2cfg.xml, petsc.rc, BASELINE_PROVENANCE.txt]
+    note: "Input-only baseline; the multi-TB phase-2 output stays in the run directory."
+  runtime_input:
+    phase1_sha256: 49d9957912968752162210abff88f75b7db783fdab90ae9804ccdcebcc70f7a9
+    phase2_sha256: 3405fe089b28d94c404cae10997903ac149553d995f3f6429af6ae557e2517c9
+  source:
+    checkout: /grand/TokamakProfile/shku/XGC-Devel-devel202609
+    branch: devel202609
+    phase1_commit: fb02185f979f280e38452d7fee4f8022b53b4766
+    phase2_commit: 1d2f94833b2776ff391598a2113b08077812eac9   # devel202609 + dadt_prediction merge
+    executable: /grand/TokamakProfile/shku/XGC-Devel-devel202609/build/bin/xgc
+  related_simulations:
+    - {id: n660au, change: "Aurora original, full torus, 8000 markers per vertex, DAOS output"}
+    - {id: n700po, change: "same mesh with su494 profiles (n674po-base)"}
+    - {id: d0022po-d0029po, change: "phase-2 blow-up bisection (helmholtz_spectral, predictor_ne00, aligned nodes)"}
+
+validated:
+  date: 2026-10-08
+  machine: polaris
+  xgc_commit: 1d2f94833b2776ff391598a2113b08077812eac9
+  input_sha256: 49d9957912968752162210abff88f75b7db783fdab90ae9804ccdcebcc70f7a9   # phase-1 input (the baseline's `input`)
+  dryrun: ACCEPTED           # parallel 1-node debug-queue dryrun on every submission (login node cannot run it)
+  n_ranks: 512
+  runtime_tested: true
+  runtime_evidence:
+    - job_id: 7659599
+      state: COMPLETED
+      exit_code: 0
+      steps: "1-1000 (phase 1, fresh start)"
+      commit: fb02185f979f280e38452d7fee4f8022b53b4766
+    - job_id: 7667761
+      state: FAILED
+      steps: "phase 2 first chunk; exit 127 after stepping (restart chain continued)"
+    - job_id: 7669709
+      state: TIMEOUT
+      steps: "phase 2 to gstep ~4023 (turbulence saturated)"
+    - job_id: 7725078
+      state: TIMEOUT
+      steps: "phase 2 to gstep ~10943, checkpoint 10800"
+      commit: 1d2f94833b2776ff391598a2113b08077812eac9
+  final_checkpoint_step: 10800
+
+physics:
+  model: electromagnetic     # sml_electromagnetic, sml_em_mixed_variable, sml_em_n0=.false.
+  flavor: XGC1
+  device: "DIII-D shot 184833 at 4800 ms, QH-mode"
+  delta_f: false
+  boundary: edge             # sml_bounce=0, inpsi=0, outpsi=1.15, private flux to 0.95
+  sheath:
+    mode: 1
+    adjust: true
+    initial_potential_factor: 2.0
+    adjust_factor: 0.25
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF}
+    - {name: carbon, mass_au: 12.0, charge_eu: 6.0, marker: TotalF}
+  toroidal:
+    nphi_total: 16
+    wedge_n: 2
+  radial_domain: {inpsi: 0.0, outpsi: 1.15}
+  em:
+    pullback_phase1: IdealMHD
+    pullback_phase2: IntegralFeedback   # sml_em_pullback_feedback_gain=0.3
+    dpot_te_limit: 0.3
+    helmholtz_spectral: false           # spectral Helmholtz drove the phase-2 blow-up (bisect d0022po-d0028po)
+  field_solver:
+    poisson_predictor_ne00: true        # tau 0.2
+    fsa_method_phase2: MatchedProjection
+    mode_select_phase2: "mode 5, n = 6..255 real (nmax 7 per wedge), m damping 1, outpsi 1.10"
+  initial_distribution:
+    maxwellian: [true, true, true]      # validated phase 1 started every species Maxwellian
+    f_init_available: "XGC_inputs/d3dqh_finit/xgc.f_init_adjusted_D_smooth_0.5_0.5.bp and xgc.f_init_C_smooth_0.5_0.5.bp (1 GB each; set ptl_maxwellian_init .false. for D/C to use them)"
+  extras:
+    collisions: "phase 1 off (col_mode=0); phase 2 col_mode=4"
+    neutrals: "phase 2 only (recycling 0.99, neu_start_time 300)"
+    sources: "phase 2 only: 1.2 MW e / 1.6 MW D core heating, SOL cooling -0.6 and -0.2 MW e"
+    rotation: "omgi_d184833_4800_pfile_new.prf flow for D and C"
+
+numerics:
+  phase1:
+    dt: 2.0e-3
+    mstep: 1000
+    ncycle_half: 30
+    restart: false
+    restart_write_period: 200
+  phase2:
+    dt: 0.8e-4
+    mstep_per_submission: 4000
+    ncycle_half: 6
+    restart: true
+    restart_write_period: 200
+  num_per_vertex: [7000, 7000, 5000]
+  f0_grid: {nmu: 32, nvp: 14, smu_max: 4.0, vp_max: 4.0}
+  f0_update: {analytic: false, alpha: 0.001}
+  monte_num: 9.0e7
+  load_balance: {max_imbalance: 3.0, f0_grid_lbal_period: 0, ptl_imbal_ion: 2.0}
+
+resource_measured:
+  machine: polaris
+  account: TokamakProfile
+  queue: prod -> large
+  nodes: 128
+  spare_nodes: 2             # GPU probe excludes a bad node before mpiexec (132 requested in the chain)
+  ranks: 512
+  ranks_per_node: 4
+  gpus_per_node: 4
+  cpus_per_task: 16
+  walltime: "24:00:00"
+  device_memory_per_rank_gb: 18.7
+  note: >
+    Phase 1 (1000 steps at dt 2e-3) completed inside one 24 h job. Phase 2
+    advances roughly 1500-2000 steps per 24 h job; chunks are timed out by
+    the scheduler and continued by restart, so the record status reads
+    `interrupted` between chunks.
+
+input_files:
+  mesh:
+    - d3d-184833.04800_xgc1_Nov2025.node
+    - d3d-184833.04800_xgc1_Nov2025.ele
+    - d3d-184833.04800_xgc1_Nov2025.flx.aif
+  equilibrium: d184833.04800_new.eqd
+  profiles:
+    density: [ne_d184833_4800_pfile_new.prf, ni_d184833_4800_pfile_new.prf, nc_d184833_4800_pfile_new.prf]
+    temp: [te_d184833_4800_pfile_new.prf, ti_d184833_4800_pfile_adj_08.prf, ti_d184833_4800_pfile_new.prf]
+    flow: [omgi_d184833_4800_pfile_new.prf]
+  f_init: d3dqh_finit/xgc.f_init_adjusted_D_smooth_0.5_0.5.bp, d3dqh_finit/xgc.f_init_C_smooth_0.5_0.5.bp
+  other: [adios2cfg.xml, petsc.rc]
+  verified_present_on_polaris: true
+
+output_products_observed:
+  - xgc.oneddiag.bp (3db columns are zero in EM runs; use f3d)
+  - xgc.3d.*.bp and xgc.f3d.*.bp
+  - xgc.heatdiag.bp (two target sections)
+  - restart checkpoints every 200 steps; xgc.restart.10800.bp kept (3.1 TB)
+  - n674po.aca campaign archive in the run directory
+
+notes:
+  - >
+    Two-phase procedure: stage the case, submit `input` (phase 1, fresh
+    start, ~1000 steps until the GAM transient decays), then copy
+    input.phase2_turb over input and resubmit as a restart. Phase 2 changes
+    dt, ncycle_half, sml_no_turb, mode selection, col_mode, neutrals,
+    sources, the pullback method and the FSA solver; see the diff of the two
+    files before editing either.
+  - >
+    Submit with queue=prod and the devel202609 executable passed explicitly:
+    the machines.yaml Polaris defaults point at a different build. spare_nodes=2
+    avoids the cudaErrorDevicesUnavailable node failures seen on 2026-09-21.
+  - >
+    Memory: 7000/7000/5000 markers per vertex on the half torus need ~19 GB
+    of the 40 GB per A100 rank at 512 ranks; the full-torus 5000x3 layout
+    hit an out-of-memory at the first load-balance repartition (job 7644701).
+  - >
+    sml_helmholtz_spectral must stay .false.: with it on, phase 2 blew up
+    (confirmed by the d0022po-d0029po bisection, 2026-09-29). The
+    IntegralFeedback pullback with gain 0.3 replaced IdealMHD at the same time.
+  - >
+    The validated phase 1 started all three species Maxwellian; the D and C
+    f_init files from the Frontier QH run are staged in XGC_inputs/d3dqh_finit/
+    but were switched off (ptl_maxwellian_init all .true.) after the f_init
+    attempts of 2026-09-23/24 died on bad GPU nodes before any physics evidence.
+  - >
+    Observed phase-2 physics (n674po ai_note): fluctuations propagate in the
+    ion diamagnetic direction (KBM-like), outer-target lambda_q ~1.3 mm, SOL
+    dphi vanishes beyond psiN 1.08 because sml_mode_select_outpsi=1.10.
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: DIII-D device
+      patterns: ['\bD3D\b', '\bDIII[\s-]?D\b', '\b184833\b']
+    - label: QH-mode
+      patterns: ['\bQH[\s-]*mode\b', '\bquiescent\b']
+    - label: electromagnetic
+      patterns: ['\belectromagnetic\b', '\bEM\b', '\bkinetic[\s-]*ballooning\b', '\bKBM\b']
+    - label: edge, pedestal or SOL turbulence
+      patterns: ['\bedge\b', '\bSOL\b', 'scrape[\s-]*off', '\bpedestal\b', '\bdivertor\b']
+    - label: XGC1 turbulence
+      patterns: ['\bXGC1\b', '\bturbulence\b', '\bturbulent\b']
+    - label: impurity or carbon species
+      patterns: ['\bcarbon\b', '\bimpurit(?:y|ies)\b', '\bthree[\s-]*species\b']
+    - label: collisional with neutrals and sources
+      patterns: ['\bcollision(?:s|al)?\b', '\bneutrals?\b', '\bsources?\b']
+  exclusions:
+    - label: electrostatic
+      patterns: ['\belectrostatic\b']
+      reason: this baseline is electromagnetic; the electrostatic edge cases are tcv-nt-es-turb, st40-heatload and kstar-rmp
+    - label: XGCa or neoclassical only
+      patterns: ['\bXGCa\b', '\bneoclassical[\s-]*only\b']
+      reason: this is an XGC1 turbulence chain (its phase 1 is neoclassical, but the case is the turbulence run)
+    - label: core-only turbulence
+      patterns: ['\bcore[\s-]*only\b', '\bcore turbulence\b']
+      reason: this is an edge/SOL case (sml_bounce=0, outpsi=1.15); the EM core cases are dadt-ecbc-em and ecbc-low-beta-n6-ci
+    - label: delta-f
+      patterns: ['\bdelta[\s-]*f\b']
+      reason: this baseline uses TotalF markers
+    - label: dAdt training data
+      patterns: ['\bdA/?dt\b', '\bdAdt\b', '\btraining[\s-]*data\b']
+      reason: the dAdt NN data cases are dadt-ecbc-em and its low-beta twins
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bTCV\b', '\bASDEX\b', '\bST[\s-]?40\b',
+                 '\bNSTX\b', '\bJET\b', '\bC[\s-]?Mod\b']
+      reason: this baseline is DIII-D 184833 geometry; other devices need their own case
+  baseline_parameters:
+    sml_electromagnetic: true
+    sml_em_mixed_variable: true
+    sml_em_pullback_method: IdealMHD      # phase 1; phase 2 uses IntegralFeedback with sml_em_pullback_feedback_gain 0.3
+    sml_em_n0: false
+    sml_helmholtz_spectral: false
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.15
+    sml_outpsi_priv1: 0.95
+    sml_dt: 2.0e-3                        # phase 1; phase 2 0.8e-4
+    sml_mstep: 1000                       # phase 1; phase 2 4000 per submission
+    sml_ncycle_half: 30                   # phase 1; phase 2 6
+    sml_no_turb: true                     # phase 1; phase 2 false
+    sml_nphi_total: 16
+    sml_wedge_n: 2
+    sml_sheath_mode: 1
+    sml_sheath_init_pot_factor: 2.0
+    sml_sheath_adjust_factor: 0.25
+    sml_poisson_predictor_ne00: true
+    sml_max_imbalance: 3.0
+    sml_f0_grid_lbal_period: 0
+    ptl_nsp: 2
+    ptl_num_per_vertex: [7000, 7000, 5000]
+    ptl_maxwellian_init: [true, true, true]
+    col_mode: 0                           # phase 1; phase 2 4
+    sml_neutral: false                    # phase 1; phase 2 true
+    sml_source: false                     # phase 1; phase 2 true
+    sml_restart: false                    # phase 1; phase 2 true
+  warnings:
+    - >
+      The baseline `input` is the phase-1 neoclassical start. Turbulence
+      physics needs the phase-2 restart (input.phase2_turb in the case
+      directory); plan both submissions, about 24 h each at 128 Polaris nodes.
+    - >
+      Phase 2 is a 24 h-per-chunk restart chain; the catalog reports
+      `interrupted` after every scheduler time-out, which is the expected
+      state, not a failure.
+    - >
+      Keep sml_helmholtz_spectral=.false. and pass the devel202609 executable
+      and queue=prod explicitly on Polaris.

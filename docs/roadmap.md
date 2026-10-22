@@ -80,6 +80,12 @@ what was actually verified, and what is still open.
       runtime-validated on Perlmutter with XGCa. It is the regular-sheath
       reference, not the sibling Gyraze-surrogate variant; a current-master
       dryrun remains required before reuse. See `docs/input-archive.md`.
+      2026-10-22: two automation-era records were promoted directly from the
+      catalog (no notebook join needed): tcv-nt-es-turb (n675pe, Perlmutter,
+      ES total-f edge turbulence, 2000 steps on devel202609) and
+      d3d-qh-em-turb (n674po, Polaris, EM total-f edge turbulence, two-phase
+      chain to gstep ~10943). Baseline directories hold input/adios2cfg.xml/
+      petsc.rc plus BASELINE_PROVENANCE.txt; KB now has 10 cases.
 - [x] 11. Remote XGC_GUI launcher (`tools/remote_gui.py`) — the
       `xgc-remote-gui` CLI and matching MCP tools resolve explicit paths or
       local provenance, validate the remote GUI/Python environment, load an
