@@ -10,22 +10,22 @@
   },
   "permission": {
     "bash": {
-      "*": "ask",
-      "ls *": "allow",
-      "cat *": "allow",
-      "git status": "allow",
-      "git diff*": "allow",
-      "git log*": "allow",
-      "uv run *": "allow",
+      "*": "allow",
       "sbatch *": "ask",
       "qsub *": "ask",
       "scancel *": "ask",
       "qdel *": "ask",
       "rm *": "ask",
       "scp *": "ask",
-      "rsync *": "ask"
+      "rsync *": "ask",
+      "git push*": "ask",
+      "git commit*": "ask"
     },
-    "edit": "ask",
+    "edit": "allow",
+    "external_directory": {
+      "~/Documents/git/**": "allow",
+      "~/.config/opencode/**": "allow"
+    },
     "webfetch": "allow"
   }
 }
