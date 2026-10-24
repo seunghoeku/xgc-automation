@@ -1,0 +1,206 @@
+# TCV NT XGCa with a carbon impurity -- the 2026-10 carbon-flow campaign template.
+#
+# Input-only baseline copied byte for byte from d0115pe (flow_match case
+# tcv69271_nt_co_pm, iteration it01). The same input with sml_mstep=20 and the
+# counter-current rotation file ran as the smoke test d0113pe (job 60066448,
+# COMPLETED, 8 GPU nodes, 5.8 s/step). Three kinetic total-f species: electrons,
+# deuterium and C6+; the carbon density comes from CXRS (nc_tcv69271_t1.1_NT.prf)
+# and the deuterium density from quasineutrality (eq_den_rsp_index=1).
+
+name: tcv-xgca-carbon
+description: >
+  TCV shot 69271 negative-triangularity XGCa (axisymmetric, neoclassical) case
+  with a small carbon impurity: total-f kinetic electrons, deuterium and C6+
+  (n_C about 1.4 % of n_e in the core, Z_eff about 1.4), D density from
+  quasineutrality, all species rotating with the CXRS omega(psi), collisions
+  on (col_mode=4), MatchedProjection FSA, predictor ne00, regular sheath,
+  no neutrals and no sources. Template of the 2026-10 carbon rotation-matching
+  loop (d0113pe-d0115pe) and the base of the carbon full-f/total-f tests.
+
+machine: perlmutter
+case_dir: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-xgca-carbon
+input_file_dir: /pscratch/sd/s/sku/XGC_inputs   # referenced as ../XGC_inputs/ from the run directory
+
+provenance:
+  simulation_id: d0115pe
+  catalog_record: kb/simulations/d0115pe.yaml
+  runtime_case_dir: /pscratch/sd/s/sku/d0115pe_tcv69271_nt_xgca_carbon_flow_co_it01
+  archive_file: input_backup/d0115pe_tcv69271_nt_xgca_carbon_flow_co_it01
+  flow_match_case: tcv69271_nt_co_pm
+  curated_baseline:
+    path: /pscratch/sd/s/sku/xgc-automation-baselines/tcv-xgca-carbon
+    files: [input, adios2cfg.xml, petsc.rc, BASELINE_PROVENANCE.txt]
+    note: "Input-only baseline created 2026-10-22; run output stays in the run directories."
+  runtime_input:
+    sha256: aef822f71f7b1071ccb0964621c8eea920858862b837244b3de2cc178b51ef43
+  source:
+    checkout: /pscratch/sd/s/sku/XGC-Devel_devel202609
+    branch: devel202609
+    commit: 569054a016893f6441ea656f88b4d74e13c92966
+    executable: /pscratch/sd/s/sku/XGC-Devel_devel202609/bin/bin/xgca
+  related_simulations:
+    - {id: d0113pe, change: "sml_mstep=20 smoke test, counter-current rotation file (omg_*_ctr)"}
+    - {id: d0114pe, change: "1250 steps, counter-current rotation file (wrong sign, superseded)"}
+    - {id: n694pe, change: "the 32-plane XGC1 carbon turbulence run this axisymmetric template was derived from"}
+
+validated:
+  date: 2026-10-20
+  machine: perlmutter
+  xgc_commit: 569054a016893f6441ea656f88b4d74e13c92966
+  input_sha256: aef822f71f7b1071ccb0964621c8eea920858862b837244b3de2cc178b51ef43
+  dryrun: not_recorded        # dev-series submissions skip the login-node dryrun
+  n_ranks: 32
+  runtime_tested: true
+  runtime_evidence:
+    - job_id: 60066448
+      simulation_id: d0113pe
+      state: COMPLETED
+      elapsed: "00:02:34"
+      steps: "1-20"
+      note: "same input except sml_mstep=20 and eq_flow_file=omg_tcv69271_t1.1_NT_ctr.prf; MAIN_LOOP 5.8 s/step on 8 nodes"
+    - job_id: 60067806
+      simulation_id: d0114pe
+      state: COMPLETED
+      elapsed: "02:09:53"
+      steps: "1-1250"
+      note: "counter-current rotation file; otherwise this input"
+
+physics:
+  model: neoclassical
+  flavor: XGCa
+  device: "TCV shot 69271 at 1.1 s, negative triangularity"
+  delta_f: false
+  boundary: edge              # sml_bounce=0, inpsi=0, outpsi=1.12, private flux to 0.92
+  sheath:
+    implementation: regular
+    mode: 1
+    adjust: true
+    initial_potential_factor: 3.0
+    adjust_factor: 1.0
+  species:
+    - {name: electron, mass_au: 5.454e-4, charge_eu: -1.0, marker: TotalF}
+    - {name: deuterium, mass_au: 2.0, charge_eu: 1.0, marker: TotalF, density: "quasineutrality (eq_den_rsp_index=1)"}
+    - {name: carbon, mass_au: 12.0, charge_eu: 6.0, marker: TotalF, density: "nc_tcv69271_t1.1_NT.prf (CXRS), about 1.4 % of n_e"}
+  toroidal:
+    nphi_total: 1
+    wedge_n: 1
+  radial_domain: {inpsi: 0.0, outpsi: 1.12}
+  field_solver:
+    fsa_method: MatchedProjection
+    poisson_predictor_ne00: true     # tau 0.2
+    iter_solver_precond_type: 0
+  rotation: "omg_tcv69271_t1.1_NT_co.prf for e, D and C (eq_flow_type=2, co-current omega > 0)"
+  extras:
+    collisions: col_mode=4
+    neutrals: disabled
+    sources: disabled
+
+numerics:
+  dt: 2.5e-3
+  mstep: 1250
+  ncycle_half: 20
+  restart: true                      # flag set in the template; a fresh run starts fresh when no checkpoint exists
+  restart_write_period: 500
+  ptl_num_per_vertex: [10000, 10000, 5000]
+  f_source_period: 10
+  f0_grid: {nmu: 30, nvp: 18, smu_max: 4.0, vp_max: 4.0, update_f0g: true, update_alpha: 0.002}
+
+resource_measured:
+  machine: perlmutter
+  constraint: gpu
+  account: m4552
+  qos: debug
+  nodes: 8
+  ranks: 32
+  ranks_per_node: 4
+  gpus_per_node: 4
+  threads_per_rank: 32
+  walltime: "00:30:00"
+  note: "d0113pe: 20 steps in 2 m 34 s wall on 8 GPU nodes (MAIN_LOOP 5.8 s/step, about 40 s setup)."
+
+input_files:
+  mesh:
+    - tcv69271_nphi160_pt_may_26_2026.node     # byte-identical to tcv69271_nphi160_nt_may_26_2026 (md5 8f233fe5), 29428 vertices
+    - tcv69271_nphi160_pt_may_26_2026.ele
+    - tcv69271_nphi160_pt_may_26_2026.flx.aif
+  equilibrium: tcv69271_t1.1_NT.eqd
+  profiles:
+    density: [ne_tcv69271_t1.1_NT.prf, nd_tcv69271_t1.1_NT_c.prf, nc_tcv69271_t1.1_NT.prf]
+    temp_electron: te_tcv69271_t1.1_NT.prf
+    temp_ion: ti_tcv69271_t1.1_NT.prf        # also used for carbon
+    flow: omg_tcv69271_t1.1_NT_co.prf
+  other: [adios2cfg.xml, petsc.rc]
+  verified_present_on_perlmutter: true
+
+output_products_observed:
+  - xgc.oneddiag.bp
+  - xgc.sheathdiag.bp
+  - xgc.2d.*.bp
+  - xgc.f2d.*.bp           # i2u_para etc. for the third species (carbon)
+  - xgc.loading.{0,1,2}.bp
+  - restart checkpoints
+
+notes:
+  - >
+    The mesh files are named "_pt_" but are byte-identical to the "_nt_" set
+    (same md5, same 29428 vertices); the equilibrium is the NT shot 69271.
+  - >
+    eq_den_rsp_index=1 makes XGC derive the deuterium density from
+    quasineutrality; nd_tcv69271_t1.1_NT_c.prf (= n_e - 6 n_C) is kept in the
+    input for reference only.
+  - >
+    XGC prints "WARNING: Using a combination of kinetic MarkerType" and skips
+    the whole f_source block (f0g update, collisions on the grid, f0
+    diagnostics) for every species when one species is FullF; sml_neutral and
+    sml_source abort in that mode. The carbon full-f tests therefore run with
+    col_mode=0 and without neutrals or sources.
+  - >
+    Dev-series submissions skip the login-node dryrun by default; pass
+    skip_dryrun=False when the input changes.
+
+advisor:
+  minimum_match_signals: 2
+  match_signals:
+    - label: TCV device
+      patterns: ['\bTCV\b', '\b69271\b']
+    - label: XGCa or neoclassical
+      patterns: ['\bXGCa\b', '\bneoclassical\b', '\baxisymmetric\b']
+    - label: carbon or impurity
+      patterns: ['\bcarbon\b', '\bC6\+?\b', '\bimpurit(?:y|ies)\b', '\bZ_?eff\b']
+    - label: rotation or flow
+      patterns: ['\brotation\b', '\btoroidal[\s-]*velocity\b', '\bflow\b', '\bCXRS\b']
+    - label: negative triangularity
+      patterns: ['\bnegative[\s-]*triangularity\b', '\bNT\b']
+  exclusions:
+    - label: XGC1 turbulence
+      patterns: ['\bXGC1\b', '\bturbulen(?:ce|t)\b']
+      reason: this is the axisymmetric XGCa template; the XGC1 carbon turbulence baseline is n694pe (tcv-nt-es-turb lineage)
+    - label: other devices
+      patterns: ['\bITER\b', '\bKSTAR\b', '\bD3D\b', '\bDIII[\s-]?D\b', '\bASDEX\b', '\bST[\s-]?40\b', '\bNSTX\b', '\bJET\b']
+      reason: this baseline uses TCV geometry
+  baseline_parameters:
+    sml_bounce: 0
+    sml_inpsi: 0.0
+    sml_outpsi: 1.12
+    sml_dt: 2.5e-3
+    sml_mstep: 1250
+    sml_nphi_total: 1
+    sml_wedge_n: 1
+    sml_sheath_mode: 1
+    sml_field_solver_fsa_method: MatchedProjection
+    sml_poisson_predictor_ne00: true
+    ptl_nsp: 2
+    ptl_num_per_vertex: [10000, 10000, 5000]
+    eq_den_rsp_index: 1
+    col_mode: 4
+    sml_neutral: false
+    sml_source: false
+    sml_restart: true
+  warnings:
+    - >
+      The baseline carries sml_restart=.true. and a rotation input; set
+      sml_restart=false for a fresh run and eq_flow_shape=0 0 0 for a run
+      without rotation.
+    - >
+      8 GPU nodes (32 ranks) hold the production particle counts; 1250 steps
+      take about 2 h 10 m there.
