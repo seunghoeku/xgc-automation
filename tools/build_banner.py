@@ -127,22 +127,68 @@ def parse_build_banner(text: str) -> dict[str, Any] | None:
     return banner
 
 
+# Stdout names that carry the scheduler job number: Slurm's ``slurm-<id>.out``
+# (``slurm-<id>_<task>.out`` for array tasks), the PBS templates'
+# ``pbs-<id>.<server>.out`` and PBS's own ``<name>.o<id>``.
+_STDOUT_JOB_PATTERNS = (
+    re.compile(r"^slurm-(\d+)(?:_\d+)?\.out$"),
+    re.compile(r"^pbs-(\d+)(?:\..+)?\.out$"),
+    re.compile(r"\.o(\d+)$"),
+)
+
+
+def job_number(job_id: str | int | None) -> str | None:
+    """Numeric part of a scheduler job id.
+
+    Slurm ids are plain numbers; PBS ids carry the server
+    (``7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov``), whose leading
+    number is what the stdout name repeats.
+    """
+    if job_id is None:
+        return None
+    match = re.match(r"\d+", str(job_id).strip())
+    return match.group(0) if match else None
+
+
+def stdout_job_number(name: str) -> str | None:
+    """Job number a scheduler stdout name carries, or None if it carries none."""
+    for pattern in _STDOUT_JOB_PATTERNS:
+        match = pattern.search(name)
+        if match:
+            return match.group(1)
+    return None
+
+
 def select_stdout_file(names: list[str], job_id: str | None) -> str | None:
     """Pick the stdout file for one job out of a shared run directory.
 
     Restart attempts routinely share a case directory, so several scheduler
     stdout files coexist and "the .out file" is ambiguous. The job id
-    disambiguates: Slurm writes ``slurm-<jobid>.out``, PBS ``<name>.o<jobid>``.
-    Without a job-id match, a lone .out file is accepted; several are not.
+    disambiguates: Slurm writes ``slurm-<jobid>.out``, the PBS templates
+    ``pbs-<jobid>.out``, PBS itself ``<name>.o<jobid>``. Job numbers are
+    compared whole, so job 6013 never matches ``slurm-60132821.out``.
+
+    A file whose name carries another job's number is never this job's, even
+    when it is the only one left (an earlier attempt's log moved into a
+    subdirectory once made a later attempt's banner land on it). A lone .out
+    whose name carries no job number is still accepted, as is a lone .out
+    when no job id is known; several candidates are not.
     """
     outs = [n for n in names if n.endswith(".out") or re.search(r"\.o\d+$", n)]
-    if job_id:
-        job = str(job_id)
-        matched = [n for n in outs if job in n]
-        if len(matched) == 1:
-            return matched[0]
-        if matched:
-            return sorted(matched)[-1]
+    job = job_number(job_id) if job_id else None
+    if job:
+        named = [n for n in outs if stdout_job_number(n) == job]
+        if named:
+            return sorted(named)[-1]
+
+        # Names outside the known patterns may still contain the number, e.g.
+        # ``run_<id>.out``; accept a single whole-number match.
+        unnamed = [n for n in outs if stdout_job_number(n) is None]
+        token = [n for n in unnamed if re.search(rf"(?<!\d){job}(?!\d)", n)]
+        if len(token) == 1:
+            return token[0]
+        if len(outs) == 1 and not unnamed:
+            return None
     if len(outs) == 1:
         return outs[0]
     return None
@@ -172,7 +218,8 @@ def capture(machine: str, remote_run_dir: str, job_id: str | None) -> dict[str, 
         return {**base, "reason": f"cannot list {run_dir}"}
     name = select_stdout_file(listing.stdout.split(), job_id)
     if name is None:
-        return {**base, "reason": f"no unambiguous stdout file in {run_dir}"}
+        job = f" for job {job_id}" if job_id else ""
+        return {**base, "reason": f"no unambiguous stdout file{job} in {run_dir}"}
 
     program = (
         f"NR>{_SCAN_LINE_LIMIT}{{exit}} "

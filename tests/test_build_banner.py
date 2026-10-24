@@ -131,6 +131,61 @@ class SelectStdoutFileTest(unittest.TestCase):
             bb.select_stdout_file(["slurm-1.out", "slurm-2.out"], None)
         )
 
+    def test_lone_log_of_another_job_is_rejected(self):
+        # d0117pe, 2026-10-23: the earlier attempts' logs had been moved into
+        # subdirectories, and their build entries picked up the later job's log.
+        self.assertIsNone(
+            bb.select_stdout_file(["slurm-60141870.out", "input"], "60132821")
+        )
+
+    def test_lone_pbs_log_of_another_job_is_rejected(self):
+        names = ["pbs-7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.out"]
+        self.assertIsNone(
+            bb.select_stdout_file(names, "7650000.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov")
+        )
+        self.assertIsNone(bb.select_stdout_file(["NT.o7301673"], "7301000"))
+
+    def test_job_number_is_compared_whole(self):
+        self.assertIsNone(bb.select_stdout_file(["slurm-60132821.out"], "6013"))
+        self.assertEqual(
+            bb.select_stdout_file(["slurm-16013.out", "slurm-6013.out"], "6013"),
+            "slurm-6013.out",
+        )
+
+    def test_pbs_template_name_with_full_job_id(self):
+        names = [
+            "pbs-7650000.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.out",
+            "pbs-7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.err",
+            "pbs-7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.out",
+            "gpu_gate.7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.probe",
+        ]
+        self.assertEqual(
+            bb.select_stdout_file(names, "7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov"),
+            "pbs-7651384.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov.out",
+        )
+
+    def test_slurm_array_task_name(self):
+        self.assertEqual(
+            bb.select_stdout_file(["slurm-123_4.out", "slurm-999.out"], "123"),
+            "slurm-123_4.out",
+        )
+
+    def test_lone_log_without_job_number_still_accepted(self):
+        self.assertEqual(bb.select_stdout_file(["run.out", "input"], "123"), "run.out")
+
+    def test_unknown_name_containing_the_job_number(self):
+        names = ["run_123.out", "run_1234.out", "slurm-999.out"]
+        self.assertEqual(bb.select_stdout_file(names, "123"), "run_123.out")
+
+    def test_job_number_helpers(self):
+        self.assertEqual(bb.job_number("7651384.polaris-pbs-01.hsn"), "7651384")
+        self.assertEqual(bb.job_number(60132821), "60132821")
+        self.assertIsNone(bb.job_number(None))
+        self.assertEqual(bb.stdout_job_number("slurm-60132821.out"), "60132821")
+        self.assertEqual(bb.stdout_job_number("pbs-8827775.aurora-pbs-0001.hostmgmt.out"), "8827775")
+        self.assertEqual(bb.stdout_job_number("NT.o7301673"), "7301673")
+        self.assertIsNone(bb.stdout_job_number("run.out"))
+
 
 class FakeResult:
     def __init__(self, stdout, ok=True):
@@ -185,6 +240,24 @@ class CaptureTest(unittest.TestCase):
             result = bb.capture("perlmutter", "/scratch/case", "1")
         self.assertFalse(result["found"])
         self.assertTrue(result["definitive"])
+
+    def test_capture_ignores_another_jobs_log(self):
+        # The only log left belongs to a later job: nothing is read, and the
+        # result stays transient so the right log can still be found later.
+        with (
+            patch.object(bb.m, "get_machine", return_value={"auth": {}}),
+            patch.object(bb.ssh, "host_for", return_value="fake"),
+            patch.object(
+                bb.ssh,
+                "run",
+                side_effect=self._fake_ssh("slurm-60141870.out\ninput", CLEAN_BANNER),
+            ),
+        ):
+            result = bb.capture("perlmutter", "/scratch/case", "60132821")
+        self.assertFalse(result["found"])
+        self.assertFalse(result["definitive"])
+        self.assertIn("job 60132821", result["reason"])
+        self.assertNotIn("source_file", result)
 
     def test_capture_missing_stdout_is_transient(self):
         with (
