@@ -81,7 +81,7 @@ echo "ranks={{ total_ranks }} threads_per_rank=${OMP_NUM_THREADS}"
 {% set srun_c = srun_c ~ " --gpus-per-task=1 --gpu-bind=single:1" %}
 {% endif %}
 {% if xgc_exe %}
-srun -n {{ total_ranks }}{{ srun_c }} {{ xgc_exe }}
+srun -n {{ total_ranks }}{{ srun_c }} {{ xgc_exe }}{{ xgc_args | default('') }}
 {% else %}
 # no XGC executable specified -> hello-world verification mode
 srun -n {{ total_ranks }}{{ srun_c }} hostname
