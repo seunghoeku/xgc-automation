@@ -152,12 +152,16 @@ def make_finit(
     overwrite: bool = False,
     out_dir: str | None = None,
     species_name: str | None = None,
+    sol: str | None = None,
+    sol_taper_psin: float | None = None,
+    open_smooth: str = "shrink",
 ) -> dict[str, Any]:
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     sigma = float(case.smooth["sigma_theta"] if sigma_theta is None else sigma_theta)
     width = float(case.smooth["v_width"] if v_width is None else v_width)
     species, species_tag = case.species_for(species_name)
+    sol_mode, taper, sol_suffix = case.sol_settings(sol, sol_taper_psin)
 
     script = _push_helper(case, target, "make_f_init.py")
     argv = [
@@ -169,10 +173,13 @@ def make_finit(
         "--charge-num", str(species.get("charge_num", 1.0)),
         "--sigma-theta", str(sigma),
         "--v-width", str(width),
-        "--no-smooth-name", cfg.no_smooth_file(species_tag),
+        "--sol", sol_mode,
+        "--sol-taper-psin", str(taper),
+        "--open-smooth", open_smooth,
+        "--no-smooth-name", cfg.no_smooth_file(species_tag, sol_suffix),
     ]
     if sigma > 0 or width > 0:
-        argv += ["--smooth-name", cfg.smooth_file(sigma, width, species_tag)]
+        argv += ["--smooth-name", cfg.smooth_file(sigma, width, species_tag, sol_suffix)]
     if species.get("has_electron"):
         argv.append("--has-electron")
     step = case.f0_step if step is None else step
@@ -187,6 +194,7 @@ def make_finit(
     cfg.append_log(
         case, "make-finit",
         f0_step=payload.get("f0_step"), sigma_theta=sigma, v_width=width,
+        sol=payload.get("sol"), open_smooth=payload.get("open_smooth"),
         species=species_tag or species["var_string"],
         outputs=[o["path"] for o in payload.get("outputs", [])],
         f_g_stats=payload.get("f_g_stats"),
@@ -833,6 +841,7 @@ def profile_compare(
 
 
 def _smooth_sort_key(name: str) -> tuple[float, float]:
+    name, _sol = cfg.strip_sol_tag(name)
     nums = re.findall(r"[0-9.]+", name)
     try:
         return (float(nums[-2]), float(nums[-1]))
@@ -872,15 +881,17 @@ def _default_label(dir_name: str, prefix: str) -> str:
     tag = dir_name[len(prefix):] if dir_name.startswith(prefix) else dir_name
     if tag.startswith("canonical"):
         return "Canonical Maxwellian"
+    tag, sol = cfg.strip_sol_tag(tag)
     match = re.match(r"^sm_([0-9.]+)_([0-9.]+)$", tag)
     if not match:
         return dir_name
     sigma, width = float(match.group(1)), float(match.group(2))
+    suffix = ", SOL Maxw." if sol else ""
     if sigma == 0 and width == 0:
-        return "No smooth"
+        return "No smooth" + suffix
     if sigma == 0:
-        return "v smooth, no pol. smooth"
-    return f"pol. smooth {cfg.fmt_num(sigma)} rad"
+        return "v smooth, no pol. smooth" + suffix
+    return f"pol. smooth {cfg.fmt_num(sigma)} rad{suffix}"
 
 
 # --- stage A continuation ---------------------------------------------------
@@ -937,8 +948,9 @@ def distribution_figure(case: Case, *, no_smooth: str | None = None, smooth: str
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     sigma, width = float(case.smooth["sigma_theta"]), float(case.smooth["v_width"])
-    no_smooth = no_smooth or cfg.NO_SMOOTH_FILE
-    smooth = smooth or cfg.smooth_file(sigma, width)
+    _mode, _taper, sol_suffix = case.sol_settings()
+    no_smooth = no_smooth or cfg.no_smooth_file(None, sol_suffix)
+    smooth = smooth or cfg.smooth_file(sigma, width, None, sol_suffix)
     smooth_label = smooth_label or f"$\\Delta\\theta={cfg.fmt_num(sigma)}$ rad, ${cfg.fmt_num(width)}\\Delta v$"
     out_dir = f"{case.root}/.xgc-finit/compare"
     ssh.mkdir_p(target, out_dir)

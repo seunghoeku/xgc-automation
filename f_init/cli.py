@@ -73,17 +73,31 @@ def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.make_finit(
         case, sigma_theta=args.sigma_theta, v_width=args.v_width, step=args.step,
         overwrite=args.overwrite, out_dir=args.out_dir, species_name=args.species,
+        sol=args.sol, sol_taper_psin=args.sol_taper_psin, open_smooth=args.open_smooth,
     )
     if args.json:
         _print(payload, True)
         return 0
     print(f"f0 step {payload['f0_step']}: {payload['nnodes']} nodes, "
           f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}")
-    print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells")
+    print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells"
+          + (f", open-line kernel {payload['open_smooth']}" if payload.get("open_smooth") else ""))
+    sol = payload.get("sol") or {}
+    if sol.get("mode") == "maxwellian":
+        if sol.get("applied"):
+            print(f"SOL: Maxwellian beyond a {sol['taper_psin']} psi_N taper "
+                  f"({sol.get('nodes_zeroed', 0)} nodes zeroed, {sol.get('nodes_tapered', 0)} tapered)")
+        else:
+            print(f"SOL: Maxwellian requested but {sol.get('note', 'not applied')}")
+    elif sol:
+        print("SOL: relaxed f_g kept")
     for out in payload["outputs"]:
         stats = payload["f_g_stats"].get(out["kind"], {})
         verb = "kept " if out.get("reused") else "wrote"
         print(f"  {verb} {out['path']}  (|f_g| max {stats.get('abs_max', 0):.3e}, rms {stats.get('rms', 0):.3e})")
+        by_region = stats.get("rms_by_region") or {}
+        if by_region:
+            print("        rms by region: " + ", ".join(f"{k} {v:.3e}" for k, v in by_region.items()))
     return 0
 
 
@@ -408,6 +422,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "files so several species can share one stage A directory")
     p.add_argument("--sigma-theta", type=float, default=None, help="poloidal width [rad]")
     p.add_argument("--v-width", type=float, default=None, help="velocity-space width [cells]")
+    p.add_argument("--sol", choices=cfg.SOL_MODES, default=None,
+                   help="open field lines: 'maxwellian' zeroes f_g there (default), 'keep' leaves "
+                        "the relaxed SOL in; default from the case's smooth.sol")
+    p.add_argument("--sol-taper-psin", type=float, default=None,
+                   help="taper width in psi_N past the separatrix for --sol maxwellian (case default 0.02)")
+    p.add_argument("--open-smooth", choices=("shrink", "legacy"), default="shrink",
+                   help="poloidal kernel on open field lines; 'legacy' is the padded pre-2026-10 kernel")
     p.add_argument("--step", type=int, default=None, help="f0 step; default last")
     p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
     p.add_argument("--overwrite", action="store_true")

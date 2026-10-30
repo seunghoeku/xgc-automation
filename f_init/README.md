@@ -121,15 +121,54 @@ offset for `compare`; otherwise those default to the last f0 step.
 
 **B.** `make-finit` runs `remote/make_f_init.py` on the login node. It reads
 the last f0 snapshot (or `f0_step`) with `XGCDistribution.from_xgc_output(...,
-use_initial_moments=True)`, removes the analytic Maxwellian, and saves
-`xgc.f_init_no_smooth.bp`. If either smoothing width is positive it also
+use_initial_moments=True)`, removes the analytic Maxwellian, applies the SOL
+treatment below, and saves `xgc.f_init_no_smooth[_solmax<t>].bp`. If either
+smoothing width is positive it also
 applies `poloidal_smooth_f_init(sigma_theta)` (Gaussian along each flux
 surface, radians) and `vspace_smooth(v_width)` (Gaussian in velocity space,
-grid cells) and saves `xgc.f_init_smooth_<sigma>_<width>.bp`. Numbers are
+grid cells) and saves `xgc.f_init_smooth_<sigma>_<width>[_solmax<t>].bp`.
+Numbers are
 rendered the way the notebook did (`0.3_0.5`, `0_0`, `1_0.5`). In a smoothing
 scan the no-smooth file already exists after the first call; it is then kept
 as is (logged as `reused`) and only the new smooth file is written, so
 `--overwrite` is needed only to replace a file that really exists.
+
+**B, open field lines.** `smooth.sol` in the case file (CLI `--sol`) decides
+what the f_init carries on the SOL, private region and wall nodes:
+
+| `sol` | what happens | file suffix |
+|---|---|---|
+| `maxwellian` (default) | `f_g` is multiplied by a weight that is 1 on closed surfaces, falls as a half-cosine from 1 at the separatrix to 0 at `psi_N = 1 + sol_taper_psin` (default 0.02) on open field lines, and is 0 in the private region and on wall nodes (`xgc_reader.distribution.set_sol_maxwellian`). The SOL therefore starts exactly as a Maxwellian run would, from the `density`/`temperature`/`flow` arrays, while the neoclassical state just inside the separatrix is kept continuous. | `_solmax0.02` |
+| `keep` | the relaxed SOL `f_g` stays in and is smoothed with the rest. Cases without open field lines (cbc6) use this so their file names are unchanged. | none |
+
+Why Maxwellian is the default: a stage-A XGCa run of a few tenths of a
+millisecond is about one parallel transit to the plates, so its SOL is not
+relaxed and its f0 there is noisy (asdexu2, 2026-09-14; the reason `adjust`
+stops at region 1); the density check never scores the SOL, so an error
+there is never corrected; and whatever sheath or recycling structure the SOL
+f0 holds re-forms within a transit time of the turbulence run anyway. A
+case-3 f_init taken from a long turbulence run has a relaxed SOL and may
+choose `keep`.
+
+The poloidal smoothing itself was also changed for open field lines
+(XGC_reader `poloidal_smooth_f_init(open_mode="shrink")`, the default; CLI
+`--open-smooth legacy` reproduces the old kernel). The old code applied the
+closed-surface index kernel with scipy's `nearest` padding: the two ends of
+an open row are the divertor plates, so the strongly non-Maxwellian
+plate-side f was copied beyond the ends and smeared back up the leg over a
+kernel width (about 25 cm on a 0.5 rad kernel of the TCV XGCa mesh, in a
+synthetic test: the interior error grew from the 0.30 input noise to 0.44),
+the ten-node minimum width turned a 47-node far-SOL piece into a near-global
+average, and the two separatrix legs below the X-point, stored back to back
+in one row, were smoothed as one array. The new kernel splits every stored
+row into its contiguous pieces (gaps wider than three median node spacings
+are wall cuts), works in arc length with `sigma_theta` times the distance
+from the magnetic axis as the width, evaluates the Gaussian only on the
+nodes of the piece, renormalises, and shrinks the width near the ends so
+three widths fit inside: the end nodes are left unchanged and the plate-side
+structure stays within a few centimetres (interior error 0.03-0.08 in the
+same test). Closed surfaces and the separatrix loop above the X-point are
+untouched, so cbc files reproduce bit for bit.
 
 **C.** `stage-dt0 --finit <file>` copies the job files from `maxwell/` into
 `dt0_<tag>/` and edits the input in place so the diff is reviewable:
@@ -315,6 +354,10 @@ one in this repository.
 
 - `xgc1(path=...)` in XGC_reader does `os.chdir`; the remote scripts use
   absolute paths throughout for that reason.
+- `make-finit` needs an XGC_reader checkout on the machine that has
+  `set_sol_maxwellian` and `poloidal_smooth_f_init(open_mode=...)`
+  (2026-10-30); with an older checkout it stops with `xgc_reader_too_old`
+  instead of silently writing a padded SOL. Pull `analysis.pythonpath` there.
 - `update_maxwellian_moments` adds the Maxwellian back into a `f_g`-only
   distribution as a side effect. The adjust script relies on it (it needs the
   full `f`), then removes it again before saving.

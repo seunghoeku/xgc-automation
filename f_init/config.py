@@ -43,7 +43,20 @@ DEFAULTS: dict[str, Any] = {
     # do not collide on xgc.f_init_smooth_<sigma>_<width>.bp. Absent (the
     # common single-species case) nothing changes.
     "species_set": {},
-    "smooth": {"sigma_theta": 0.0, "v_width": 0.0},
+    "smooth": {
+        "sigma_theta": 0.0,
+        "v_width": 0.0,
+        # Open field lines. "maxwellian" (default): f_g is zeroed on the SOL
+        # beyond a half-cosine taper of `sol_taper_psin` in psi_N past the
+        # separatrix, and always in the private region and on wall nodes, so
+        # the SOL starts from the Maxwellian of the stored moments. "keep":
+        # the relaxed SOL f_g stays in and is smoothed with the rest (with
+        # the open-line kernel of XGC_reader, which never pads beyond the
+        # plates). Cases without open field lines (cbc) set "keep" so their
+        # file names stay as they were.
+        "sol": "maxwellian",
+        "sol_taper_psin": 0.02,
+    },
     "dt0": {
         "sml_dt": "2.0D-13",
         "sml_mstep": 20,
@@ -112,6 +125,13 @@ class Case:
                 f"(have: {sorted(self.species_set)})"
             )
         return _merge(self.species, dict(self.species_set[name])), name
+
+    def sol_settings(self, mode: str | None = None, taper_psin: float | None = None) -> tuple[str, float, str]:
+        """(mode, taper_psin, file suffix) of the SOL treatment, with overrides."""
+        mode = str(self.smooth.get("sol", DEFAULTS["smooth"]["sol"]) if mode is None else mode)
+        taper = float(self.smooth.get("sol_taper_psin", DEFAULTS["smooth"]["sol_taper_psin"])
+                      if taper_psin is None else taper_psin)
+        return mode, taper, sol_tag(mode, taper)
 
     def subdir(self, name: str) -> str:
         return f"{self.root.rstrip('/')}/{name}"
@@ -243,16 +263,44 @@ def _species_prefix(species_tag: str | None) -> str:
     return f"{species_tag}_" if species_tag else ""
 
 
-def no_smooth_file(species_tag: str | None = None) -> str:
-    return f"xgc.f_init_{_species_prefix(species_tag)}no_smooth.bp"
+SOL_MODES = ("maxwellian", "keep")
+
+
+def sol_tag(mode: str, taper_psin: float) -> str:
+    """``('maxwellian', 0.02) -> '_solmax0.02'``; ``'keep'`` adds nothing.
+
+    The suffix sits after the smoothing numbers so every name written before
+    the SOL option existed (``smooth_0.5_0.5``, ``no_smooth``) keeps parsing
+    and keeps meaning "SOL kept".
+    """
+    if mode == "keep":
+        return ""
+    if mode == "maxwellian":
+        return f"_solmax{fmt_num(taper_psin)}"
+    raise CaseError(f"smooth.sol must be one of {SOL_MODES}, got {mode!r}")
+
+
+_SOL_SUFFIX_RE = re.compile(r"_solmax[0-9.]+")
+
+
+def strip_sol_tag(text: str) -> tuple[str, str]:
+    """``'sm_0.5_0.5_solmax0.02' -> ('sm_0.5_0.5', '_solmax0.02')``."""
+    match = _SOL_SUFFIX_RE.search(text)
+    if not match:
+        return text, ""
+    return text[:match.start()] + text[match.end():], match.group(0)
+
+
+def no_smooth_file(species_tag: str | None = None, sol: str = "") -> str:
+    return f"xgc.f_init_{_species_prefix(species_tag)}no_smooth{sol}.bp"
 
 
 def smooth_file(
-    sigma_theta: float, v_width: float, species_tag: str | None = None
+    sigma_theta: float, v_width: float, species_tag: str | None = None, sol: str = ""
 ) -> str:
     return (
         f"xgc.f_init_{_species_prefix(species_tag)}"
-        f"smooth_{smooth_tag(sigma_theta, v_width)}.bp"
+        f"smooth_{smooth_tag(sigma_theta, v_width)}{sol}.bp"
     )
 
 
@@ -287,11 +335,12 @@ def run_dirname(finit_filename: str, prefix: str = "finit_") -> str:
     """
     tag = finit_tag(finit_filename)
     tag = re.sub(r"^adjusted\d*_", "", tag)
+    tag, sol = strip_sol_tag(tag)
     if tag == "no_smooth":
         tag = "sm_0_0"
     elif tag.startswith("smooth_"):
         tag = "sm_" + tag[len("smooth_"):]
-    return f"{prefix}{tag}"
+    return f"{prefix}{tag}{sol}"
 
 
 def turb_file(finit_filename: str) -> str:

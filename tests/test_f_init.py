@@ -126,6 +126,33 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(cfg.no_smooth_file(), cfg.NO_SMOOTH_FILE)
         self.assertEqual(cfg.smooth_file(0.5, 0.5), "xgc.f_init_smooth_0.5_0.5.bp")
 
+    def test_sol_suffix_follows_the_smoothing_numbers(self) -> None:
+        # 'keep' is the pre-option behaviour and leaves every old name intact.
+        self.assertEqual(cfg.sol_tag("keep", 0.02), "")
+        self.assertEqual(cfg.sol_tag("maxwellian", 0.02), "_solmax0.02")
+        self.assertEqual(cfg.sol_tag("maxwellian", 0), "_solmax0")
+        with self.assertRaises(cfg.CaseError):
+            cfg.sol_tag("flat", 0.02)
+        sol = cfg.sol_tag("maxwellian", 0.02)
+        self.assertEqual(cfg.no_smooth_file(None, sol), "xgc.f_init_no_smooth_solmax0.02.bp")
+        smooth = cfg.smooth_file(0.5, 0.5, "D", sol)
+        self.assertEqual(smooth, "xgc.f_init_D_smooth_0.5_0.5_solmax0.02.bp")
+        self.assertEqual(cfg.dt0_dirname(smooth), "dt0_D_smooth_0.5_0.5_solmax0.02")
+        self.assertEqual(cfg.adjusted_file(smooth), "xgc.f_init_adjusted_D_smooth_0.5_0.5_solmax0.02.bp")
+        self.assertEqual(cfg.run_dirname("xgc.f_init_adjusted_smooth_0.5_0.5_solmax0.02.bp"),
+                         "finit_sm_0.5_0.5_solmax0.02")
+        self.assertEqual(cfg.run_dirname("xgc.f_init_no_smooth_solmax0.02.bp"), "finit_sm_0_0_solmax0.02")
+        self.assertEqual(cfg.strip_sol_tag("sm_0.5_0.5_solmax0.02"), ("sm_0.5_0.5", "_solmax0.02"))
+        self.assertEqual(cfg.strip_sol_tag("sm_0.5_0.5"), ("sm_0.5_0.5", ""))
+
+    def test_case_sol_settings_default_and_override(self) -> None:
+        case = cfg.load_case("cbc6")
+        mode, taper, suffix = case.sol_settings()
+        self.assertIn(mode, cfg.SOL_MODES)
+        self.assertEqual(suffix, cfg.sol_tag(mode, taper))
+        self.assertEqual(case.sol_settings("maxwellian", 0.01), ("maxwellian", 0.01, "_solmax0.01"))
+        self.assertEqual(case.sol_settings("keep"), ("keep", taper, ""))
+
     def test_species_tag_survives_the_adjusted_prefix(self) -> None:
         # The tag goes in front, so adjusted/adjusted2 still parse and the
         # species stays visible in every derived name.

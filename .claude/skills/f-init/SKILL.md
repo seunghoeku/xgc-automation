@@ -18,6 +18,10 @@ The case is a YAML under `f_init/cases/` (currently `cbc6`); copy
 2. `xgc-finit CASE make-finit` - writes `xgc.f_init_no_smooth.bp` and, with
    smoothing on, `xgc.f_init_smooth_<sigma>_<width>.bp` into `maxwell/`.
    Refuses to overwrite; add `--overwrite` only if the user says so.
+   On a mesh with open field lines the default `smooth.sol: maxwellian`
+   zeroes `f_g` on the SOL (taper 0.02 psi_N), private region and wall, and
+   the names gain `_solmax0.02`; `--sol keep` keeps the relaxed SOL. Say
+   which was used when reporting (README, "B, open field lines").
 3. `xgc-finit CASE stage-dt0 --finit <file>` - show the printed input diff
    and node-hour line to the user, then re-run with `--confirm`.
 4. `xgc-finit CASE submit dt0_<tag>` - show the cost line, get approval, then
