@@ -287,6 +287,16 @@ labelled colour bar. `er-profile [--paper]` draws `<E_r>(psi_N) =
 -(d<phi>_00/dpsi) <|grad psi|>` of stage A at the f_init snapshot and at the
 end of the run. Both pull JSON and PNGs to `f_init/cases/<case>/`.
 
+**H2. Smoothness.** `smoothness [--files F ...]` measures, on every closed
+surface, rms(neighbour difference)/rms of `g = f_g / max f_M` along the
+surface, in v_par and in v_perp, and of the f_g density moment along the
+surface (white noise = 1.41, resolved structure well below 1), plus the
+fraction of the unsmoothed rms the smoothing removed. Default files are the
+case's no-smooth and smooth f_init; medians per psi_N band are printed and
+JSON/PNG pulled to `f_init/cases/<case>/smoothness.*`. asdexu2_unfav/fav
+(2026-11-06, 0.5 rad / 0.5 cells): poloidal 0.3-0.5 -> 0.01-0.02, v_par
+0.56-0.60 -> 0.38-0.49, v_perp 0.34-0.49 -> 0.23-0.25.
+
 **E.** `stage-dt0 --finit xgc.f_init_adjusted_<tag>.bp`, `submit`, then
 `check dt0_adjusted_<tag>` prints the residual mismatch without writing a
 file. Repeat `adjust` on that directory if another pass is wanted. The
@@ -358,6 +368,12 @@ one in this repository.
   `set_sol_maxwellian` and `poloidal_smooth_f_init(open_mode=...)`
   (2026-10-30); with an older checkout it stops with `xgc_reader_too_old`
   instead of silently writing a padded SOL. Pull `analysis.pythonpath` there.
+- XGC_reader's `XGC_analysis` branch (bca9f07+) defaults `xgc1(...)` to
+  `backend="analysis"`, which needs the separate XGC-Analysis package; the
+  remote scripts therefore open runs through `_xgc1()`, which asks for
+  `backend="legacy"` when the argument exists. XGC master since late 2026
+  writes `gstep` instead of `step` in `xgc.f0.*.bp`; XGC_reader needs the
+  fix that reads either.
 - `update_maxwellian_moments` adds the Maxwellian back into a `f_g`-only
   distribution as a side effect. The adjust script relies on it (it needs the
   full `f`), then removes it again before saving.

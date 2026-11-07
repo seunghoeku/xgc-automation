@@ -979,6 +979,38 @@ def distribution_figure(case: Case, *, no_smooth: str | None = None, smooth: str
     return payload
 
 
+def smoothness(case: Case, *, files: list[str] | None = None, labels: list[str] | None = None,
+               psi_min: float = 0.0, tag: str | None = None) -> dict[str, Any]:
+    """Roughness of f_init files on closed surfaces (``remote/smoothness_check.py``).
+
+    Default files: the case's no-smooth and smooth f_init. The first file is the
+    reference for the "removed" fraction.
+    """
+    machine_cfg, target = _machine(case)
+    python, reader = cfg.remote_python(case, machine_cfg)
+    sigma, width = float(case.smooth["sigma_theta"]), float(case.smooth["v_width"])
+    _mode, _taper, sol_suffix = case.sol_settings()
+    if not files:
+        files = [cfg.no_smooth_file(None, sol_suffix), cfg.smooth_file(sigma, width, None, sol_suffix)]
+        labels = labels or ["no smoothing",
+                            f"smooth {cfg.fmt_num(sigma)} rad, {cfg.fmt_num(width)} cells"]
+    labels = labels or list(files)
+    out_dir = f"{case.root}/.xgc-finit/compare"
+    ssh.mkdir_p(target, out_dir)
+    stem = "smoothness" + (f"_{tag}" if tag else "")
+    script = _push_helper(case, target, "smoothness_check.py")
+    argv = [python, script, "--xgc-reader", reader, "--run-dir", case.maxwell_path,
+            "--files", *[f if f.startswith("/") else f"{case.maxwell_path}/{f}" for f in files],
+            "--labels", *labels, "--psi-min", str(psi_min),
+            "--title", f"{case.name}: f_init roughness, rms(neighbour difference) / rms",
+            "--out-prefix", f"{out_dir}/{stem}"]
+    payload = _run_json(target, argv, timeout=3600)
+    payload["local"] = _pull_outputs(case, target, payload)
+    cfg.append_log(case, "smoothness", files=files, bands_median=payload.get("bands_median"),
+                   local=payload["local"])
+    return payload
+
+
 def er_profile(case: Case, *, f0_step: int | None = None, paper: bool = False,
                psi_max: float = 0.9, psi_min: float = 0.0, run_dir: str | None = None,
                steps: str | None = None, labels: str | None = None, smooth_psi: float = 0.0,

@@ -33,6 +33,20 @@ PROTON_MASS = 1.67262192e-27
 E_CHARGE = 1.602176634e-19
 
 
+def _xgc1(module, path):
+    """Open a run with the legacy XGC_reader backend.
+
+    XGC_reader's XGC_analysis branch (bca9f07 and later, which carries
+    set_sol_maxwellian) defaults to ``backend="analysis"``, which needs the
+    separate XGC-Analysis package; these scripts use only the legacy reader.
+    Older checkouts have no ``backend`` argument at all.
+    """
+    import inspect
+    if "backend" in inspect.signature(module.xgc1.__init__).parameters:
+        return module.xgc1(path=path, backend="legacy")
+    return module.xgc1(path=path)
+
+
 def emit(payload: dict) -> None:
     print("FINIT_JSON " + json.dumps(payload), flush=True)
 
@@ -162,7 +176,7 @@ def main() -> int:
     # --- particle weights -----------------------------------------------------
     # w = w0 * w1 is the marker's delta-f weight in physical particles; it is
     # the quantity whose rms sets the noise. w1 alone is kept for reference.
-    x = xgc_reader.xgc1(path=stage_a)   # note: chdir into stage_a
+    x = _xgc1(xgc_reader, stage_a)   # note: chdir into stage_a
     x.load_unitsm()
     x.setup_mesh()
     x.load_bfield()

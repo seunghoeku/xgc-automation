@@ -27,6 +27,20 @@ import re
 import sys
 
 
+def _xgc1(module, path):
+    """Open a run with the legacy XGC_reader backend.
+
+    XGC_reader's XGC_analysis branch (bca9f07 and later, which carries
+    set_sol_maxwellian) defaults to ``backend="analysis"``, which needs the
+    separate XGC-Analysis package; these scripts use only the legacy reader.
+    Older checkouts have no ``backend`` argument at all.
+    """
+    import inspect
+    if "backend" in inspect.signature(module.xgc1.__init__).parameters:
+        return module.xgc1(path=path, backend="legacy")
+    return module.xgc1(path=path)
+
+
 def steps_in(directory: str, prefix: str) -> list[int]:
     steps = []
     for path in glob.glob(os.path.join(directory, f"{prefix}.[0-9]*.bp")):
@@ -136,7 +150,7 @@ def main() -> int:
     iden_ref = read_iden(os.path.join(run_dir, f"{ref_prefix}.{ref_step:05d}.bp"))
     iden_cmp = read_iden(os.path.join(dt0_dir, f"{cmp_prefix}.{cmp_step:05d}.bp"))
 
-    x1 = xgc_reader.xgc1(path=run_dir)   # note: chdir into run_dir
+    x1 = _xgc1(xgc_reader, run_dir)   # note: chdir into run_dir
     x1.load_unitsm()
     x1.setup_mesh()
     x1.setup_f0mesh()

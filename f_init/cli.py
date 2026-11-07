@@ -15,6 +15,7 @@
     xgc-finit CASE compare [DIR ...] [--psi P] [--shift-finit] [--paper] [--no-particles]
     xgc-finit CASE extend-maxwell [--confirm]
     xgc-finit CASE distribution [--psi P] [--node N] [--paper]
+    xgc-finit CASE smoothness [--files F ...] [--psi-min P]
     xgc-finit CASE er-profile [--paper]
     xgc-finit CASE log
 
@@ -377,6 +378,26 @@ def cmd_distribution(case: cfg.Case, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_smoothness(case: cfg.Case, args: argparse.Namespace) -> int:
+    payload = proc.smoothness(case, files=args.files, labels=args.labels, psi_min=args.psi_min, tag=args.tag)
+    if args.json:
+        _print(payload, True)
+        return 0
+    print("median over closed surfaces per psi_N band; rms(neighbour difference)/rms "
+          "(white noise = 1.41); removed = rms(raw - file)/rms(raw)")
+    for label, bands in payload["bands_median"].items():
+        print(f"  {label}")
+        for band, m in bands.items():
+            if not m:
+                continue
+            extra = f"  removed {m['removed']:.2f}" if "removed" in m else ""
+            print(f"    psi {band}: pol {m['pol']:.2f}  vpar {m['vpar']:.2f}  vperp {m['vperp']:.2f}  "
+                  f"dn_pol {m['dn_pol']:.2f}  g_rms {m['g_rms']:.2e}  dn_rms {m['dn_rms']:.2e}{extra}")
+    for key, path in payload.get("local", {}).items():
+        print(f"  {key}: {path}")
+    return 0
+
+
 def cmd_er_profile(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.er_profile(case, f0_step=args.f0_step, paper=args.paper, psi_max=args.psi_max,
                               psi_min=args.psi_min, run_dir=args.run_dir, steps=args.steps, labels=args.labels,
@@ -544,6 +565,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="(f-f_M)/f_M per cell, or relative to the node's peak f_M")
     p.add_argument("--paper", action="store_true")
 
+    p = sub.add_parser("smoothness", help="roughness of f_init files along flux surfaces and in velocity space")
+    p.add_argument("--files", nargs="+", default=None, help="files in stage A dir (first = reference); default no-smooth + smooth")
+    p.add_argument("--labels", nargs="+", default=None)
+    p.add_argument("--psi-min", type=float, default=0.0)
+    p.add_argument("--tag", default=None, help="suffix for the output file names")
+
     p = sub.add_parser("er-profile", help="<E_r>(psi_N) of stage A at the f_init snapshot and at the end")
     p.add_argument("--f0-step", type=int, default=None)
     p.add_argument("--psi-max", type=float, default=0.9, help="cut the plot here (outer boundary layer)")
@@ -581,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
             "compare": cmd_compare,
             "extend-maxwell": cmd_extend_maxwell,
             "distribution": cmd_distribution,
+            "smoothness": cmd_smoothness,
             "er-profile": cmd_er_profile,
             "log": cmd_log,
         }

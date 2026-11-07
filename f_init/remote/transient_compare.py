@@ -31,6 +31,20 @@ import re
 import sys
 
 
+def _xgc1(module, path):
+    """Open a run with the legacy XGC_reader backend.
+
+    XGC_reader's XGC_analysis branch (bca9f07 and later, which carries
+    set_sol_maxwellian) defaults to ``backend="analysis"``, which needs the
+    separate XGC-Analysis package; these scripts use only the legacy reader.
+    Older checkouts have no ``backend`` argument at all.
+    """
+    import inspect
+    if "backend" in inspect.signature(module.xgc1.__init__).parameters:
+        return module.xgc1(path=path, backend="legacy")
+    return module.xgc1(path=path)
+
+
 def emit(payload: dict) -> None:
     print("FINIT_JSON " + json.dumps(payload), flush=True)
 
@@ -66,7 +80,7 @@ def dedupe_oned(od) -> int:
 
 
 def load_run(xgc_reader, path: str):
-    x = xgc_reader.xgc1(path=path)   # note: chdir into path
+    x = _xgc1(xgc_reader, path)   # note: chdir into path
     x.load_unitsm()
     x.setup_mesh()
     x.setup_f0mesh()
