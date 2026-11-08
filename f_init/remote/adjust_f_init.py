@@ -75,6 +75,9 @@ def main() -> int:
     parser.add_argument("--finit", required=True, help="f_init file the dt0 run used")
     parser.add_argument("--ref-step", type=int, default=None,
                         help="density-output step in run dir; default: the last f0 step")
+    parser.add_argument("--ref-steps", type=int, nargs="+", default=None,
+                        help="average the reference density over these steps (for an f_init "
+                             "averaged over the same f0 steps); overrides --ref-step")
     parser.add_argument("--cmp-step", type=int, default=None,
                         help="density-output step in dt0 dir; default: first available")
     parser.add_argument("--factor", type=float, default=1.0)
@@ -123,9 +126,10 @@ def main() -> int:
     else:
         ref_step = args.ref_step
     cmp_step = args.cmp_step if args.cmp_step is not None else cmp_steps[0]
-    for directory, prefix, step in (
-        (run_dir, ref_prefix, ref_step), (dt0_dir, cmp_prefix, cmp_step)
-    ):
+    ref_list = sorted(set(args.ref_steps)) if args.ref_steps else [ref_step]
+    ref_step = ref_list[-1]
+    checks = [(run_dir, ref_prefix, st) for st in ref_list] + [(dt0_dir, cmp_prefix, cmp_step)]
+    for directory, prefix, step in checks:
         path = os.path.join(directory, f"{prefix}.{step:05d}.bp")
         if not os.path.exists(path):
             emit({"error": "missing", "paths": [path]})
@@ -147,7 +151,8 @@ def main() -> int:
         # (nphi, nnodes) for XGC1-style output; XGCa writes one plane.
         return np.mean(np.atleast_2d(iden), axis=0)
 
-    iden_ref = read_iden(os.path.join(run_dir, f"{ref_prefix}.{ref_step:05d}.bp"))
+    iden_ref = np.mean([read_iden(os.path.join(run_dir, f"{ref_prefix}.{st:05d}.bp"))
+                        for st in ref_list], axis=0)
     iden_cmp = read_iden(os.path.join(dt0_dir, f"{cmp_prefix}.{cmp_step:05d}.bp"))
 
     x1 = _xgc1(xgc_reader, run_dir)   # note: chdir into run_dir
@@ -222,6 +227,7 @@ def main() -> int:
         "dt0_dir": dt0_dir,
         "finit": finit,
         "ref_step": ref_step,
+        "ref_steps": ref_list,
         "cmp_step": cmp_step,
         "ref_source": ref_prefix,
         "cmp_source": cmp_prefix,
@@ -261,7 +267,8 @@ def main() -> int:
             axes[0].axhline(0, color="k", lw=0.5)
             axes[0].set_xlabel("psi_n")
             axes[0].set_ylabel("(n_ref - n_dt0) / n_finit")
-            axes[0].set_title(f"density mismatch  ref step {ref_step}, dt0 step {cmp_step}")
+            axes[0].set_title((f"density mismatch  ref steps {ref_list[0]}-{ref_list[-1]} mean, dt0 step {cmp_step}"
+                               if len(ref_list) > 1 else f"density mismatch  ref step {ref_step}, dt0 step {cmp_step}"))
             axes[0].legend()
             try:
                 tri = x1.mesh.triobj

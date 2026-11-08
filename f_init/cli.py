@@ -288,7 +288,10 @@ def cmd_adjust(case: cfg.Case, args: argparse.Namespace, *, check_only: bool = F
     ref_src = payload.get("ref_source", "xgc.2d")
     cmp_src = payload.get("cmp_source", "xgc.2d")
     print(f"  density variable {payload.get('density_var', 'iden')}")
-    print(f"  reference {case.maxwell_dir}/{ref_src}.{payload['ref_step']:05d}.bp "
+    ref_steps = payload.get("ref_steps") or [payload["ref_step"]]
+    ref_label = (f"{ref_src}.{ref_steps[0]:05d}-{ref_steps[-1]:05d}.bp mean of {len(ref_steps)}"
+                 if len(ref_steps) > 1 else f"{ref_src}.{payload['ref_step']:05d}.bp")
+    print(f"  reference {case.maxwell_dir}/{ref_label} "
           f"vs dt0 {cmp_src}.{payload['cmp_step']:05d}.bp")
     raw, fsa = m["raw_dn_over_n"], m["fsa_dn_over_n"]
     print(f"  (n_ref - n_dt0)/n  node-wise: rms {raw['rms']:.3e}, max {raw['abs_max']:.3e}")

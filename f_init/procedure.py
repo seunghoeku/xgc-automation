@@ -681,12 +681,22 @@ def adjust(
     factor: float | None = None,
     check_only: bool = False,
     ref_step: int | None = None,
+    ref_steps: list[int] | None = None,
     cmp_step: int | None = None,
     overwrite: bool = False,
     out_name: str | None = None,
     species_name: str | None = None,
     density_var: str | None = None,
 ) -> dict[str, Any]:
+    """Density mismatch of a dt=0 run against stage A, and the adjusted file.
+
+    The reference density is stage A at the f0 step the f_init came from. For
+    an f_init averaged over several f0 steps (make-finit --step-range) it is
+    the mean density over the same steps, found in the make-finit log entry
+    that wrote the file, unless ``ref_step``/``ref_steps`` say otherwise:
+    comparing a 0.25-0.35 ms average against the last step would score the
+    later profile evolution as f_init error.
+    """
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     directory = case.subdir(dt0_dir)
@@ -724,9 +734,14 @@ def adjust(
         argv.append("--check-only")
     else:
         argv += ["--out", f"{finit_dir}/{out_file}"]
-    ref_step = case.f0_step if ref_step is None else ref_step
-    if ref_step is not None:
-        argv += ["--ref-step", str(ref_step)]
+    if ref_step is None and not ref_steps:
+        ref_steps = _f0_steps_of(case, finit_name)
+    if ref_steps and len(ref_steps) > 1:
+        argv += ["--ref-steps", *[str(v) for v in ref_steps]]
+    else:
+        ref_step = case.f0_step if ref_step is None else ref_step
+        if ref_step is not None:
+            argv += ["--ref-step", str(ref_step)]
     if cmp_step is not None:
         argv += ["--cmp-step", str(cmp_step)]
     if overwrite:
@@ -748,10 +763,21 @@ def adjust(
     cfg.append_log(
         case, "check" if check_only else "adjust",
         dt0_dir=dt0_dir, finit=finit_path, ref_step=payload.get("ref_step"),
+        ref_steps=payload.get("ref_steps"),
         cmp_step=payload.get("cmp_step"), factor=factor,
         metrics=payload.get("metrics"), output=payload.get("output"), local=local,
     )
     return payload
+
+
+def _f0_steps_of(case: Case, finit_name: str) -> list[int] | None:
+    """f0 steps of the newest make-finit entry that wrote ``finit_name``."""
+    for entry in reversed(cfg.read_log(case)):
+        if entry.get("stage") != "make-finit" or not entry.get("f0_steps"):
+            continue
+        if any(Path(str(o)).name == finit_name for o in entry.get("outputs") or []):
+            return [int(v) for v in entry["f0_steps"]]
+    return None
 
 
 # --- initial-transient comparison (paper figures) ---------------------------
