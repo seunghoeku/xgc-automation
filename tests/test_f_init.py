@@ -290,3 +290,16 @@ def test_step_range_and_avg_tag():
     assert finit_cfg.avg_tag(steps) == "_avg03300-04600"
     name = finit_cfg.smooth_file(0.5, 0.5, None, "_solmax0.02" + finit_cfg.avg_tag(steps))
     assert name.endswith("_solmax0.02_avg03300-04600.bp")
+
+
+def test_sbatch_rewrite_walltime_qos():
+    from f_init import sbatch as sb
+
+    text = "#!/bin/bash\n#SBATCH --job-name=n704pe\n#SBATCH --time=09:00:00\n#SBATCH -q regular\n#SBATCH -N 8\n"
+    out, notes = sb.rewrite(text, "dt0", walltime="00:30:00", qos="debug")
+    assert "#SBATCH --time=00:30:00" in out
+    assert "#SBATCH -q debug" in out
+    assert "#SBATCH -N 8" in out
+    assert any(n.startswith("time:") for n in notes) and any(n.startswith("qos:") for n in notes)
+    same, _ = sb.rewrite(text, "dt0")
+    assert "#SBATCH --time=09:00:00" in same

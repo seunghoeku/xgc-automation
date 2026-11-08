@@ -192,7 +192,8 @@ def cmd_stage_dt0(case: cfg.Case, args: argparse.Namespace, *, run: bool = False
     if run and getattr(args, "sim_dir", None):
         plan = planner(case, finit, sim_dir=args.sim_dir)
     else:
-        plan = planner(case, finit, dir_name=args.dir)
+        extra = {} if run else {"walltime": args.walltime, "qos": args.qos}
+        plan = planner(case, finit, dir_name=args.dir, **extra)
     if args.json and not args.confirm:
         _print(plan, True)
         return 0
@@ -509,6 +510,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "NAME=FILE (NAME from the case's species_set) to load "
                         "several species in one dt=0 run")
     p.add_argument("--dir", default=None, help="directory name; default dt0_<tag>")
+    p.add_argument("--walltime", default=None,
+                   help="sbatch --time for the dt=0 job (default: dt0.walltime of the case, else stage A's)")
+    p.add_argument("--qos", default=None,
+                   help="sbatch --qos for the dt=0 job (default: dt0.qos of the case, else stage A's)")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--overwrite", action="store_true")
 

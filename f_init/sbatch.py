@@ -29,8 +29,10 @@ def parse_directives(text: str) -> dict[str, str]:
     return found
 
 
-def rewrite(text: str, job_name: str) -> tuple[str, list[str]]:
-    """Set the job name and drop dependency directives. Returns (text, notes)."""
+def rewrite(text: str, job_name: str, *, walltime: str | None = None,
+            qos: str | None = None) -> tuple[str, list[str]]:
+    """Set the job name (and optionally the wall time and QOS), drop
+    dependency directives. Returns (text, notes)."""
     notes: list[str] = []
     out: list[str] = []
     named = False
@@ -39,6 +41,14 @@ def rewrite(text: str, job_name: str) -> tuple[str, list[str]]:
         if re.match(r"^#SBATCH\s+--dependency", stripped):
             notes.append(f"dropped stale directive: {stripped}")
             continue
+        for flag, short, value in (("time", "t", walltime), ("qos", "q", qos)):
+            if value is None:
+                continue
+            m = re.match(rf"^(#SBATCH\s+(?:--{flag}|-{short}))(=|\s+)(\S+)(.*)$", stripped)
+            if m:
+                line = f"{m.group(1)}{m.group(2)}{value}{m.group(4)}\n"
+                notes.append(f"{flag}: {m.group(3)} -> {value}")
+                break
         match = re.match(r"^(#SBATCH\s+--job-name)(=|\s+)(\S+)(.*)$", stripped)
         if match:
             out.append(f"{match.group(1)}={job_name}{match.group(4)}\n")

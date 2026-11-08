@@ -322,8 +322,14 @@ def plan_dt0(
     finit_file: str | dict[str | None, str],
     *,
     dir_name: str | None = None,
+    walltime: str | None = None,
+    qos: str | None = None,
 ) -> dict[str, Any]:
     """Everything a dt=0 directory would contain, without writing any of it.
+
+    ``walltime`` / ``qos`` (or ``dt0.walltime`` / ``dt0.qos`` in the case file)
+    replace the stage A job's request: a 20-step dt=0 run does not need a
+    production allocation.
 
     ``finit_file`` is one file name, or ``{species name: file name}`` for a
     case that initialises several species at once (d3dqh: e, D and C).
@@ -335,8 +341,12 @@ def plan_dt0(
         "sml_restart": ".false.",
     }
     finits = _finit_map(finit_file)
+    walltime = walltime or case.dt0.get("walltime")
+    qos = qos or case.dt0.get("qos")
     return _plan_from_maxwell(case, finits, dir_name or _dt0_dirname(case, finits),
-                              overrides, kind="dt0")
+                              overrides, kind="dt0",
+                              walltime=str(walltime) if walltime else None,
+                              qos=str(qos) if qos else None)
 
 
 def _finit_map(finit_file: str | dict[str | None, str]) -> dict[str | None, str]:
@@ -407,7 +417,8 @@ def _fortran(value: Any) -> str:
 
 def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
                        overrides: dict[str, str], *, kind: str,
-                       sim_dir: str | None = None) -> dict[str, Any]:
+                       sim_dir: str | None = None, walltime: str | None = None,
+                       qos: str | None = None) -> dict[str, Any]:
     _cfg, target = _machine(case)
     target_dir = sim_dir.rstrip("/") if sim_dir else case.subdir(dir_name)
     script_name = case.job["script"]
@@ -444,6 +455,14 @@ def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
     for name, token_for in (("ptl_f_init_file", lambda f: f"'{f}'"),
                             ("ptl_maxwellian_init", lambda _f: ".false.")):
         current = nle.read_value(old_input, name)
+        if current is None and name == "ptl_f_init_file":
+            # A pure Maxwellian stage A often leaves the file array commented
+            # out. Build it with one placeholder per species (the length of
+            # ptl_maxwellian_init); XGC opens only the slots whose
+            # ptl_maxwellian_init is .false., and the dryrun checks the rest.
+            maxwellian = nle.read_value(old_input, "ptl_maxwellian_init")
+            if maxwellian is not None:
+                current = " ".join(["'none'"] * len(nle.split_array(maxwellian)))
         if current is None:
             raise ProcedureError(
                 f"{name} is not set in {case.maxwell_path}/input; the procedure "
@@ -460,7 +479,21 @@ def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
     ))
 
     old_script = ssh.read_file(target, f"{case.maxwell_path}/{script_name}")
-    new_script, script_notes = sb.rewrite(old_script, f"{case.name}_{dir_name}")
+    new_script, script_notes = sb.rewrite(old_script, f"{case.name}_{dir_name}",
+                                          walltime=walltime, qos=qos)
+    if not sim_dir:
+        # A script written by hpc_runner names the stage A directory by its
+        # absolute path (cd, --output, --error). Left alone, the dt=0 job
+        # would run inside stage A and overwrite its outputs.
+        stage_a_dirs = {case.maxwell_path.rstrip("/")}
+        resolved = ssh.run(target, ["readlink", "-f", case.maxwell_path], check=False)
+        if resolved.returncode == 0 and resolved.stdout.strip():
+            stage_a_dirs.add(resolved.stdout.strip().rstrip("/"))
+        for path in sorted(stage_a_dirs, key=len, reverse=True):
+            pattern = re.compile(re.escape(path) + r"(?=[/\s\"']|$)", re.MULTILINE)
+            new_script, count = pattern.subn(target_dir, new_script)
+            if count:
+                script_notes.append(f"stage A path {path} -> {target_dir} ({count}x)")
 
     return {
         "kind": kind,
