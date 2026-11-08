@@ -150,6 +150,7 @@ def make_finit(
     v_width: float | None = None,
     step: int | None = None,
     steps: list[int] | None = None,
+    zero_nodes: list[int] | None = None,
     overwrite: bool = False,
     out_dir: str | None = None,
     species_name: str | None = None,
@@ -193,6 +194,8 @@ def make_finit(
     if species.get("has_electron"):
         argv.append("--has-electron")
     step = case.f0_step if step is None else step
+    if zero_nodes:
+        argv += ["--zero-nodes", *[str(int(v)) for v in zero_nodes]]
     if steps:
         argv += ["--steps", *[str(v) for v in steps]]
     elif step is not None:
@@ -206,6 +209,7 @@ def make_finit(
     cfg.append_log(
         case, "make-finit",
         f0_step=payload.get("f0_step"), f0_steps=payload.get("f0_steps"),
+        zero_nodes=payload.get("zero_nodes"),
         sigma_theta=sigma, v_width=width,
         sol=payload.get("sol"), open_smooth=payload.get("open_smooth"),
         species=species_tag or species["var_string"],

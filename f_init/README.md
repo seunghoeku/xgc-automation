@@ -142,7 +142,10 @@ f_init, and the average also cuts marker noise (asdexu2, 14 snapshots over
 Check the window for a transient first: a mid-window event is averaged in
 with weight 1/N (asdexu2_fav, n705pe: one outer-leg node 5 cm from the
 X-point at psi_N 1.001 held 8-9x its density until step 4300, inside the SOL
-taper, so the averaged file carries a 10x f_g spike there). For XGC1
+taper, so the averaged file carries a 10x f_g spike there). `--zero-nodes
+N ...` sets f_g of those 0-based nodes to zero after the SOL treatment and
+before smoothing, and records them in the case log (asdexu2_fav:
+`--zero-nodes 17512`, |f_g| max 6.5e17 -> 5.8e16, like the unfav twin). For XGC1
 turbulence f0, which is too big to hold in memory, use `remote/average_f0.py`
 (case 3 above) instead. In a smoothing
 scan the no-smooth file already exists after the first call; it is then kept

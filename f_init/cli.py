@@ -85,7 +85,7 @@ def _step_range(values: list[int] | None) -> list[int] | None:
 def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.make_finit(
         case, sigma_theta=args.sigma_theta, v_width=args.v_width, step=args.step,
-        steps=_step_range(args.step_range),
+        steps=_step_range(args.step_range), zero_nodes=args.zero_nodes,
         overwrite=args.overwrite, out_dir=args.out_dir, species_name=args.species,
         sol=args.sol, sol_taper_psin=args.sol_taper_psin, open_smooth=args.open_smooth,
     )
@@ -99,6 +99,10 @@ def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
           f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}")
     print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells"
           + (f", open-line kernel {payload['open_smooth']}" if payload.get("open_smooth") else ""))
+    zn = payload.get("zero_nodes")
+    if zn:
+        print("f_g zeroed at nodes " + ", ".join(
+            f"{n} (|f_g| max was {v:.3e})" for n, v in zip(zn["nodes"], zn["abs_max_before"])))
     sol = payload.get("sol") or {}
     if sol.get("mode") == "maxwellian":
         if sol.get("applied"):
@@ -473,6 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--step-range", type=int, nargs="+", metavar=("FIRST", "LAST"), default=None,
                    help="time-average f over f0 steps FIRST..LAST [EVERY, default 100]; "
                         "output names gain _avg<FIRST>-<LAST>")
+    p.add_argument("--zero-nodes", type=int, nargs="+", default=None,
+                   help="0-based mesh nodes whose f_g is zeroed before smoothing "
+                        "(a transient pile-up); recorded in the case log")
     p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
     p.add_argument("--overwrite", action="store_true")
 

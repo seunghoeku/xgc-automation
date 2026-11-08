@@ -86,6 +86,9 @@ def main() -> int:
                         help="half-cosine taper width in psi_N past the separatrix (0: step)")
     parser.add_argument("--open-smooth", choices=("shrink", "legacy"), default="shrink",
                         help="poloidal kernel on open field lines (XGC_reader open_mode)")
+    parser.add_argument("--zero-nodes", type=int, nargs="+", default=None,
+                        help="0-based mesh nodes whose f_g is set to zero (Maxwellian) before "
+                             "smoothing, e.g. a transient pile-up caught in a time average")
     parser.add_argument("--no-smooth-name", default="xgc.f_init_no_smooth.bp")
     parser.add_argument("--smooth-name", default=None)
     parser.add_argument("--overwrite", action="store_true")
@@ -173,6 +176,17 @@ def main() -> int:
             sol_info["nodes_zeroed"] = int(np.sum(weight == 0))
             sol_info["nodes_tapered"] = int(np.sum((weight > 0) & (weight < 1)))
 
+    zero_info = None
+    if args.zero_nodes:
+        nodes = sorted(set(args.zero_nodes))
+        bad = [n for n in nodes if n < 0 or n >= dist.nnodes]
+        if bad:
+            emit({"error": "bad_nodes", "nodes": bad, "nnodes": int(dist.nnodes)})
+            return 2
+        before = [float(np.max(np.abs(dist.f_g[n]))) for n in nodes]
+        dist.f_g[nodes] = 0.0
+        zero_info = {"nodes": nodes, "abs_max_before": before}
+
     def region_rms(f_g: "np.ndarray") -> dict:
         if region is None:
             return {}
@@ -222,6 +236,7 @@ def main() -> int:
         "sigma_theta": args.sigma_theta,
         "v_width": args.v_width,
         "sol": sol_info,
+        "zero_nodes": zero_info,
         "open_smooth": args.open_smooth if args.sigma_theta > 0 else None,
         "f_g_stats": fg_stats,
         "outputs": outputs,
