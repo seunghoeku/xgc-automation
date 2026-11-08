@@ -128,7 +128,23 @@ applies `poloidal_smooth_f_init(sigma_theta)` (Gaussian along each flux
 surface, radians) and `vspace_smooth(v_width)` (Gaussian in velocity space,
 grid cells) and saves `xgc.f_init_smooth_<sigma>_<width>[_solmax<t>].bp`.
 Numbers are
-rendered the way the notebook did (`0.3_0.5`, `0_0`, `1_0.5`). In a smoothing
+rendered the way the notebook did (`0.3_0.5`, `0_0`, `1_0.5`).
+
+`make-finit --step-range FIRST LAST [EVERY]` (default every 100) averages f
+over those XGCa f0 snapshots before the Maxwellian is removed; the moments
+come from `xgc.f0.mesh.bp` and are the same for every snapshot, so this is
+the average of f_g. Use it when the end of stage A still oscillates (edge
+GAMs, an unconverged Er well): one snapshot freezes their phase into the
+f_init, and the average also cuts marker noise (asdexu2, 14 snapshots over
+0.25-0.35 ms: poloidal roughness 0.3-0.5 -> 0.10-0.14 and v_perp roughness
+0.34-0.49 -> 0.24-0.26 before any smoothing). Names gain
+`_avg<FIRST>-<LAST>`, so the snapshot files of the same smoothing are kept.
+Check the window for a transient first: a mid-window event is averaged in
+with weight 1/N (asdexu2_fav, n705pe: one outer-leg node 5 cm from the
+X-point at psi_N 1.001 held 8-9x its density until step 4300, inside the SOL
+taper, so the averaged file carries a 10x f_g spike there). For XGC1
+turbulence f0, which is too big to hold in memory, use `remote/average_f0.py`
+(case 3 above) instead. In a smoothing
 scan the no-smooth file already exists after the first call; it is then kept
 as is (logged as `reused`) and only the new smooth file is written, so
 `--overwrite` is needed only to replace a file that really exists.

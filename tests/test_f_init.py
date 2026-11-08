@@ -277,3 +277,16 @@ class LogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_step_range_and_avg_tag():
+    from f_init import cli as finit_cli
+    from f_init import config as finit_cfg
+
+    steps = finit_cli._step_range([3300, 4600])
+    assert steps[0] == 3300 and steps[-1] == 4600 and len(steps) == 14
+    assert finit_cli._step_range([3300, 3500, 50]) == [3300, 3350, 3400, 3450, 3500]
+    assert finit_cli._step_range(None) is None
+    assert finit_cfg.avg_tag(steps) == "_avg03300-04600"
+    name = finit_cfg.smooth_file(0.5, 0.5, None, "_solmax0.02" + finit_cfg.avg_tag(steps))
+    assert name.endswith("_solmax0.02_avg03300-04600.bp")

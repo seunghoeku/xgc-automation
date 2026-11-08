@@ -149,6 +149,7 @@ def make_finit(
     sigma_theta: float | None = None,
     v_width: float | None = None,
     step: int | None = None,
+    steps: list[int] | None = None,
     overwrite: bool = False,
     out_dir: str | None = None,
     species_name: str | None = None,
@@ -156,12 +157,21 @@ def make_finit(
     sol_taper_psin: float | None = None,
     open_smooth: str = "shrink",
 ) -> dict[str, Any]:
+    """f0 snapshot (or the average of several, ``steps``) -> f_init files.
+
+    An average writes ``..._avg<first>-<last>.bp`` names, so it never clashes
+    with the single-snapshot files of the same smoothing.
+    """
     machine_cfg, target = _machine(case)
     python, reader = cfg.remote_python(case, machine_cfg)
     sigma = float(case.smooth["sigma_theta"] if sigma_theta is None else sigma_theta)
     width = float(case.smooth["v_width"] if v_width is None else v_width)
     species, species_tag = case.species_for(species_name)
     sol_mode, taper, sol_suffix = case.sol_settings(sol, sol_taper_psin)
+    if steps:
+        steps = sorted(set(int(v) for v in steps))
+        if len(steps) > 1:
+            sol_suffix = f"{sol_suffix}{cfg.avg_tag(steps)}"
 
     script = _push_helper(case, target, "make_f_init.py")
     argv = [
@@ -183,7 +193,9 @@ def make_finit(
     if species.get("has_electron"):
         argv.append("--has-electron")
     step = case.f0_step if step is None else step
-    if step is not None:
+    if steps:
+        argv += ["--steps", *[str(v) for v in steps]]
+    elif step is not None:
         argv += ["--step", str(step)]
     if overwrite:
         argv.append("--overwrite")
@@ -193,7 +205,8 @@ def make_finit(
     payload = _run_json(target, argv, timeout=3600)
     cfg.append_log(
         case, "make-finit",
-        f0_step=payload.get("f0_step"), sigma_theta=sigma, v_width=width,
+        f0_step=payload.get("f0_step"), f0_steps=payload.get("f0_steps"),
+        sigma_theta=sigma, v_width=width,
         sol=payload.get("sol"), open_smooth=payload.get("open_smooth"),
         species=species_tag or species["var_string"],
         outputs=[o["path"] for o in payload.get("outputs", [])],

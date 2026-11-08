@@ -291,6 +291,11 @@ def strip_sol_tag(text: str) -> tuple[str, str]:
     return text[:match.start()] + text[match.end():], match.group(0)
 
 
+def avg_tag(steps: list[int]) -> str:
+    """File-name suffix of an f_init averaged over several f0 steps."""
+    return f"_avg{min(steps):05d}-{max(steps):05d}"
+
+
 def no_smooth_file(species_tag: str | None = None, sol: str = "") -> str:
     return f"xgc.f_init_{_species_prefix(species_tag)}no_smooth{sol}.bp"
 

@@ -15,6 +15,12 @@ uses XGC_reader's open-line kernel (``--open-smooth shrink``: arc-length
 Gaussian truncated at the plates), or the old padded index kernel
 (``legacy``) for comparisons.
 
+Time average (``--steps``): f from several f0 snapshots is averaged before
+the Maxwellian is removed. The Maxwellian uses the initial moments stored in
+``xgc.f0.mesh.bp`` (the same for every snapshot), so this is the average of
+f_g. It removes the phase of slow oscillations (GAMs, edge Er) that a single
+snapshot freezes in, and averages down marker noise.
+
 Runs with the analysis Python (adios2, numpy, scipy) and a checkout of
 XGC_reader. File-access dominant and bounded (minutes), so a login node is the
 right place for it.
@@ -66,6 +72,8 @@ def main() -> int:
     parser.add_argument("--run-dir", required=True, help="XGCa run directory")
     parser.add_argument("--out-dir", default=None, help="default: run dir")
     parser.add_argument("--step", type=int, default=None, help="f0 step; default last")
+    parser.add_argument("--steps", type=int, nargs="+", default=None,
+                        help="average f over these f0 steps (overrides --step)")
     parser.add_argument("--var-string", default="i_f")
     parser.add_argument("--mass-au", type=float, default=2.0)
     parser.add_argument("--charge-num", type=float, default=1.0)
@@ -116,27 +124,40 @@ def main() -> int:
                   "message": f"XGC_reader at {args.xgc_reader} has no {name}; pull the checkout"})
             return 2
 
-    step = args.step if args.step is not None else last_f0_step(run_dir)
-    f0_file = f"xgc.f0.{step:05d}.bp"
-    if not os.path.exists(os.path.join(run_dir, f0_file)):
-        emit({"error": "missing", "paths": [os.path.join(run_dir, f0_file)]})
+    if args.steps:
+        steps = sorted(set(args.steps))
+    else:
+        steps = [args.step if args.step is not None else last_f0_step(run_dir)]
+    f0_files = [f"xgc.f0.{st:05d}.bp" for st in steps]
+    missing = [os.path.join(run_dir, f) for f in f0_files if not os.path.exists(os.path.join(run_dir, f))]
+    if missing:
+        emit({"error": "missing", "paths": missing})
         return 2
+    step, f0_file = steps[-1], f0_files[-1]
 
     x = _xgc1(xgc_reader, run_dir)   # note: chdir into run_dir
     x.load_unitsm()
     x.setup_mesh()
     x.setup_f0mesh()
 
-    dist = xd.XGCDistribution.from_xgc_output(
-        f0_file,
-        time_step=0,
-        mass_au=args.mass_au,
-        charge_num=args.charge_num,
-        var_string=args.var_string,
-        dir=run_dir,
-        has_electron=args.has_electron,
-        use_initial_moments=True,
-    )
+    def read(name):
+        return xd.XGCDistribution.from_xgc_output(
+            name,
+            time_step=0,
+            mass_au=args.mass_au,
+            charge_num=args.charge_num,
+            var_string=args.var_string,
+            dir=run_dir,
+            has_electron=args.has_electron,
+            use_initial_moments=True,
+        )
+
+    dist = read(f0_files[0])
+    if len(f0_files) > 1:
+        acc = np.array(dist.f, dtype=np.float64)
+        for name in f0_files[1:]:
+            acc += np.asarray(read(name).f, dtype=np.float64)
+        dist.f = acc / len(f0_files)
     dist.remove_maxwellian()
 
     region = getattr(x.mesh, "region", None)
@@ -192,6 +213,7 @@ def main() -> int:
 
     emit({
         "f0_step": step,
+        "f0_steps": steps,
         "f0_file": os.path.join(run_dir, f0_file),
         "nnodes": int(dist.nnodes),
         "nvperp": int(dist.vgrid.nvperp),

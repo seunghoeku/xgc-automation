@@ -70,16 +70,32 @@ def cmd_status(case: cfg.Case, args: argparse.Namespace) -> int:
     return 0
 
 
+def _step_range(values: list[int] | None) -> list[int] | None:
+    if not values:
+        return None
+    if len(values) not in (2, 3):
+        raise SystemExit("--step-range takes FIRST LAST [EVERY]")
+    first, last = values[0], values[1]
+    every = values[2] if len(values) == 3 else 100
+    if last < first or every <= 0:
+        raise SystemExit("--step-range: need FIRST <= LAST and EVERY > 0")
+    return list(range(first, last + 1, every))
+
+
 def cmd_make_finit(case: cfg.Case, args: argparse.Namespace) -> int:
     payload = proc.make_finit(
         case, sigma_theta=args.sigma_theta, v_width=args.v_width, step=args.step,
+        steps=_step_range(args.step_range),
         overwrite=args.overwrite, out_dir=args.out_dir, species_name=args.species,
         sol=args.sol, sol_taper_psin=args.sol_taper_psin, open_smooth=args.open_smooth,
     )
     if args.json:
         _print(payload, True)
         return 0
-    print(f"f0 step {payload['f0_step']}: {payload['nnodes']} nodes, "
+    steps = payload.get("f0_steps") or [payload["f0_step"]]
+    label = (f"f0 steps {steps[0]}-{steps[-1]} ({len(steps)} snapshots averaged)" if len(steps) > 1
+             else f"f0 step {payload['f0_step']}")
+    print(f"{label}: {payload['nnodes']} nodes, "
           f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}")
     print(f"smoothing: sigma_theta={payload['sigma_theta']} rad, v_width={payload['v_width']} cells"
           + (f", open-line kernel {payload['open_smooth']}" if payload.get("open_smooth") else ""))
@@ -108,7 +124,10 @@ def cmd_make_canonical(case: cfg.Case, args: argparse.Namespace) -> int:
     if args.json:
         _print(payload, True)
         return 0
-    print(f"f0 step {payload['f0_step']}: {payload['nnodes']} nodes, "
+    steps = payload.get("f0_steps") or [payload["f0_step"]]
+    label = (f"f0 steps {steps[0]}-{steps[-1]} ({len(steps)} snapshots averaged)" if len(steps) > 1
+             else f"f0 step {payload['f0_step']}")
+    print(f"{label}: {payload['nnodes']} nodes, "
           f"v-grid {payload['nvperp']}x{2 * payload['nvpara'] + 1}, "
           f"orbit correction {'on' if payload['correction'] else 'off'}")
     for key, label in (("fsa_den_rel_err", "density"), ("fsa_temp_rel_err", "temperature")):
@@ -451,6 +470,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open-smooth", choices=("shrink", "legacy"), default="shrink",
                    help="poloidal kernel on open field lines; 'legacy' is the padded pre-2026-10 kernel")
     p.add_argument("--step", type=int, default=None, help="f0 step; default last")
+    p.add_argument("--step-range", type=int, nargs="+", metavar=("FIRST", "LAST"), default=None,
+                   help="time-average f over f0 steps FIRST..LAST [EVERY, default 100]; "
+                        "output names gain _avg<FIRST>-<LAST>")
     p.add_argument("--out-dir", default=None, help="write elsewhere than the run dir")
     p.add_argument("--overwrite", action="store_true")
 
