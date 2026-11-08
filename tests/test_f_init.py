@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from f_init import config as cfg
@@ -223,6 +224,32 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(plan["resources"]["node_hours"], 4.0)
         self.assertIn("--job-name=t_dt0_no_smooth", plan["script_text"])
         self.assertEqual(len(plan["input_notes"]), 6)
+
+    def test_plan_dt0_moves_absolute_stage_a_paths(self) -> None:
+        """An hpc_runner script cds into stage A by absolute path; the dt=0
+        script must point at its own directory instead."""
+        script = ("#!/bin/bash\n#SBATCH --job-name=n704pe\n"
+                  "#SBATCH --output=/scratch/n704pe_run/slurm-%j.out\n"
+                  "#SBATCH --time=09:00:00\n#SBATCH --qos=regular\n"
+                  "cd /scratch/n704pe_run\nsrun /builds/xgca\n")
+        files = {"/remote/t/maxwell/input": INPUT, "/remote/t/maxwell/xgcs.cpu": script}
+        resolved = SimpleNamespace(returncode=0, stdout="/scratch/n704pe_run\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            case = _fake_case(tmp)
+            with (
+                patch.object(proc, "_machine", return_value=({}, "host")),
+                patch.object(proc.ssh, "exists", side_effect=lambda _t, p: not p.endswith("/dt0_no_smooth")),
+                patch.object(proc.ssh, "read_file", side_effect=lambda _t, p: files[p]),
+                patch.object(proc.ssh, "run", return_value=resolved),
+            ):
+                plan = proc.plan_dt0(case, "xgc.f_init_no_smooth.bp", walltime="00:30:00", qos="debug")
+        text = plan["script_text"]
+        self.assertNotIn("/scratch/n704pe_run", text)
+        self.assertIn("cd /remote/t/dt0_no_smooth\n", text)
+        self.assertIn("--output=/remote/t/dt0_no_smooth/slurm-%j.out", text)
+        self.assertIn("srun /builds/xgca", text)
+        self.assertEqual(plan["resources"]["walltime"], "00:30:00")
+        self.assertEqual(plan["resources"]["qos"], "debug")
 
     def test_resolve_finit_from_dt0_input(self) -> None:
         text, _ = nle.apply(INPUT, {

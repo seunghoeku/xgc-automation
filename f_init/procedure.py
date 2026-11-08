@@ -486,8 +486,11 @@ def _plan_from_maxwell(case: Case, finits: dict[str | None, str], dir_name: str,
         # absolute path (cd, --output, --error). Left alone, the dt=0 job
         # would run inside stage A and overwrite its outputs.
         stage_a_dirs = {case.maxwell_path.rstrip("/")}
-        resolved = ssh.run(target, ["readlink", "-f", case.maxwell_path], check=False)
-        if resolved.returncode == 0 and resolved.stdout.strip():
+        try:
+            resolved = ssh.run(target, ["readlink", "-f", case.maxwell_path], check=False)
+        except ssh.SSHError:
+            resolved = None
+        if resolved is not None and resolved.returncode == 0 and resolved.stdout.strip():
             stage_a_dirs.add(resolved.stdout.strip().rstrip("/"))
         for path in sorted(stage_a_dirs, key=len, reverse=True):
             pattern = re.compile(re.escape(path) + r"(?=[/\s\"']|$)", re.MULTILINE)
