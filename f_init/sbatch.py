@@ -104,9 +104,11 @@ def resources(text: str) -> dict[str, Any]:
 
 
 def parse_runscript(text: str) -> dict[str, Any]:
-    """Executable and environment lines from the site ``runscript``.
+    """Executable and environment lines from the site ``runscript``, or from
+    an hpc_runner job script that sources an env script and sruns the binary.
 
-    Returns ``module`` lines (in order), the ``XGC_BIN`` value, and the
+    Returns ``module``/``source`` lines (in order), the ``XGC_BIN`` value (or
+    the srun target), and the
     per-node rank and thread counts when they are literal integers.
     """
     modules: list[str] = []
@@ -116,8 +118,13 @@ def parse_runscript(text: str) -> dict[str, Any]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("module "):
+        if line.startswith("module ") or re.match(r"^(source|\.)\s+\S+", line):
             modules.append(line)
+            continue
+        match = re.match(r"^srun\s.*\s(\S*/xgca?\S*)\s*$", line)
+        if match and not info["xgc_bin"]:
+            # hpc_runner scripts launch the executable directly
+            info["xgc_bin"] = match.group(1).strip("'\"")
             continue
         match = re.match(r"^export\s+XGC_BIN=(\S+)", line)
         if match:

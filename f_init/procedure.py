@@ -551,9 +551,15 @@ def stage_dt0(case: Case, plan: dict[str, Any], *, overwrite: bool = False) -> d
 
 # --- dryrun and submission --------------------------------------------------
 
-def _runscript_name(script_text: str) -> str:
+def _runscript_name(script_text: str) -> str | None:
+    """The site runscript the job script calls, or None for an hpc_runner
+    script that sruns the executable itself."""
     match = re.search(r"^\s*\./(runscript\S*)", script_text, re.MULTILINE)
-    return match.group(1) if match else "runscript.cpu"
+    if match:
+        return match.group(1)
+    if re.search(r"^\s*srun\s", script_text, re.MULTILINE):
+        return None
+    return "runscript.cpu"
 
 
 def dryrun(case: Case, dir_name: str) -> dict[str, Any]:
@@ -561,10 +567,12 @@ def dryrun(case: Case, dir_name: str) -> dict[str, Any]:
     _cfg, target = _machine(case)
     directory = case.subdir(dir_name)
     script_text = ssh.read_file(target, f"{directory}/{case.job['script']}")
-    runscript = ssh.read_file(target, f"{directory}/{_runscript_name(script_text)}")
+    run_name = _runscript_name(script_text)
+    source_name = run_name or case.job["script"]
+    runscript = script_text if run_name is None else ssh.read_file(target, f"{directory}/{run_name}")
     info = sb.parse_runscript(runscript)
     if not info["xgc_bin"]:
-        raise ProcedureError(f"no XGC_BIN in {directory}/{_runscript_name(script_text)}")
+        raise ProcedureError(f"no XGC_BIN or srun executable in {directory}/{source_name}")
     steps = ["set -o pipefail", f"cd {sh_quote(directory)}"] + info["modules"] + [
         f"{info['xgc_bin']} --dryrun > dryrun.out 2>&1; rc=$?; cat dryrun.out; exit $rc",
     ]

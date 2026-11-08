@@ -330,3 +330,16 @@ def test_sbatch_rewrite_walltime_qos():
     assert any(n.startswith("time:") for n in notes) and any(n.startswith("qos:") for n in notes)
     same, _ = sb.rewrite(text, "dt0")
     assert "#SBATCH --time=09:00:00" in same
+
+
+def test_parse_hpc_runner_job_script():
+    text = ("#!/bin/bash\n#SBATCH --nodes=8\nset -euo pipefail\n"
+            "source /b/quickstart/modules_and_env/perlmutter.sh 2> /d/env_setup.err\n"
+            "cd /d\nexport OMP_NUM_THREADS=32\n"
+            "srun -n 32 -c 32 --cpu-bind=cores --gpus-per-task=1 /b/bin/bin/xgca\n"
+            'echo "end=$(date -Is) rc=$?"\n')
+    info = sb.parse_runscript(text)
+    assert info["xgc_bin"] == "/b/bin/bin/xgca"
+    assert info["modules"] == ["source /b/quickstart/modules_and_env/perlmutter.sh 2> /d/env_setup.err"]
+    assert proc._runscript_name(text) is None
+    assert proc._runscript_name("#!/bin/bash\n./runscript.gpu\n") == "runscript.gpu"
